@@ -32,8 +32,16 @@ jobs:
 
       - name: Copy static assets to standalone
         run: |
+          echo "=== project root ==="
+          ls -la
+          echo "=== .next ==="
+          ls -la .next/
+          echo "=== .next/standalone ==="
+          ls -la .next/standalone/
           cp -r .next/static .next/standalone/.next/static
-          cp -r public .next/standalone/public
+          if [ -d public ]; then
+            cp -r public .next/standalone/public
+          fi
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
