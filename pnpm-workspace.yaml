@@ -1,0 +1,5 @@
+allowBuilds:
+  '@firebase/util': false
+  canvas: set this to true or false
+  protobufjs: false
+  unrs-resolver: false

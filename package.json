@@ -1,0 +1,57 @@
+{
+  "name": "sci-reader",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=20 <23"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start -H 0.0.0.0 -p ${PORT:-3000}",
+    "azure-start": "node .next/standalone/server.js",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.95.1",
+    "@azure/storage-blob": "^12.32.0",
+    "@hono/zod-validator": "^0.7.0",
+    "@radix-ui/react-avatar": "^1.1.1",
+    "@radix-ui/react-dialog": "^1.1.14",
+    "@radix-ui/react-dropdown-menu": "^2.1.2",
+    "@radix-ui/react-scroll-area": "^1.2.0",
+    "@radix-ui/react-separator": "^1.1.0",
+    "@radix-ui/react-slot": "^1.2.3",
+    "@tanstack/react-query": "^5.59.13",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.44.1",
+    "firebase-admin": "^13.9.0",
+    "hono": "^4.6.4",
+    "lucide-react": "^0.536.0",
+    "next": "^14.2.35",
+    "next-auth": "^5.0.0-beta.22",
+    "pdf-poppler": "^0.2.3",
+    "pdfjs-dist": "^4.10.38",
+    "pnpm": "^11.0.9",
+    "react": "^18",
+    "react-dom": "^18",
+    "react-markdown": "^10.1.0",
+    "sonner": "^2.0.1",
+    "tailwind-merge": "^3.0.1",
+    "zod": "^3.23.8",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^14.2.35",
+    "postcss": "^8",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.6.2"
+  }
+}

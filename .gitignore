@@ -1,0 +1,9 @@
+node_modules
+.next
+.env.local
+.DS_Store
+uploads
+.output
+.claude/settings.local.json
+tsconfig.tsbuildinfo
+testopenai*.py
