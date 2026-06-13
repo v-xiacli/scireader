@@ -42,6 +42,7 @@ jobs:
           if [ -d public ]; then
             cp -r public .next/standalone/public
           fi
+          rm -f .next/standalone/oryx-manifest.toml
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
