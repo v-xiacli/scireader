@@ -56,16 +56,16 @@ const buildConversationHistory = (messages: ChatMessage[]): ConversationTurn[] =
     }));
 
 const getSummaryProgress = (elapsedSeconds: number): SummaryProgress => {
-  if (elapsedSeconds < 3) return { percent: 12, label: 'Checking saved summary...', elapsedSeconds };
-  if (elapsedSeconds < 10) return { percent: 28, label: 'Loading PDF context...', elapsedSeconds };
-  if (elapsedSeconds < 25) return { percent: 52, label: 'Generating deep reading notes...', elapsedSeconds };
-  if (elapsedSeconds < 60) return { percent: 76, label: 'Still working on a long paper...', elapsedSeconds };
+  if (elapsedSeconds < 3) return { percent: 12, label: 'No saved summary found yet. Starting summary generation...', elapsedSeconds };
+  if (elapsedSeconds < 10) return { percent: 28, label: 'Reading the uploaded PDF...', elapsedSeconds };
+  if (elapsedSeconds < 25) return { percent: 52, label: 'Generating the first deep summary...', elapsedSeconds };
+  if (elapsedSeconds < 60) return { percent: 76, label: 'Still summarizing this long paper...', elapsedSeconds };
 
-  return { percent: 90, label: 'Almost there; large PDFs can take a few minutes...', elapsedSeconds };
+  return { percent: 90, label: 'Still working. First-time summaries can take a few minutes...', elapsedSeconds };
 };
 
 const formatSummaryProgressMessage = (progress: SummaryProgress) =>
-  `${progress.label}\n\n${progress.percent}% complete · ${progress.elapsedSeconds}s elapsed\n\nIf this paper was summarized before, the cached summary should appear quickly. First-time deep summaries may take longer.`;
+  `${progress.label}\n\n${progress.percent}% complete · ${progress.elapsedSeconds}s elapsed\n\nI will show the summary here automatically when it is ready. After that, future opens should load the saved summary instead of regenerating.`;
 
 const clampLayout = (position: { x: number; y: number }, size: { width: number; height: number }) => {
   if (typeof window === 'undefined') return { position, size };
@@ -98,6 +98,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const [isImageMode, setIsImageMode] = useState(false);
   const [paperContextSummary, setPaperContextSummary] = useState('');
   const [summaryProgress, setSummaryProgress] = useState<SummaryProgress | null>(null);
+  const [isSummarizing, setIsSummarizing] = useState(false);
   const hasPaper = Boolean(paper);
   const paperId = paper?.id;
   const paperPdfUrl = paper?.pdfUrl;
@@ -254,6 +255,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     if (!paperId || !paperPdfUrl) {
       setPaperContextSummary('');
       setSummaryProgress(null);
+      setIsSummarizing(false);
       setMessages(mockMessages);
       return;
     }
@@ -273,6 +275,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
 
     setPaperContextSummary('');
     setSummaryProgress(initialProgress);
+    setIsSummarizing(true);
     setMessages([
       {
         id: loadingId,
@@ -288,6 +291,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
 
         window.clearInterval(progressTimer);
         setSummaryProgress(null);
+        setIsSummarizing(false);
         const history = await loadPaperHistory().catch(() => []);
         if (!isActive) return;
 
@@ -314,6 +318,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
 
         window.clearInterval(progressTimer);
         setSummaryProgress(null);
+        setIsSummarizing(false);
         setMessages([
           {
             id: loadingId,
@@ -327,6 +332,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     return () => {
       isActive = false;
       window.clearInterval(progressTimer);
+      setIsSummarizing(false);
     };
   }, [paperId, paperPdfUrl, summarizePaper, loadPaperHistory]);
 
@@ -423,6 +429,17 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
       contextLabel: isImageMode ? 'Image generation' : selectedText ? `Selection on page ${selectedText.pageNumber ?? '?'}` : hasPaper ? 'Whole paper' : 'General chat',
     };
     const loadingId = crypto.randomUUID();
+
+    if (isSummarizing && hasPaper) {
+      const summaryNotice: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: 'I am still generating the first summary for this paper. Questions may use only saved history until the summary is ready.',
+        contextLabel: 'Summary still running',
+      };
+
+      setMessages((current) => [...current, summaryNotice]);
+    }
 
     setMessages((current) => [
       ...current,

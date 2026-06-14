@@ -785,6 +785,19 @@ const parseCheapTriageResult = (text: string): CheapTriageResult => {
 };
 
 const triageWithCheapModel = async (request: z.infer<typeof readerRequestSchema>, cachedSummary: string, storedHistory: StoredDialogTurn[]) => {
+  if (!cachedSummary.trim() && storedHistory.length === 0) {
+    return {
+      result: {
+        sufficient: false,
+        contextSummary: '',
+        expensivePrompt: `${request.prompt}\n\n当前还没有保存的论文总结或历史对话。请基于 PDF 原文回答，不要声称已经读取过总结。`,
+      },
+      model: 'no-stored-context',
+      inputTokens: 0,
+      outputTokens: 0,
+    };
+  }
+
   const modelSelection = selectCheapTriageModel();
   const client = createAnthropicClient(modelSelection.target);
   const historyText = formatDialogHistory(storedHistory);
