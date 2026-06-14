@@ -10,6 +10,15 @@ import { mockPapers, mockUserAccount } from '@/features/papers/mock-data';
 type AuthMode = 'login' | 'signup';
 type AuthUser = { id: string; email: string };
 
+const normalizeDownloadUrl = (downloadUrl: string) => {
+  const trimmed = downloadUrl.trim();
+
+  if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith('/')) return trimmed;
+  if (trimmed.startsWith('api/')) return `/${trimmed}`;
+
+  return `https://${trimmed}`;
+};
+
 const HomePage = () => {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -107,7 +116,7 @@ const HomePage = () => {
       if (!response.ok) throw new Error(result.message ?? result.error ?? 'Upload failed.');
 
       const paperId = encodeURIComponent(file.name.replace(/\.pdf$/i, '') || 'uploaded-paper');
-      router.push(`/papers/${paperId}?pdfUrl=${encodeURIComponent(result.downloadUrl)}&filePath=${encodeURIComponent(result.filePath)}&title=${encodeURIComponent(file.name)}`);
+      router.push(`/papers/${paperId}?pdfUrl=${encodeURIComponent(normalizeDownloadUrl(result.downloadUrl))}&filePath=${encodeURIComponent(result.filePath)}&title=${encodeURIComponent(file.name)}`);
     } catch (error) {
       setUploadMessage(error instanceof Error ? error.message : 'Upload failed.');
     } finally {

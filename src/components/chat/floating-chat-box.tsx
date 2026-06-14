@@ -12,7 +12,7 @@ interface FloatingChatBoxProps {
   selectedText?: PaperSelection | null;
 }
 
-const defaultPosition = { x: 28, y: 96 };
+const defaultPosition = { x: 0, y: 96 };
 const defaultSize = { width: 560, height: 620 };
 const minSize = { width: 380, height: 420 };
 const edgePadding = 8;
@@ -56,6 +56,20 @@ export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingC
   const paperId = paper?.id;
   const paperPdfUrl = paper?.pdfUrl;
   const paperTitle = paper?.title;
+
+  useEffect(() => {
+    const placeOnRight = () => {
+      setPosition((current) => ({
+        x: Math.max(edgePadding, window.innerWidth - size.width - 28),
+        y: current.y,
+      }));
+    };
+
+    placeOnRight();
+    window.addEventListener('resize', placeOnRight);
+
+    return () => window.removeEventListener('resize', placeOnRight);
+  }, [size.width]);
 
   const askReaderAgent = useCallback(
     async (prompt: string, scope: 'whole-paper' | 'selected-text' = 'whole-paper') => {

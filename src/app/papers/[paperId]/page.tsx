@@ -19,6 +19,15 @@ interface PaperPageProps {
   };
 }
 
+const normalizePdfUrl = (pdfUrl: string) => {
+  const trimmed = pdfUrl.trim();
+
+  if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith('/')) return trimmed;
+  if (trimmed.startsWith('api/')) return `/${trimmed}`;
+
+  return `https://${trimmed}`;
+};
+
 const PaperPage = ({ params, searchParams }: PaperPageProps) => {
   const mockPaper = getMockPaper(params.paperId);
   const paper = useMemo(
@@ -31,7 +40,7 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
             authors: 'Uploaded paper',
             pages: 0,
             status: 'uploaded' as const,
-            pdfUrl: searchParams.pdfUrl,
+            pdfUrl: normalizePdfUrl(searchParams.pdfUrl),
             filePath: searchParams.filePath,
           }
         : mockPaper,
@@ -61,7 +70,7 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
         </Link>
         <div className="text-sm text-muted-foreground">PDF viewer + large floating chat</div>
       </nav>
-      <div className="relative min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1 justify-center overflow-hidden">
         <PdfReader onSelectionChange={setSelectedText} paper={paper} />
         <PaperChatContextBridge paper={paper} selectedText={selectedText} />
       </div>
@@ -70,5 +79,4 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
 };
 
 export default PaperPage;
-
 

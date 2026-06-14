@@ -5,7 +5,12 @@ const appBaseEnvKeys = ['NEXT_PUBLIC_APP_BASE_URL', 'APP_BASE_URL'];
 const resolveAppBaseUrl = () => {
   for (const key of appBaseEnvKeys) {
     const value = process.env[key];
-    if (value?.trim()) return value.trim().replace(/\/$/, '');
+    const trimmed = value?.trim().replace(/\/$/, '');
+
+    if (!trimmed) continue;
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+
+    return `https://${trimmed}`;
   }
 
   return '';

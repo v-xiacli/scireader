@@ -51,7 +51,7 @@ export const PdfReader = ({ paper, onSelectionChange }: PdfReaderProps) => {
   }, [paper.pdfUrl]);
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col rounded-3xl bg-slate-900 p-4 shadow-sm">
+    <section className="flex min-h-0 w-[min(72vw,1180px)] -translate-x-[12vw] flex-col rounded-3xl bg-slate-900 p-4 shadow-sm">
       <header className="mb-4 flex items-center justify-between text-white">
         <div className="flex min-w-0 items-center gap-3">
           <div className="rounded-xl bg-white/10 p-2">
