@@ -20,12 +20,19 @@ const edgePadding = 8;
 type ResizeHandle = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 type ConversationTurn = Pick<ChatMessage, 'role' | 'content'>;
 
-const compactPaperSummaryPrompt =
-  '请用中文为这篇论文生成高密度速记，适合显示在窄聊天框里：1 行主题；6-10 条核心要点，每条不超过 28 个汉字；再给出方法/数据/实验/结论/局限各一条短句。不要客套话。';
+const deepPaperSummaryPrompt =
+  `请用中文生成一份“深度论文阅读笔记”，不是短摘要。要求：
+1. 先用 3-5 句话说明论文解决的问题、核心方案、为什么重要。
+2. 按论文结构展开：背景/动机、核心设计、关键工艺或算法、实验设置、主要结果、局限与风险。
+3. 逐图分析：尽量覆盖每个 Figure/Table，说明它展示了什么、作者想证明什么、读者应该怎么解读。
+4. 逐公式/关键参数分析：列出论文中的重要公式、变量含义、工程意义；如果没有显式公式，就分析关键指标和参数。
+5. 给出“可追问索引”：列出 8-12 个后续可问的问题，方便继续追问。
+6. 不要为了省字牺牲解释；用紧凑排版，但每一点要有论述。保留关键数值、频段、dB、尺寸、良率等证据。
+7. 输出 Markdown，使用二级标题和项目符号。`;
 
 const buildConversationHistory = (messages: ChatMessage[]): ConversationTurn[] =>
   messages
-    .filter((message) => message.content && message.contextLabel !== 'Paper brief' && !message.imageBase64 && !message.imageUrl && message.content !== 'Analyzing...' && message.content !== 'Generating image...')
+    .filter((message) => message.content && message.contextLabel !== 'Paper brief' && message.contextLabel !== 'Deep brief' && !message.imageBase64 && !message.imageUrl && message.content !== 'Analyzing...' && message.content !== 'Generating image...')
     .slice(-8)
     .map((message) => ({
       role: message.role,
@@ -86,7 +93,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingC
         paperId,
         pdfUrl: paperPdfUrl,
         title: paperTitle,
-        prompt: compactPaperSummaryPrompt,
+        prompt: deepPaperSummaryPrompt,
         scope: 'whole-paper',
       }),
     });
@@ -133,8 +140,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingC
       {
         id: loadingId,
         role: 'assistant',
-        content: '正在生成论文要点...',
-        contextLabel: 'Paper brief',
+        content: '正在生成深度阅读笔记...',
+        contextLabel: 'Deep brief',
       },
     ]);
 
@@ -148,7 +155,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingC
             id: loadingId,
             role: 'assistant',
             content: summary,
-            contextLabel: 'Paper brief',
+            contextLabel: 'Deep brief',
           },
         ]);
       })
@@ -160,7 +167,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingC
             id: loadingId,
             role: 'assistant',
             content: error instanceof Error ? error.message : '论文要点生成失败，可以直接提问，我会读取论文回答。',
-            contextLabel: 'Paper brief',
+            contextLabel: 'Deep brief',
           },
         ]);
       });
@@ -311,31 +318,38 @@ export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingC
       style={{ left: position.x, top: position.y, width: size.width, height: size.height }}
     >
       <header
-        className={isDragging ? 'cursor-grabbing border-b p-3' : 'cursor-grab border-b p-3'}
+        className={isDragging ? 'cursor-grabbing border-b px-3 py-2' : 'cursor-grab border-b px-3 py-2'}
         onPointerDown={startDragging}
         onPointerMove={drag}
         onPointerUp={stopDragging}
       >
-        <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
           <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-wide text-primary">AI reader</p>
-            <h2 className="mt-0.5 text-base font-semibold">{hasPaper ? 'Paper chat' : 'SCIReader chat'}</h2>
-            <p className="mt-1 truncate text-xs text-muted-foreground">{paper?.title ?? 'Ask without opening a paper'}</p>
+            <div className="flex items-baseline gap-2">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-primary">AI reader</p>
+              <h2 className="text-sm font-semibold">{hasPaper ? 'Paper chat' : 'SCIReader chat'}</h2>
+            </div>
+            <p className="truncate text-[11px] text-muted-foreground">{paper?.title ?? 'Ask without opening a paper'}</p>
           </div>
-          <div className="rounded-xl bg-primary/10 p-2 text-primary">
-            <Bot className="size-5" />
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            <button className="rounded-lg border p-1.5 text-slate-700 hover:bg-slate-50 disabled:opacity-40" disabled={!hasPaper} title="Paper context" type="button">
+              <FileSearch className="size-4" />
+            </button>
+            <button className="rounded-lg border p-1.5 text-slate-700 hover:bg-slate-50 disabled:opacity-40" disabled={!selectedText} title="Selected text" type="button">
+              <Quote className="size-4" />
+            </button>
+            <button
+              className={isImageMode ? 'rounded-lg border border-primary bg-primary/10 p-1.5 text-primary' : 'rounded-lg border p-1.5 text-slate-700 hover:bg-slate-50'}
+              onClick={() => setIsImageMode((current) => !current)}
+              title="Image mode"
+              type="button"
+            >
+              <ImageIcon className="size-4" />
+            </button>
+            <div className="rounded-lg bg-primary/10 p-1.5 text-primary">
+              <Bot className="size-4" />
+            </div>
           </div>
-        </div>
-        <div className="mt-3 grid grid-cols-3 gap-1.5 text-xs">
-          <button className="rounded-lg border p-1.5 hover:bg-slate-50" disabled={!hasPaper} type="button"><FileSearch className="mx-auto mb-0.5 size-4" />Paper</button>
-          <button className="rounded-lg border p-1.5 hover:bg-slate-50" disabled={!selectedText} type="button"><Quote className="mx-auto mb-0.5 size-4" />Selection</button>
-          <button
-            className={isImageMode ? 'rounded-lg border border-primary bg-primary/10 p-1.5 text-primary' : 'rounded-lg border p-1.5 hover:bg-slate-50'}
-            onClick={() => setIsImageMode((current) => !current)}
-            type="button"
-          >
-            <ImageIcon className="mx-auto mb-0.5 size-4" />Image
-          </button>
         </div>
       </header>
 

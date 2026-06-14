@@ -195,7 +195,7 @@ const materializePdfToTempFile = async (storagePath: string) => {
   return { localPdfPath, outputDir, buffer };
 };
 
-const getPaperSummaryStoragePath = (pdfStoragePath: string) => `${pdfStoragePath}.reader-summary.md`;
+const getPaperSummaryStoragePath = (pdfStoragePath: string) => `${pdfStoragePath}.reader-summary.deep-v1.md`;
 
 const downloadTextIfExists = async (filePath: string) => {
   try {
@@ -580,7 +580,7 @@ const app = new Hono()
         scope: 'whole-paper',
         prompt:
           request.prompt ||
-          '请用中文为这篇论文生成高密度速记：1 行主题，6-10 条核心要点，方法/数据/实验/结论/局限各尽量压缩到短句。不要写客套话。',
+          `请用中文生成一份深度论文阅读笔记，不要短摘要。请展开分析背景、方法、实验、结果、局限；逐图说明每个 Figure/Table 的含义；逐公式或逐关键参数解释变量、指标和工程意义；保留关键数值证据；最后列出可追问索引。输出 Markdown。`,
       });
       const summary = result.answer;
 
