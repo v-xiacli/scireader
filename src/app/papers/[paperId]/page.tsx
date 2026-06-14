@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { PaperChatContextBridge } from '@/components/chat/paper-chat-context-bridge';
 import { PdfReader } from '@/components/paper/pdf-reader';
@@ -38,24 +38,6 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
     [mockPaper, params.paperId, searchParams?.filePath, searchParams?.pdfUrl, searchParams?.title],
   );
   const [selectedText, setSelectedText] = useState<PaperSelection | null>(null);
-  const didDeleteRef = useRef(false);
-
-  useEffect(() => {
-    if (!paper.filePath) return;
-
-    const deleteUploadedPdf = () => {
-      if (didDeleteRef.current) return;
-      didDeleteRef.current = true;
-      navigator.sendBeacon(`/api/storage/${encodeURIComponent(paper.filePath ?? '')}`);
-    };
-
-    window.addEventListener('pagehide', deleteUploadedPdf);
-
-    return () => {
-      deleteUploadedPdf();
-      window.removeEventListener('pagehide', deleteUploadedPdf);
-    };
-  }, [paper.filePath]);
 
   return (
     <main className="flex h-screen flex-col gap-4 p-4">
