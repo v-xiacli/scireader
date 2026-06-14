@@ -30,6 +30,12 @@ type StoredHistoryTurn = ConversationTurn & {
   outputTokens?: number;
 };
 
+type SummaryProgress = {
+  percent: number;
+  label: string;
+  elapsedSeconds: number;
+};
+
 const deepPaperSummaryPrompt =
   `请用中文生成一份“深度论文阅读笔记”，不是短摘要。要求：
 1. 先用 3-5 句话说明论文解决的问题、核心方案、为什么重要。
@@ -48,6 +54,18 @@ const buildConversationHistory = (messages: ChatMessage[]): ConversationTurn[] =
       role: message.role,
       content: message.content.slice(0, 2000),
     }));
+
+const getSummaryProgress = (elapsedSeconds: number): SummaryProgress => {
+  if (elapsedSeconds < 3) return { percent: 12, label: 'Checking saved summary...', elapsedSeconds };
+  if (elapsedSeconds < 10) return { percent: 28, label: 'Loading PDF context...', elapsedSeconds };
+  if (elapsedSeconds < 25) return { percent: 52, label: 'Generating deep reading notes...', elapsedSeconds };
+  if (elapsedSeconds < 60) return { percent: 76, label: 'Still working on a long paper...', elapsedSeconds };
+
+  return { percent: 90, label: 'Almost there; large PDFs can take a few minutes...', elapsedSeconds };
+};
+
+const formatSummaryProgressMessage = (progress: SummaryProgress) =>
+  `${progress.label}\n\n${progress.percent}% complete · ${progress.elapsedSeconds}s elapsed\n\nIf this paper was summarized before, the cached summary should appear quickly. First-time deep summaries may take longer.`;
 
 const clampLayout = (position: { x: number; y: number }, size: { width: number; height: number }) => {
   if (typeof window === 'undefined') return { position, size };
@@ -79,6 +97,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const [isThinking, setIsThinking] = useState(false);
   const [isImageMode, setIsImageMode] = useState(false);
   const [paperContextSummary, setPaperContextSummary] = useState('');
+  const [summaryProgress, setSummaryProgress] = useState<SummaryProgress | null>(null);
   const hasPaper = Boolean(paper);
   const paperId = paper?.id;
   const paperPdfUrl = paper?.pdfUrl;
@@ -234,19 +253,31 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   useEffect(() => {
     if (!paperId || !paperPdfUrl) {
       setPaperContextSummary('');
+      setSummaryProgress(null);
       setMessages(mockMessages);
       return;
     }
 
     let isActive = true;
     const loadingId = crypto.randomUUID();
+    const startedAt = Date.now();
+    const initialProgress = getSummaryProgress(0);
+
+    const updateProgress = () => {
+      const nextProgress = getSummaryProgress(Math.floor((Date.now() - startedAt) / 1000));
+      setSummaryProgress(nextProgress);
+      setMessages((current) => current.map((message) => (message.id === loadingId ? { ...message, content: formatSummaryProgressMessage(nextProgress) } : message)));
+    };
+
+    const progressTimer = window.setInterval(updateProgress, 1000);
 
     setPaperContextSummary('');
+    setSummaryProgress(initialProgress);
     setMessages([
       {
         id: loadingId,
         role: 'assistant',
-        content: '正在生成深度阅读笔记...',
+        content: formatSummaryProgressMessage(initialProgress),
         contextLabel: 'Deep brief',
       },
     ]);
@@ -255,6 +286,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
       .then(async (summary) => {
         if (!isActive) return;
 
+        window.clearInterval(progressTimer);
+        setSummaryProgress(null);
         const history = await loadPaperHistory().catch(() => []);
         if (!isActive) return;
 
@@ -279,6 +312,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
       .catch((error) => {
         if (!isActive) return;
 
+        window.clearInterval(progressTimer);
+        setSummaryProgress(null);
         setMessages([
           {
             id: loadingId,
@@ -291,6 +326,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
 
     return () => {
       isActive = false;
+      window.clearInterval(progressTimer);
     };
   }, [paperId, paperPdfUrl, summarizePaper, loadPaperHistory]);
 
@@ -474,6 +510,19 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
           </div>
         </div>
       </header>
+
+      {summaryProgress ? (
+        <div className="border-b bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <div className="flex items-center justify-between gap-3">
+            <span className="font-medium">{summaryProgress.label}</span>
+            <span>{summaryProgress.percent}%</span>
+          </div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-amber-100">
+            <div className="h-full rounded-full bg-amber-500 transition-all duration-500" style={{ width: `${summaryProgress.percent}%` }} />
+          </div>
+          <p className="mt-1 text-[11px] text-amber-700">{summaryProgress.elapsedSeconds}s elapsed</p>
+        </div>
+      ) : null}
 
       {selectedText && !isImageMode ? (
         <div className="border-b bg-blue-50 p-3 text-xs">
