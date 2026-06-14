@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { ArrowRight, FileText, Loader2, MessageSquareText, WalletCards } from 'lucide-react';
+import { ArrowRight, FileText, Loader2, MessageSquareText, Trash2, WalletCards } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
@@ -43,6 +43,7 @@ const HomePage = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [uploadedPapers, setUploadedPapers] = useState<PaperSummary[]>([]);
+  const [deletingFilePath, setDeletingFilePath] = useState<string | null>(null);
   const [tokenEstimate, setTokenEstimate] = useState<TokenEstimate | null>(null);
   const [tokenEstimateMessage, setTokenEstimateMessage] = useState('Upload a PDF to estimate input tokens.');
 
@@ -225,6 +226,31 @@ const HomePage = () => {
     }
   };
 
+  const handleRemovePaper = async (paper: PaperSummary) => {
+    if (!paper.filePath || deletingFilePath) return;
+
+    setDeletingFilePath(paper.filePath);
+    setUploadMessage(null);
+
+    try {
+      const response = await fetch('/api/auth/uploaded-papers', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath: paper.filePath }),
+      });
+      const result = await response.json();
+
+      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Could not remove paper.');
+
+      setUploadedPapers(result.papers);
+      setUploadMessage('Removed from your account. The PDF, summary, and chat history are still stored for reuse.');
+    } catch (error) {
+      setUploadMessage(error instanceof Error ? error.message : 'Could not remove paper.');
+    } finally {
+      setDeletingFilePath(null);
+    }
+  };
+
   return (
     <main className="min-h-screen px-8 py-6">
       <section className="mx-auto flex max-w-7xl flex-col gap-8">
@@ -378,6 +404,9 @@ const HomePage = () => {
 
           <div className="mt-6 grid gap-4">
             {papers.map((paper) => {
+              const paperHref = paper.filePath
+                ? `/papers/${encodeURIComponent(paper.id)}?pdfUrl=${encodeURIComponent(paper.pdfUrl)}&filePath=${encodeURIComponent(paper.filePath)}&title=${encodeURIComponent(paper.title)}&authors=${encodeURIComponent(paper.authors)}&journal=${encodeURIComponent(paper.journal ?? '')}&year=${encodeURIComponent(paper.year ?? '')}`
+                : `/papers/${paper.id}`;
               const content = (
                 <>
                   <div>
@@ -392,17 +421,25 @@ const HomePage = () => {
               );
 
               return isLoggedIn ? (
-                <Link
-                  className="group flex items-center justify-between rounded-2xl border p-4 transition hover:border-primary hover:bg-slate-50"
-                  href={
-                    paper.filePath
-                      ? `/papers/${encodeURIComponent(paper.id)}?pdfUrl=${encodeURIComponent(paper.pdfUrl)}&filePath=${encodeURIComponent(paper.filePath)}&title=${encodeURIComponent(paper.title)}&authors=${encodeURIComponent(paper.authors)}&journal=${encodeURIComponent(paper.journal ?? '')}&year=${encodeURIComponent(paper.year ?? '')}`
-                      : `/papers/${paper.id}`
-                  }
-                  key={paper.id}
+                <div
+                  className="group flex items-center justify-between gap-3 rounded-2xl border p-4 transition hover:border-primary hover:bg-slate-50"
+                  key={`${paper.id}-${paper.filePath ?? 'sample'}`}
                 >
-                  {content}
-                </Link>
+                  <Link className="flex min-w-0 flex-1 items-center justify-between gap-3" href={paperHref}>
+                    {content}
+                  </Link>
+                  {paper.filePath ? (
+                    <button
+                      className="rounded-xl border p-2 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={deletingFilePath === paper.filePath}
+                      onClick={() => void handleRemovePaper(paper)}
+                      title="Remove from my account only"
+                      type="button"
+                    >
+                      {deletingFilePath === paper.filePath ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                    </button>
+                  ) : null}
+                </div>
               ) : (
                 <div
                   className="flex cursor-not-allowed items-center justify-between rounded-2xl border bg-slate-50 p-4 opacity-60"

@@ -47,6 +47,10 @@ const uploadedPaperSchema = z.object({
 
 const uploadedPapersSchema = z.array(uploadedPaperSchema);
 
+const removeUploadedPaperSchema = z.object({
+  filePath: z.string().min(1),
+});
+
 const hashPassword = async (password: string) => {
   const salt = randomBytes(16).toString('hex');
   const derivedKey = (await scrypt(password, salt, 64)) as Buffer;
@@ -103,16 +107,27 @@ export const loadUploadedPapers = async (userId: string) => {
   }
 };
 
+const saveUploadedPapers = async (userId: string, papers: z.infer<typeof uploadedPapersSchema>) => {
+  await uploadTextAsAdmin(
+    `# Uploaded papers\n\n\`\`\`json\n${JSON.stringify(papers, null, 2)}\n\`\`\`\n`,
+    getUploadedPapersPath(userId),
+  );
+
+  return papers;
+};
+
 const saveUploadedPaper = async (userId: string, paper: z.infer<typeof uploadedPaperSchema>) => {
   const currentPapers = await loadUploadedPapers(userId);
   const nextPapers = [paper, ...currentPapers.filter((currentPaper) => currentPaper.filePath !== paper.filePath)];
 
-  await uploadTextAsAdmin(
-    `# Uploaded papers\n\n\`\`\`json\n${JSON.stringify(nextPapers, null, 2)}\n\`\`\`\n`,
-    getUploadedPapersPath(userId),
-  );
+  return saveUploadedPapers(userId, nextPapers);
+};
 
-  return nextPapers;
+const removeUploadedPaper = async (userId: string, filePath: string) => {
+  const currentPapers = await loadUploadedPapers(userId);
+  const nextPapers = currentPapers.filter((paper) => paper.filePath !== filePath);
+
+  return saveUploadedPapers(userId, nextPapers);
 };
 
 const createSession = async (userId: string) => {
@@ -188,6 +203,12 @@ const app = new Hono()
     if (!user) return c.json({ error: 'Not authenticated.' }, 401);
 
     return c.json({ papers: await saveUploadedPaper(user.id, c.req.valid('json')) }, 201);
+  })
+  .delete('/uploaded-papers', zValidator('json', removeUploadedPaperSchema), async (c) => {
+    const user = await getCurrentUser(getCookie(c, sessionCookieName));
+    if (!user) return c.json({ error: 'Not authenticated.' }, 401);
+
+    return c.json({ papers: await removeUploadedPaper(user.id, c.req.valid('json').filePath) });
   })
   .post('/signup', zValidator('json', credentialsSchema), async (c) => {
     const { email, password } = c.req.valid('json');
