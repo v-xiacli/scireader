@@ -65,6 +65,6 @@ jobs:
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
-          app-name: 'scireader'
+          app-name: 'scireader2'
           slot-name: 'Production'
           images: 'ghcr.io/v-xiacli/scireader:latest'
