@@ -9,10 +9,33 @@ import {
 } from '@/lib/firebase/server/storage-admin';
 import { getUserStoragePrefix } from '@/lib/storage-paths';
 
+const delayedDeleteTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const delayedDeleteMs = Number(process.env.UPLOADED_PDF_DELETE_DELAY_MS ?? 24 * 60 * 60 * 1000);
+
 const deleteStoredFile = async (filePath: string) => {
   await deleteFileAsAdmin(filePath);
 
   return { message: 'File deleted successfully' };
+};
+
+const scheduleStoredFileDeletion = (filePath: string) => {
+  const existingTimer = delayedDeleteTimers.get(filePath);
+
+  if (existingTimer) clearTimeout(existingTimer);
+
+  const timer = setTimeout(() => {
+    delayedDeleteTimers.delete(filePath);
+    void deleteStoredFile(filePath).catch((error) => {
+      console.error('Delayed file deletion failed.', { filePath, error });
+    });
+  }, delayedDeleteMs);
+
+  delayedDeleteTimers.set(filePath, timer);
+
+  return {
+    message: 'File deletion scheduled.',
+    deleteAfterMs: delayedDeleteMs,
+  };
 };
 
 const app = new Hono()
@@ -72,6 +95,15 @@ const app = new Hono()
       return new Response(new Uint8Array(buffer), { headers });
     } catch {
       return c.json({ error: 'File not found or could not be downloaded' }, 404);
+    }
+  })
+  .post('/delete-later/:filePath{.+}', async (c) => {
+    try {
+      const filePath = c.req.param('filePath');
+
+      return c.json(scheduleStoredFileDeletion(filePath));
+    } catch {
+      return c.json({ error: 'Could not schedule file deletion' }, 500);
     }
   })
   .post('/:filePath{.+}', async (c) => {
