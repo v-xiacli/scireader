@@ -12,11 +12,7 @@ import { getUserStoragePrefix } from '@/lib/storage-paths';
 const delayedDeleteTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const delayedDeleteMs = Number(process.env.UPLOADED_PDF_DELETE_DELAY_MS ?? 24 * 60 * 60 * 1000);
 
-const deleteStoredFile = async (filePath: string) => {
-  await deleteFileAsAdmin(filePath);
-
-  return { message: 'File deleted successfully' };
-};
+const deleteStoredFile = async (_filePath: string) => ({ message: 'PDF deletion is disabled; stored files are kept for reuse.' });
 
 const scheduleStoredFileDeletion = (filePath: string) => {
   const existingTimer = delayedDeleteTimers.get(filePath);

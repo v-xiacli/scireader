@@ -16,6 +16,9 @@ interface PaperPageProps {
     filePath?: string;
     pdfUrl?: string;
     title?: string;
+    journal?: string;
+    year?: string;
+    volume?: string;
   };
 }
 
@@ -46,6 +49,9 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
             status: 'uploaded' as const,
             pdfUrl: normalizePdfUrl(searchParams.pdfUrl),
             filePath: searchParams.filePath,
+            journal: searchParams.journal,
+            year: searchParams.year,
+            volume: searchParams.volume,
           }
         : mockPaper,
     [mockPaper, params.paperId, searchParams?.filePath, searchParams?.pdfUrl, searchParams?.title],
@@ -74,20 +80,6 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
       body: JSON.stringify({ pdfZoom }),
     });
   }, []);
-
-  useEffect(() => {
-    if (!paper.filePath) return;
-
-    const scheduleUploadedPdfDeletion = () => {
-      navigator.sendBeacon(`/api/storage/delete-later/${encodeURIComponent(paper.filePath ?? '')}`);
-    };
-
-    window.addEventListener('pagehide', scheduleUploadedPdfDeletion);
-
-    return () => {
-      window.removeEventListener('pagehide', scheduleUploadedPdfDeletion);
-    };
-  }, [paper.filePath]);
 
   return (
     <main className="relative h-screen overflow-hidden p-1">

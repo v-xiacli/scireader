@@ -41,6 +41,9 @@ const uploadedPaperSchema = z.object({
   abstract: z.string(),
   pdfUrl: z.string(),
   filePath: z.string(),
+  journal: z.string().optional(),
+  year: z.string().optional(),
+  volume: z.string().optional(),
 });
 
 const uploadedPapersSchema = z.array(uploadedPaperSchema);

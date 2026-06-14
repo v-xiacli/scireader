@@ -99,6 +99,9 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
           paperId: paperId ?? 'general-chat',
           pdfUrl: paperPdfUrl,
           title: paperTitle ?? 'SCIReader',
+          journal: paper?.journal,
+          year: paper?.year,
+          volume: paper?.volume,
           prompt,
           scope,
           selectedText: selectedText?.text,
@@ -113,7 +116,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
 
       return result.answer as string;
     },
-    [messages, paperId, paperPdfUrl, paperTitle, paperContextSummary, selectedText],
+    [messages, paperId, paperPdfUrl, paperTitle, paperContextSummary, selectedText, paper?.journal, paper?.year, paper?.volume],
   );
 
   const summarizePaper = useCallback(async () => {
@@ -126,6 +129,9 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
         paperId,
         pdfUrl: paperPdfUrl,
         title: paperTitle,
+        journal: paper?.journal,
+        year: paper?.year,
+        volume: paper?.volume,
         prompt: deepPaperSummaryPrompt,
         scope: 'whole-paper',
       }),
@@ -135,7 +141,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     if (!response.ok) throw new Error(result.message ?? result.error ?? 'Paper summary failed.');
 
     return result.summary as string;
-  }, [paperId, paperPdfUrl, paperTitle]);
+  }, [paperId, paperPdfUrl, paperTitle, paper?.journal, paper?.year, paper?.volume]);
 
   const generateImage = useCallback(
     async (prompt: string) => {

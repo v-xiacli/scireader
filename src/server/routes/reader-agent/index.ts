@@ -8,7 +8,7 @@ import { zValidator } from '@hono/zod-validator';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
-import { downloadFileAsAdmin, uploadFileAsAdmin } from '@/lib/firebase/server/storage-admin';
+import { downloadFileAsAdmin, downloadTextAsAdmin, uploadFileAsAdmin, uploadTextAsAdmin } from '@/lib/firebase/server/storage-admin';
 
 type ExtractedPdfPage = {
   pageNumber: number;
@@ -49,6 +49,9 @@ const readerRequestSchema = z.object({
   model: z.string().optional(),
   pdfUrl: z.string().optional(),
   title: z.string().optional(),
+  journal: z.string().optional(),
+  year: z.string().optional(),
+  volume: z.string().optional(),
   paperContextSummary: z.string().optional(),
   conversationHistory: z
     .array(
@@ -195,13 +198,18 @@ const materializePdfToTempFile = async (storagePath: string) => {
   return { localPdfPath, outputDir, buffer };
 };
 
-const getPaperSummaryStoragePath = (pdfStoragePath: string) => `${pdfStoragePath}.reader-summary.deep-v1.md`;
+const getPaperIdentitySlug = (request: Pick<z.infer<typeof readerRequestSchema>, 'paperId' | 'title' | 'journal' | 'year' | 'volume'>) =>
+  [request.title ?? request.paperId, request.journal, request.year, request.volume]
+    .map((part) => part?.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''))
+    .filter(Boolean)
+    .join('-') || request.paperId;
+
+const getPaperSummaryStoragePath = (request: z.infer<typeof readerRequestSchema>, pdfStoragePath?: string | null) =>
+  `paper-cache/${getPaperIdentitySlug(request)}/${pdfStoragePath ? 'uploaded' : 'sample'}.reader-summary.deep-v1.md`;
 
 const downloadTextIfExists = async (filePath: string) => {
   try {
-    const { buffer } = await downloadFileAsAdmin(filePath);
-
-    return buffer.toString('utf8');
+    return await downloadTextAsAdmin(filePath);
   } catch {
     return null;
   }
@@ -561,10 +569,10 @@ const app = new Hono()
   .post('/summarize', zValidator('json', readerRequestSchema), async (c) => {
     const request = c.req.valid('json');
     const storagePath = resolveUploadedPdfStoragePath(request.pdfUrl);
-    const summaryStoragePath = storagePath ? getPaperSummaryStoragePath(storagePath) : null;
+    const summaryStoragePath = getPaperSummaryStoragePath(request, storagePath);
 
     try {
-      const cachedSummary = summaryStoragePath ? await downloadTextIfExists(summaryStoragePath) : null;
+      const cachedSummary = await downloadTextIfExists(summaryStoragePath);
 
       if (cachedSummary?.trim()) {
         return c.json({
@@ -584,8 +592,8 @@ const app = new Hono()
       });
       const summary = result.answer;
 
-      if (summaryStoragePath && summary.trim()) {
-        await uploadFileAsAdmin(Buffer.from(summary, 'utf8'), summaryStoragePath, 'text/markdown; charset=utf-8');
+      if (summary.trim()) {
+        await uploadTextAsAdmin(summary, summaryStoragePath);
       }
 
       return c.json({

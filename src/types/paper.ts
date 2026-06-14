@@ -7,6 +7,9 @@
   abstract: string;
   pdfUrl: string;
   filePath?: string;
+  journal?: string;
+  year?: string;
+  volume?: string;
 }
 
 export interface UserAccountSummary {
