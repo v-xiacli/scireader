@@ -11,7 +11,7 @@ import { ensureAuthTables, getSql } from '@/server/db';
 import { downloadTextAsAdmin, uploadTextAsAdmin } from '@/lib/firebase/server/storage-admin';
 
 const scrypt = promisify(scryptCallback);
-const sessionCookieName = 'sci_session';
+export const sessionCookieName = 'sci_session';
 const sessionMaxAgeSeconds = 60 * 60 * 24 * 30;
 
 type UserRow = {
@@ -96,7 +96,7 @@ const saveViewerPreferences = async (userId: string, preferences: z.infer<typeof
   return nextPreferences;
 };
 
-const loadUploadedPapers = async (userId: string) => {
+export const loadUploadedPapers = async (userId: string) => {
   try {
     return uploadedPapersSchema.parse(parseJsonBlock(await downloadTextAsAdmin(getUploadedPapersPath(userId))) ?? []);
   } catch {
@@ -138,7 +138,7 @@ const setSessionCookie = (c: Context, token: string) => {
   });
 };
 
-const getCurrentUser = async (token: string | undefined) => {
+export const getCurrentUser = async (token: string | undefined) => {
   if (!token) return null;
 
   await ensureAuthTables();

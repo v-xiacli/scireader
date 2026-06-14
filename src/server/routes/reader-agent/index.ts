@@ -5,10 +5,12 @@ import { pathToFileURL } from 'node:url';
 
 import Anthropic from '@anthropic-ai/sdk';
 import { zValidator } from '@hono/zod-validator';
-import { Hono } from 'hono';
+import { getCookie } from 'hono/cookie';
+import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 
 import { downloadFileAsAdmin, downloadTextAsAdmin, uploadFileAsAdmin, uploadTextAsAdmin } from '@/lib/firebase/server/storage-admin';
+import { getCurrentUser, loadUploadedPapers, sessionCookieName } from '@/server/routes/auth';
 
 type ExtractedPdfPage = {
   pageNumber: number;
@@ -39,6 +41,26 @@ type TavilySearchResult = {
   content: string;
   publishedDate?: string;
   score?: number;
+};
+
+type PaperAccess = {
+  user: { id: string; email: string; created_at: string };
+  storagePath: string | null;
+};
+
+type StoredDialogTurn = {
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: string;
+  model?: string;
+  routedBy?: 'cheap-context' | 'expensive-reader';
+};
+
+type CheapTriageResult = {
+  sufficient: boolean;
+  contextSummary: string;
+  answerDraft?: string;
+  expensivePrompt?: string;
 };
 
 const MAX_EXTRACTED_TEXT_CHARS = 140_000;
@@ -212,6 +234,23 @@ const resolveUploadedPdfStoragePath = (pdfUrl?: string) => {
   return storagePath;
 };
 
+const requirePaperAccess = async (c: Context, pdfUrl?: string): Promise<PaperAccess> => {
+  const user = await getCurrentUser(getCookie(c, sessionCookieName));
+
+  if (!user) throw new Error('Not authenticated.');
+
+  const storagePath = resolveUploadedPdfStoragePath(pdfUrl);
+
+  if (!storagePath) return { user, storagePath };
+
+  const uploadedPapers = await loadUploadedPapers(user.id);
+  const canAccessPaper = uploadedPapers.some((paper) => paper.filePath === storagePath);
+
+  if (!canAccessPaper) throw new Error('You do not have access to this PDF.');
+
+  return { user, storagePath };
+};
+
 const materializePdfToTempFile = async (storagePath: string) => {
   const { buffer } = await downloadFileAsAdmin(storagePath);
   const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'scireader-pdf-'));
@@ -242,6 +281,14 @@ const getPaperIdentitySlug = (request: Pick<z.infer<typeof readerRequestSchema>,
 const getPaperSummaryStoragePath = (request: z.infer<typeof readerRequestSchema>, pdfStoragePath?: string | null) =>
   `paper-cache/${getPaperIdentitySlug(request)}/${pdfStoragePath ? 'uploaded' : 'sample'}.reader-summary.deep-v1.md`;
 
+const getPaperDialogHistoryPath = (userId: string, paperKey: string) => `user-paper-history/${userId}/${paperKey}.md`;
+
+const parseJsonBlock = (content: string) => {
+  const match = content.match(/```json\n([\s\S]*?)\n```/);
+
+  return match ? JSON.parse(match[1]) : null;
+};
+
 const downloadTextIfExists = async (filePath: string) => {
   try {
     return await downloadTextAsAdmin(filePath);
@@ -249,6 +296,49 @@ const downloadTextIfExists = async (filePath: string) => {
     return null;
   }
 };
+
+const loadDialogHistory = async (userId: string, paperKey: string): Promise<StoredDialogTurn[]> => {
+  try {
+    const parsed = parseJsonBlock(await downloadTextAsAdmin(getPaperDialogHistoryPath(userId, paperKey)));
+
+    return Array.isArray(parsed)
+      ? parsed
+          .filter((turn): turn is StoredDialogTurn =>
+            typeof turn === 'object' &&
+            turn !== null &&
+            (turn.role === 'user' || turn.role === 'assistant') &&
+            typeof turn.content === 'string' &&
+            typeof turn.createdAt === 'string',
+          )
+          .slice(-80)
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveDialogHistory = async (userId: string, paperKey: string, turns: StoredDialogTurn[]) => {
+  const nextTurns = turns.slice(-80);
+
+  await uploadTextAsAdmin(
+    `# Paper dialog history\n\n\`\`\`json\n${JSON.stringify(nextTurns, null, 2)}\n\`\`\`\n`,
+    getPaperDialogHistoryPath(userId, paperKey),
+  );
+
+  return nextTurns;
+};
+
+const appendDialogTurns = async (userId: string, paperKey: string, turns: StoredDialogTurn[]) => {
+  const currentTurns = await loadDialogHistory(userId, paperKey);
+
+  return saveDialogHistory(userId, paperKey, [...currentTurns, ...turns]);
+};
+
+const formatDialogHistory = (history: StoredDialogTurn[]) =>
+  history
+    .slice(-24)
+    .map((turn) => `${turn.role === 'user' ? '用户' : '助手'}(${turn.createdAt}): ${turn.content.slice(0, 2000)}`)
+    .join('\n\n');
 
 const normalizeMetadataText = (value?: string) => value?.replace(/\s+/g, ' ').trim();
 
@@ -382,6 +472,20 @@ const selectTokenEstimateModel = (request: z.infer<typeof tokenEstimateRequestSc
   const defaultModel = process.env.ANTHROPIC_MODEL?.trim() || 'gpt-5.5';
 
   return { model: defaultModel, target: 'default' };
+};
+
+const selectCheapTriageModel = (): AnthropicModelSelection => {
+  const textModel = process.env.ANTHROPIC_CHEAP_MODEL?.trim();
+  const defaultModel = process.env.ANTHROPIC_MODEL?.trim() || 'gpt-5.5';
+
+  return { model: textModel || defaultModel, target: textModel ? 'cheap' : 'default' };
+};
+
+const selectExpensiveReaderModel = (): AnthropicModelSelection => {
+  const expertModel = process.env.ANTHROPIC_EXPENSIVE_MODEL?.trim();
+  const defaultModel = process.env.ANTHROPIC_MODEL?.trim() || 'gpt-5.5';
+
+  return { model: expertModel || defaultModel, target: expertModel ? 'expensive' : 'default' };
 };
 
 const getAnthropicCredential = (target: AnthropicModelTarget) => {
@@ -530,7 +634,7 @@ ${paperContextSummary}${request.selectedText ? `选中文本：\n${request.selec
 ${webSearchText}用户请求：${request.prompt}`;
 };
 
-const askClaude = async (request: z.infer<typeof readerRequestSchema>) => {
+const askClaude = async (request: z.infer<typeof readerRequestSchema>, forcedModelSelection?: AnthropicModelSelection) => {
   const storagePath = resolveUploadedPdfStoragePath(request.pdfUrl);
   const tempPdf = storagePath ? await materializePdfToTempFile(storagePath) : null;
   const localPdfPath = tempPdf?.localPdfPath;
@@ -549,7 +653,7 @@ const askClaude = async (request: z.infer<typeof readerRequestSchema>) => {
       }
     }
 
-    const modelSelection = selectReaderModel(request);
+    const modelSelection = forcedModelSelection ?? selectReaderModel(request);
     const client = createAnthropicClient(modelSelection.target);
     const content: Anthropic.MessageParam['content'] = [{ type: 'text', text: buildReaderUserPrompt(request, extractedPdf, webSearchResults) }];
 
@@ -597,6 +701,7 @@ const askClaude = async (request: z.infer<typeof readerRequestSchema>) => {
     return {
       answer: textFromResponse(response),
       webSearchResults,
+      model: modelSelection.model,
     };
   } finally {
     if (tempPdf) await fs.rm(tempPdf.outputDir, { recursive: true, force: true });
@@ -631,6 +736,31 @@ const generateImage = async (request: z.infer<typeof imageRequestSchema>) => {
     answer,
     prompt: request.prompt,
     ...image,
+  };
+};
+
+const triageWithCheapModel = async (request: z.infer<typeof readerRequestSchema>, cachedSummary: string, storedHistory: StoredDialogTurn[]) => {
+  const modelSelection = selectCheapTriageModel();
+  const client = createAnthropicClient(modelSelection.target);
+  const historyText = formatDialogHistory(storedHistory);
+  const response = await client.messages.create({
+    model: modelSelection.model,
+    max_tokens: 2000,
+    system:
+      '你是 SCIReader 的低成本上下文检索助手。你的职责只有两件事：1) 从已保存的论文总结和历史对话里查找、压缩和整理已有信息；2) 判断这些已有信息是否足够回答当前问题。你不能做新的论文理解、推理扩展或深度分析。如果已有信息足够，就输出基于已有信息的简洁回答草稿；如果不够，就输出给高成本模型的更清晰任务提示。只输出 JSON。',
+    messages: [
+      {
+        role: 'user',
+        content: `论文标题: ${request.title ?? request.paperId}\n\n已保存总结:\n${cachedSummary || '暂无总结'}\n\n已保存历史:\n${historyText || '暂无历史'}\n\n当前问题:\n${request.prompt}\n\n请输出 JSON，格式为 {"sufficient": boolean, "contextSummary": string, "answerDraft": string, "expensivePrompt": string }。当 sufficient=true 时必须提供 answerDraft；当 sufficient=false 时必须提供 expensivePrompt。`,
+      },
+    ],
+  });
+  const text = textFromResponse(response).trim();
+  const parsed = JSON.parse(text) as CheapTriageResult;
+
+  return {
+    result: parsed,
+    model: modelSelection.model,
   };
 };
 
@@ -674,57 +804,116 @@ const estimateTokenConsumption = async (request: z.infer<typeof tokenEstimateReq
 const app = new Hono()
   .post('/metadata', zValidator('json', metadataRequestSchema), async (c) => {
     const request = c.req.valid('json');
-    const storagePath = resolveUploadedPdfStoragePath(request.pdfUrl);
-
-    if (!storagePath) return c.json({ error: 'Only uploaded PDFs can be inspected.' }, 400);
-
-    const tempPdf = await materializePdfToTempFile(storagePath);
 
     try {
-      const metadata = await extractPaperMetadata(tempPdf.localPdfPath, request.fallbackTitle);
-      const paperKey = getPaperIdentityKey(metadata);
+      const { storagePath } = await requirePaperAccess(c, request.pdfUrl);
 
-      return c.json({ ...metadata, paperKey });
+      if (!storagePath) return c.json({ error: 'Only uploaded PDFs can be inspected.' }, 400);
+
+      const tempPdf = await materializePdfToTempFile(storagePath);
+
+      try {
+        const metadata = await extractPaperMetadata(tempPdf.localPdfPath, request.fallbackTitle);
+        const paperKey = getPaperIdentityKey(metadata);
+
+        return c.json({ ...metadata, paperKey });
+      } finally {
+        await fs.rm(tempPdf.outputDir, { recursive: true, force: true });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'PDF metadata extraction failed.';
+      const status = message === 'Not authenticated.' ? 401 : message === 'You do not have access to this PDF.' ? 403 : 500;
 
-      return c.json({ error: 'PDF metadata extraction failed.', message }, 500);
-    } finally {
-      await fs.rm(tempPdf.outputDir, { recursive: true, force: true });
+      return c.json({ error: 'PDF metadata extraction failed.', message }, status);
     }
   })
   .post('/count-tokens', zValidator('json', tokenEstimateRequestSchema), async (c) => {
     const request = c.req.valid('json');
 
     try {
+      await requirePaperAccess(c, request.pdfUrl);
       return c.json(await estimateTokenConsumption(request));
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Token estimate failed.';
+      const status = message === 'Not authenticated.' ? 401 : message === 'You do not have access to this PDF.' ? 403 : 500;
 
-      return c.json({ error: 'Token estimate failed.', message }, 500);
+      return c.json({ error: 'Token estimate failed.', message }, status);
     }
   })
   .post('/ask', zValidator('json', readerRequestSchema), async (c) => {
     const request = c.req.valid('json');
 
     try {
-      const result = await askClaude(request);
+      const { user } = await requirePaperAccess(c, request.pdfUrl);
+      const paperKey = getPaperIdentitySlug(request);
+      const summaryStoragePath = getPaperSummaryStoragePath(request, resolveUploadedPdfStoragePath(request.pdfUrl));
+      const cachedSummary = (await downloadTextIfExists(summaryStoragePath)) ?? '';
+      const storedHistory = await loadDialogHistory(user.id, paperKey);
+      const triage = await triageWithCheapModel(request, cachedSummary, storedHistory);
+      const now = new Date().toISOString();
+
+      if (triage.result.sufficient && triage.result.answerDraft?.trim()) {
+        await appendDialogTurns(user.id, paperKey, [
+          { role: 'user', content: request.prompt, createdAt: now },
+          {
+            role: 'assistant',
+            content: triage.result.answerDraft,
+            createdAt: now,
+            model: triage.model,
+            routedBy: 'cheap-context',
+          },
+        ]);
+
+        return c.json({
+          answer: triage.result.answerDraft,
+          citations: [],
+          sources: [],
+          scope: request.scope,
+          paperId: request.paperId,
+          routedBy: 'cheap-context',
+          contextSummary: triage.result.contextSummary,
+        });
+      }
+
+      const expensiveResult = await askClaude(
+        {
+          ...request,
+          prompt: triage.result.expensivePrompt?.trim() || request.prompt,
+          paperContextSummary: [cachedSummary, triage.result.contextSummary, request.paperContextSummary].filter(Boolean).join('\n\n'),
+          conversationHistory: storedHistory.slice(-8).map((turn) => ({ role: turn.role, content: turn.content })),
+        },
+        selectExpensiveReaderModel(),
+      );
+
+      await appendDialogTurns(user.id, paperKey, [
+        { role: 'user', content: request.prompt, createdAt: now },
+        {
+          role: 'assistant',
+          content: expensiveResult.answer,
+          createdAt: now,
+          model: expensiveResult.model,
+          routedBy: 'expensive-reader',
+        },
+      ]);
 
       return c.json({
-        answer: result.answer,
+        answer: expensiveResult.answer,
         citations: [],
-        sources: result.webSearchResults.map((item) => ({
+        sources: expensiveResult.webSearchResults.map((item) => ({
           title: item.title,
           url: item.url,
           publishedDate: item.publishedDate,
         })),
         scope: request.scope,
         paperId: request.paperId,
+        routedBy: 'expensive-reader',
+        contextSummary: triage.result.contextSummary,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Reader agent failed.';
+      const status = message === 'Not authenticated.' ? 401 : message === 'You do not have access to this PDF.' ? 403 : 500;
 
-      return c.json({ error: 'Reader agent failed.', message }, 500);
+      return c.json({ error: 'Reader agent failed.', message }, status);
     }
   })
   .post('/image', zValidator('json', imageRequestSchema), async (c) => {
@@ -742,10 +931,11 @@ const app = new Hono()
   })
   .post('/summarize', zValidator('json', readerRequestSchema), async (c) => {
     const request = c.req.valid('json');
-    const storagePath = resolveUploadedPdfStoragePath(request.pdfUrl);
-    const summaryStoragePath = getPaperSummaryStoragePath(request, storagePath);
 
     try {
+      await requirePaperAccess(c, request.pdfUrl);
+      const storagePath = resolveUploadedPdfStoragePath(request.pdfUrl);
+      const summaryStoragePath = getPaperSummaryStoragePath(request, storagePath);
       const cachedSummary = await downloadTextIfExists(summaryStoragePath);
 
       if (cachedSummary?.trim()) {
@@ -763,7 +953,7 @@ const app = new Hono()
         prompt:
           request.prompt ||
           `请用中文生成一份深度论文阅读笔记，不要短摘要。请展开分析背景、方法、实验、结果、局限；逐图说明每个 Figure/Table 的含义；逐公式或逐关键参数解释变量、指标和工程意义；保留关键数值证据；最后列出可追问索引。输出 Markdown。`,
-      });
+      }, selectExpensiveReaderModel());
       const summary = result.answer;
 
       if (summary.trim()) {
@@ -778,8 +968,9 @@ const app = new Hono()
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Paper summary failed.';
+      const status = message === 'Not authenticated.' ? 401 : message === 'You do not have access to this PDF.' ? 403 : 500;
 
-      return c.json({ error: 'Paper summary failed.', message }, 500);
+      return c.json({ error: 'Paper summary failed.', message }, status);
     }
   })
   .post('/explain-selection', zValidator('json', readerRequestSchema), async (c) => {
