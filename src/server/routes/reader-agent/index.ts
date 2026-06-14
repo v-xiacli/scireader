@@ -1,7 +1,6 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 
 import Anthropic from '@anthropic-ai/sdk';
 import { zValidator } from '@hono/zod-validator';
@@ -132,13 +131,6 @@ const extractFigureCaptions = (text: string) => {
     .slice(0, MAX_FIGURE_CAPTIONS);
 };
 
-const getPdfjsStandardFontDataUrl = () => {
-  const pdfjsDistDir = path.join(process.cwd(), 'node_modules', 'pdfjs-dist');
-  const standardFontsDir = path.join(pdfjsDistDir, 'standard_fonts');
-
-  return pathToFileURL(`${standardFontsDir}${path.sep}`).href;
-};
-
 const ensurePdfCanvasPolyfills = async () => {
   const canvas = await import('@napi-rs/canvas');
   const globalScope = globalThis as typeof globalThis & {
@@ -163,7 +155,7 @@ const loadPdfjs = async () => {
 const extractPdfText = async (localPdfPath: string): Promise<ExtractedPdf> => {
   const pdfjs = await loadPdfjs();
   const data = new Uint8Array(await fs.readFile(localPdfPath));
-  const pdf = await pdfjs.getDocument({ data, useWorkerFetch: false, isEvalSupported: false, disableFontFace: true, standardFontDataUrl: getPdfjsStandardFontDataUrl() }).promise;
+  const pdf = await pdfjs.getDocument({ data, useWorkerFetch: false, isEvalSupported: false, disableFontFace: true }).promise;
   const pages: ExtractedPdfPage[] = [];
 
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
@@ -193,7 +185,7 @@ const renderPdfPageImages = async (localPdfPath: string, pageNumbers?: number[])
   const pdfjs = await loadPdfjs();
 
   const data = new Uint8Array(await fs.readFile(localPdfPath));
-  const pdf = await pdfjs.getDocument({ data, useWorkerFetch: false, isEvalSupported: false, disableFontFace: true, standardFontDataUrl: getPdfjsStandardFontDataUrl() }).promise;
+  const pdf = await pdfjs.getDocument({ data, useWorkerFetch: false, isEvalSupported: false, disableFontFace: true }).promise;
   const pagesToRender = (pageNumbers?.length ? pageNumbers : Array.from({ length: Math.min(pdf.numPages, MAX_PAGE_IMAGES) }, (_, index) => index + 1))
     .filter((pageNumber) => pageNumber >= 1 && pageNumber <= pdf.numPages)
     .slice(0, MAX_PAGE_IMAGES);
@@ -382,7 +374,7 @@ const inferMetadataFromText = (text: string, fallbackTitle?: string): PaperMetad
 const extractPaperMetadata = async (localPdfPath: string, fallbackTitle?: string): Promise<PaperMetadata> => {
   const pdfjs = await loadPdfjs();
   const data = new Uint8Array(await fs.readFile(localPdfPath));
-  const pdf = await pdfjs.getDocument({ data, useWorkerFetch: false, isEvalSupported: false, disableFontFace: true, standardFontDataUrl: getPdfjsStandardFontDataUrl() }).promise;
+  const pdf = await pdfjs.getDocument({ data, useWorkerFetch: false, isEvalSupported: false, disableFontFace: true }).promise;
   const metadata = await pdf.getMetadata().catch(() => null);
   const info = (metadata?.info ?? {}) as Record<string, unknown>;
   const metadataTitle = getMetadataInfoValue(info, 'Title');
