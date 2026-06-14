@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { PaperSelection, PaperSummary } from '@/types/paper';
 
@@ -18,10 +18,26 @@ const sampleParagraphs = [
 ];
 
 export const PdfReader = ({ paper, onSelectionChange, initialZoom = 100, onZoomChange }: PdfReaderProps) => {
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [pdfFrameStatus, setPdfFrameStatus] = useState<string | null>(null);
+  const pdfUrlWithZoom = useMemo(() => `${paper.pdfUrl}${paper.pdfUrl.includes('#') ? '&' : '#'}zoom=${initialZoom}`, [initialZoom, paper.pdfUrl]);
 
   useEffect(() => {
     onZoomChange?.(initialZoom);
+  }, [initialZoom, onZoomChange]);
+
+  useEffect(() => {
+    const saveZoomOnLeave = () => {
+      const pdfFrameUrl = iframeRef.current?.contentWindow?.location.href;
+      const match = pdfFrameUrl?.match(/[?#&]zoom=([^&]+)/);
+      const nextZoom = match ? Number.parseInt(match[1], 10) : initialZoom;
+
+      if (Number.isFinite(nextZoom)) onZoomChange?.(nextZoom);
+    };
+
+    window.addEventListener('pagehide', saveZoomOnLeave);
+
+    return () => window.removeEventListener('pagehide', saveZoomOnLeave);
   }, [initialZoom, onZoomChange]);
 
   const captureSelection = useCallback(() => {
@@ -64,7 +80,8 @@ export const PdfReader = ({ paper, onSelectionChange, initialZoom = 100, onZoomC
               className="mx-auto h-full min-h-[980px] w-full origin-top rounded-sm bg-white shadow-xl transition-transform"
               onLoad={(event) => inspectPdfFrame(event.currentTarget)}
               onMouseUp={captureSelection}
-              src={paper.pdfUrl}
+              ref={iframeRef}
+              src={pdfUrlWithZoom}
               style={{ transformOrigin: 'top center' }}
               title={paper.title}
             />

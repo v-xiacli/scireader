@@ -79,6 +79,10 @@ export const uploadFileAsAdmin = async (buffer: Buffer, filePath: string, conten
   });
 };
 
+export const uploadTextAsAdmin = async (content: string, filePath: string) => {
+  await uploadFileAsAdmin(Buffer.from(content, 'utf8'), filePath, 'text/markdown; charset=utf-8');
+};
+
 export const generateSignedUrl = async (filePath: string, durationInMinutes = 15) => {
   const parsedConnectionString = parseConnectionString();
   const containerName = process.env.AZURE_STORAGE_CONTAINER?.trim();
@@ -112,6 +116,12 @@ export const downloadFileAsAdmin = async (filePath: string): Promise<{ buffer: B
     buffer: Buffer.from(response),
     contentType: properties.contentType || 'application/octet-stream',
   };
+};
+
+export const downloadTextAsAdmin = async (filePath: string) => {
+  const { buffer } = await downloadFileAsAdmin(filePath);
+
+  return buffer.toString('utf8');
 };
 
 export const deleteFileAsAdmin = async (filePath: string) => {
