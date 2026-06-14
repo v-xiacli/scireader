@@ -1,21 +1,36 @@
 ﻿'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { FloatingChatBox } from '@/components/chat/floating-chat-box';
 import { useFloatingChat } from '@/components/chat/floating-chat-context';
+
+type ViewerPreferences = {
+  pdfZoom?: number;
+  chatPosition?: { x: number; y: number };
+  chatSize?: { width: number; height: number };
+};
 
 export const GlobalFloatingChat = () => {
   const { paper, selectedText } = useFloatingChat();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
+  const [preferences, setPreferences] = useState<ViewerPreferences | null>(null);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const loadSession = async () => {
       try {
         const response = await fetch('/api/auth/me');
         const result = await response.json();
-        setIsAuthenticated(Boolean(response.ok && result.user));
+        const nextIsAuthenticated = Boolean(response.ok && result.user);
+        setIsAuthenticated(nextIsAuthenticated);
+
+        if (nextIsAuthenticated) {
+          const preferencesResponse = await fetch('/api/auth/viewer-preferences');
+          const preferencesResult = await preferencesResponse.json();
+          setPreferences(preferencesResponse.ok ? preferencesResult.preferences : null);
+        }
       } catch {
         setIsAuthenticated(false);
       } finally {
@@ -26,7 +41,19 @@ export const GlobalFloatingChat = () => {
     void loadSession();
   }, []);
 
+  const saveLayout = useCallback((layout: { position: { x: number; y: number }; size: { width: number; height: number } }) => {
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+
+    saveTimeoutRef.current = setTimeout(() => {
+      void fetch('/api/auth/viewer-preferences', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatPosition: layout.position, chatSize: layout.size }),
+      });
+    }, 400);
+  }, []);
+
   if (isSessionLoading || !isAuthenticated) return null;
 
-  return <FloatingChatBox paper={paper ?? undefined} selectedText={selectedText} />;
+  return <FloatingChatBox initialPosition={preferences?.chatPosition} initialSize={preferences?.chatSize} onLayoutChange={saveLayout} paper={paper ?? undefined} selectedText={selectedText} />;
 };

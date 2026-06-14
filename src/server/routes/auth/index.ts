@@ -1,4 +1,6 @@
 ﻿import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'crypto';
+import { mkdir, readFile, writeFile } from 'fs/promises';
+import path from 'path';
 import { promisify } from 'util';
 
 import { zValidator } from '@hono/zod-validator';
@@ -12,6 +14,7 @@ import { ensureAuthTables, getSql } from '@/server/db';
 const scrypt = promisify(scryptCallback);
 const sessionCookieName = 'sci_session';
 const sessionMaxAgeSeconds = 60 * 60 * 24 * 30;
+const preferenceDir = path.join(process.cwd(), 'user-preferences');
 
 type UserRow = {
   id: string;
@@ -23,6 +26,12 @@ type UserRow = {
 const credentialsSchema = z.object({
   email: z.string().trim().email().max(254),
   password: z.string().min(8).max(128),
+});
+
+const viewerPreferencesSchema = z.object({
+  pdfZoom: z.number().min(25).max(500).optional(),
+  chatPosition: z.object({ x: z.number(), y: z.number() }).optional(),
+  chatSize: z.object({ width: z.number(), height: z.number() }).optional(),
 });
 
 const hashPassword = async (password: string) => {
@@ -43,6 +52,34 @@ const verifyPassword = async (password: string, storedHash: string) => {
 };
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
+
+const getPreferencePath = (userId: string) => path.join(preferenceDir, `${userId}.md`);
+
+const loadViewerPreferences = async (userId: string) => {
+  try {
+    const content = await readFile(getPreferencePath(userId), 'utf8');
+    const match = content.match(/```json\n([\s\S]*?)\n```/);
+    if (!match) return null;
+
+    return viewerPreferencesSchema.parse(JSON.parse(match[1]));
+  } catch {
+    return null;
+  }
+};
+
+const saveViewerPreferences = async (userId: string, preferences: z.infer<typeof viewerPreferencesSchema>) => {
+  const currentPreferences = (await loadViewerPreferences(userId)) ?? {};
+  const nextPreferences = { ...currentPreferences, ...preferences };
+
+  await mkdir(preferenceDir, { recursive: true });
+  await writeFile(
+    getPreferencePath(userId),
+    `# Viewer preferences\n\n\`\`\`json\n${JSON.stringify(nextPreferences, null, 2)}\n\`\`\`\n`,
+    'utf8',
+  );
+
+  return nextPreferences;
+};
 
 const createSession = async (userId: string) => {
   const token = randomBytes(32).toString('hex');
@@ -92,6 +129,19 @@ const app = new Hono()
       const message = error instanceof Error ? error.message : 'Could not load session.';
       return c.json({ error: 'Could not load session.', message }, 500);
     }
+  })
+  .get('/viewer-preferences', async (c) => {
+    const user = await getCurrentUser(getCookie(c, sessionCookieName));
+    if (!user) return c.json({ error: 'Not authenticated.' }, 401);
+
+    return c.json({ preferences: await loadViewerPreferences(user.id) });
+  })
+  .put('/viewer-preferences', zValidator('json', viewerPreferencesSchema), async (c) => {
+    const user = await getCurrentUser(getCookie(c, sessionCookieName));
+    if (!user) return c.json({ error: 'Not authenticated.' }, 401);
+
+    const preferences = c.req.valid('json');
+    return c.json({ preferences: await saveViewerPreferences(user.id, preferences) });
   })
   .post('/signup', zValidator('json', credentialsSchema), async (c) => {
     const { email, password } = c.req.valid('json');

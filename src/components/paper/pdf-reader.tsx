@@ -1,12 +1,14 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import type { PaperSelection, PaperSummary } from '@/types/paper';
 
 interface PdfReaderProps {
   paper: PaperSummary;
   onSelectionChange: (selection: PaperSelection | null) => void;
+  initialZoom?: number;
+  onZoomChange?: (zoom: number) => void;
 }
 
 const sampleParagraphs = [
@@ -15,8 +17,12 @@ const sampleParagraphs = [
   'The reader keeps a large chat workspace visible so that users can ask about the whole paper, current page, selected text, or visual figures without leaving the document.',
 ];
 
-export const PdfReader = ({ paper, onSelectionChange }: PdfReaderProps) => {
+export const PdfReader = ({ paper, onSelectionChange, initialZoom = 100, onZoomChange }: PdfReaderProps) => {
   const [pdfFrameStatus, setPdfFrameStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    onZoomChange?.(initialZoom);
+  }, [initialZoom, onZoomChange]);
 
   const captureSelection = useCallback(() => {
     const text = window.getSelection()?.toString().trim();

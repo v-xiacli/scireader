@@ -10,6 +10,9 @@ import type { ChatMessage, PaperSelection, PaperSummary } from '@/types/paper';
 interface FloatingChatBoxProps {
   paper?: PaperSummary | null;
   selectedText?: PaperSelection | null;
+  initialPosition?: { x: number; y: number };
+  initialSize?: { width: number; height: number };
+  onLayoutChange?: (layout: { position: { x: number; y: number }; size: { width: number; height: number } }) => void;
 }
 
 const defaultPosition = { x: 0, y: 96 };
@@ -39,14 +42,14 @@ const buildConversationHistory = (messages: ChatMessage[]): ConversationTurn[] =
       content: message.content.slice(0, 2000),
     }));
 
-export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingChatBoxProps) => {
+export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosition, initialSize, onLayoutChange }: FloatingChatBoxProps) => {
   const dragOffsetRef = useRef(defaultPosition);
   const resizeStartRef = useRef({ x: 0, y: 0, width: defaultSize.width, height: defaultSize.height, left: defaultPosition.x, top: defaultPosition.y });
   const resizeHandleRef = useRef<ResizeHandle>('bottom-right');
   const [messages, setMessages] = useState<ChatMessage[]>(mockMessages);
   const [input, setInput] = useState('');
-  const [position, setPosition] = useState(defaultPosition);
-  const [size, setSize] = useState(defaultSize);
+  const [position, setPosition] = useState(initialPosition ?? defaultPosition);
+  const [size, setSize] = useState(initialSize ?? defaultSize);
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
@@ -58,18 +61,34 @@ export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingC
   const paperTitle = paper?.title;
 
   useEffect(() => {
+    if (initialPosition) setPosition(initialPosition);
+  }, [initialPosition]);
+
+  useEffect(() => {
+    if (initialSize) setSize(initialSize);
+  }, [initialSize]);
+
+  useEffect(() => {
+    onLayoutChange?.({ position, size });
+  }, [onLayoutChange, position, size]);
+
+  useEffect(() => {
     const placeOnRight = () => {
-      setPosition((current) => ({
-        x: Math.max(edgePadding, window.innerWidth - size.width - 28),
-        y: current.y,
-      }));
+      setPosition((current) => {
+        if (initialPosition) return current;
+
+        return {
+          x: Math.max(edgePadding, window.innerWidth - size.width - 28),
+          y: current.y,
+        };
+      });
     };
 
     placeOnRight();
     window.addEventListener('resize', placeOnRight);
 
     return () => window.removeEventListener('resize', placeOnRight);
-  }, [size.width]);
+  }, [initialPosition, size.width]);
 
   const askReaderAgent = useCallback(
     async (prompt: string, scope: 'whole-paper' | 'selected-text' = 'whole-paper') => {
