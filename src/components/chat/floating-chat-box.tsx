@@ -49,6 +49,23 @@ const buildConversationHistory = (messages: ChatMessage[]): ConversationTurn[] =
       content: message.content.slice(0, 2000),
     }));
 
+const clampLayout = (position: { x: number; y: number }, size: { width: number; height: number }) => {
+  if (typeof window === 'undefined') return { position, size };
+
+  const nextSize = {
+    width: Math.min(Math.max(minSize.width, size.width), Math.max(minSize.width, window.innerWidth - edgePadding * 2)),
+    height: Math.min(Math.max(minSize.height, size.height), Math.max(minSize.height, window.innerHeight - edgePadding * 2)),
+  };
+
+  return {
+    size: nextSize,
+    position: {
+      x: Math.min(Math.max(edgePadding, position.x), Math.max(edgePadding, window.innerWidth - nextSize.width - edgePadding)),
+      y: Math.min(Math.max(edgePadding, position.y), Math.max(edgePadding, window.innerHeight - nextSize.height - edgePadding)),
+    },
+  };
+};
+
 export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosition, initialSize, onLayoutChange }: FloatingChatBoxProps) => {
   const dragOffsetRef = useRef(defaultPosition);
   const resizeStartRef = useRef({ x: 0, y: 0, width: defaultSize.width, height: defaultSize.height, left: defaultPosition.x, top: defaultPosition.y });
@@ -68,12 +85,34 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const paperTitle = paper?.title;
 
   useEffect(() => {
-    if (initialPosition) setPosition(initialPosition);
-  }, [initialPosition]);
+    console.info('Floating chat mounted/rendered.', {
+      hasPaper,
+      paperId,
+      position,
+      size,
+      initialPosition,
+      initialSize,
+      viewport: typeof window === 'undefined' ? null : { width: window.innerWidth, height: window.innerHeight },
+    });
+  }, [hasPaper, paperId, position, size, initialPosition, initialSize]);
 
   useEffect(() => {
-    if (initialSize) setSize(initialSize);
-  }, [initialSize]);
+    if (!initialPosition) return;
+
+    setPosition((current) => {
+      const nextPosition = clampLayout(initialPosition, size).position;
+
+      return current.x === nextPosition.x && current.y === nextPosition.y ? current : nextPosition;
+    });
+  }, [initialPosition, size]);
+
+  useEffect(() => {
+    if (!initialSize) return;
+
+    const layout = clampLayout(position, initialSize);
+    setPosition((current) => (current.x === layout.position.x && current.y === layout.position.y ? current : layout.position));
+    setSize((current) => (current.width === layout.size.width && current.height === layout.size.height ? current : layout.size));
+  }, [initialSize, position]);
 
   useEffect(() => {
     onLayoutChange?.({ position, size });

@@ -23,7 +23,10 @@ export const PaperChatContextBridge = ({ paper, selectedText }: PaperChatContext
 
     setPaperContext(paper, selectedText);
 
-    return () => setPaperContext(null);
+    return () => {
+      console.info('Paper chat context unmounted.', { paperId: paper.id });
+      setPaperContext(null);
+    };
   }, [paper, selectedText, setPaperContext]);
 
   return null;
