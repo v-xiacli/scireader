@@ -1,6 +1,6 @@
 'use client';
 
-import { FileText, ZoomIn, ZoomOut } from 'lucide-react';
+import { ZoomIn, ZoomOut } from 'lucide-react';
 import { useCallback, useState } from 'react';
 
 import type { PaperSelection, PaperSummary } from '@/types/paper';
@@ -51,29 +51,18 @@ export const PdfReader = ({ paper, onSelectionChange }: PdfReaderProps) => {
   }, [paper.pdfUrl]);
 
   return (
-    <section className="flex min-h-0 w-[min(72vw,1180px)] -translate-x-[12vw] flex-col rounded-3xl bg-slate-900 p-4 shadow-sm">
-      <header className="mb-4 flex items-center justify-between text-white">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="rounded-xl bg-white/10 p-2">
-            <FileText className="size-5" />
-          </div>
-          <div className="min-w-0">
-            <h1 className="truncate text-lg font-semibold">{paper.title}</h1>
-            <p className="truncate text-sm text-white/60">{paper.authors}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button className="rounded-lg bg-white/10 p-2 hover:bg-white/20" onClick={() => setZoom((value) => Math.max(70, value - 10))}>
-            <ZoomOut className="size-4" />
-          </button>
-          <span className="w-14 text-center text-sm">{zoom}%</span>
-          <button className="rounded-lg bg-white/10 p-2 hover:bg-white/20" onClick={() => setZoom((value) => Math.min(160, value + 10))}>
-            <ZoomIn className="size-4" />
-          </button>
-        </div>
-      </header>
+    <section className="relative flex min-h-0 w-[min(72vw,1180px)] -translate-x-[12vw] flex-col rounded-3xl bg-slate-200 p-4 shadow-sm">
+      <div className="absolute right-7 top-7 z-10 flex items-center gap-2 rounded-xl border bg-white/90 p-1.5 text-slate-700 shadow-sm backdrop-blur">
+        <button className="rounded-lg p-2 hover:bg-slate-100" onClick={() => setZoom((value) => Math.max(70, value - 10))}>
+          <ZoomOut className="size-4" />
+        </button>
+        <span className="w-14 text-center text-sm">{zoom}%</span>
+        <button className="rounded-lg p-2 hover:bg-slate-100" onClick={() => setZoom((value) => Math.min(160, value + 10))}>
+          <ZoomIn className="size-4" />
+        </button>
+      </div>
 
-      <div className="min-h-0 flex-1 overflow-auto rounded-2xl bg-slate-200 p-8">
+      <div className="min-h-0 flex-1 overflow-auto rounded-2xl bg-slate-200 p-6 pt-16">
         {paper.pdfUrl ? (
           <>
             <div className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-white/80 px-3 py-2 text-xs text-slate-600">
