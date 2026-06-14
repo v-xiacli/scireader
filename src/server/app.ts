@@ -7,7 +7,27 @@ import storageRoutes from './routes/storage';
 
 export const app = new Hono().basePath('/api');
 
-app.get('/health', (c) => c.json({ ok: true, service: 'SCIReader' }));
+app.use('*', async (c, next) => {
+  const startedAt = Date.now();
+
+  await next();
+
+  console.info('API request', {
+    method: c.req.method,
+    path: c.req.path,
+    status: c.res.status,
+    durationMs: Date.now() - startedAt,
+  });
+});
+
+app.get('/health', (c) =>
+  c.json({
+    ok: true,
+    service: 'SCIReader',
+    version: process.env.WEBSITE_SITE_NAME ? 'azure-app-service' : 'local',
+    timestamp: new Date().toISOString(),
+  }),
+);
 
 const routes = app
   .route('/auth', authRoutes)

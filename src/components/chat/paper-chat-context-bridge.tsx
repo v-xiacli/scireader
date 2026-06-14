@@ -14,6 +14,13 @@ export const PaperChatContextBridge = ({ paper, selectedText }: PaperChatContext
   const { setPaperContext } = useFloatingChat();
 
   useEffect(() => {
+    console.info('Paper chat context mounted.', {
+      paperId: paper.id,
+      title: paper.title,
+      pdfUrl: paper.pdfUrl,
+      hasSelectedText: Boolean(selectedText?.text),
+    });
+
     setPaperContext(paper, selectedText);
 
     return () => setPaperContext(null);

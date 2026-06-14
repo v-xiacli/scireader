@@ -76,8 +76,9 @@ const app = new Hono()
     }
   })
   .get('/download/:filePath{.+}', async (c) => {
+    const filePath = c.req.param('filePath');
+
     try {
-      const filePath = c.req.param('filePath');
       const forceDownload = c.req.query('download') === '1';
       const { buffer, contentType } = await downloadFileAsAdmin(filePath);
       const filename = filePath.split('/').pop() || 'paper.pdf';
@@ -93,7 +94,12 @@ const app = new Hono()
       headers.set('Content-Length', String(buffer.length));
 
       return new Response(new Uint8Array(buffer), { headers });
-    } catch {
+    } catch (error) {
+      console.error('Storage download failed.', {
+        filePath,
+        message: error instanceof Error ? error.message : String(error),
+      });
+
       return c.json({ error: 'File not found or could not be downloaded' }, 404);
     }
   })
