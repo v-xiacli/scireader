@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { PaperChatContextBridge } from '@/components/chat/paper-chat-context-bridge';
 import { PdfReader } from '@/components/paper/pdf-reader';
@@ -18,6 +18,10 @@ interface PaperPageProps {
     title?: string;
   };
 }
+
+type ViewerPreferences = {
+  pdfZoom?: number;
+};
 
 const normalizePdfUrl = (pdfUrl: string) => {
   const trimmed = pdfUrl.trim();
@@ -47,6 +51,29 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
     [mockPaper, params.paperId, searchParams?.filePath, searchParams?.pdfUrl, searchParams?.title],
   );
   const [selectedText, setSelectedText] = useState<PaperSelection | null>(null);
+  const [preferences, setPreferences] = useState<ViewerPreferences | null>(null);
+
+  useEffect(() => {
+    const loadPreferences = async () => {
+      try {
+        const response = await fetch('/api/auth/viewer-preferences');
+        const result = await response.json();
+        setPreferences(response.ok ? result.preferences : null);
+      } catch {
+        setPreferences(null);
+      }
+    };
+
+    void loadPreferences();
+  }, []);
+
+  const saveZoom = useCallback((pdfZoom: number) => {
+    void fetch('/api/auth/viewer-preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pdfZoom }),
+    });
+  }, []);
 
   useEffect(() => {
     if (!paper.filePath) return;
@@ -71,7 +98,7 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
         <div className="text-sm text-muted-foreground">PDF viewer + large floating chat</div>
       </nav>
       <div className="flex h-full min-h-0 justify-center overflow-hidden">
-        <PdfReader onSelectionChange={setSelectedText} paper={paper} />
+        <PdfReader initialZoom={preferences?.pdfZoom} onSelectionChange={setSelectedText} onZoomChange={saveZoom} paper={paper} />
         <PaperChatContextBridge paper={paper} selectedText={selectedText} />
       </div>
     </main>

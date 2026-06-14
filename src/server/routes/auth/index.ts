@@ -1,6 +1,4 @@
 ﻿import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'crypto';
-import { mkdir, readFile, writeFile } from 'fs/promises';
-import path from 'path';
 import { promisify } from 'util';
 
 import { zValidator } from '@hono/zod-validator';
@@ -10,11 +8,11 @@ import type { Context } from 'hono';
 import { z } from 'zod';
 
 import { ensureAuthTables, getSql } from '@/server/db';
+import { downloadTextAsAdmin, uploadTextAsAdmin } from '@/lib/firebase/server/storage-admin';
 
 const scrypt = promisify(scryptCallback);
 const sessionCookieName = 'sci_session';
 const sessionMaxAgeSeconds = 60 * 60 * 24 * 30;
-const preferenceDir = path.join(process.cwd(), 'user-preferences');
 
 type UserRow = {
   id: string;
@@ -53,11 +51,11 @@ const verifyPassword = async (password: string, storedHash: string) => {
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
 
-const getPreferencePath = (userId: string) => path.join(preferenceDir, `${userId}.md`);
+const getPreferencePath = (userId: string) => `user-preferences/${userId}.md`;
 
 const loadViewerPreferences = async (userId: string) => {
   try {
-    const content = await readFile(getPreferencePath(userId), 'utf8');
+    const content = await downloadTextAsAdmin(getPreferencePath(userId));
     const match = content.match(/```json\n([\s\S]*?)\n```/);
     if (!match) return null;
 
@@ -71,11 +69,9 @@ const saveViewerPreferences = async (userId: string, preferences: z.infer<typeof
   const currentPreferences = (await loadViewerPreferences(userId)) ?? {};
   const nextPreferences = { ...currentPreferences, ...preferences };
 
-  await mkdir(preferenceDir, { recursive: true });
-  await writeFile(
-    getPreferencePath(userId),
+  await uploadTextAsAdmin(
     `# Viewer preferences\n\n\`\`\`json\n${JSON.stringify(nextPreferences, null, 2)}\n\`\`\`\n`,
-    'utf8',
+    getPreferencePath(userId),
   );
 
   return nextPreferences;
