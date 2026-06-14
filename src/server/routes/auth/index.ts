@@ -107,18 +107,50 @@ export const loadUploadedPapers = async (userId: string) => {
   }
 };
 
+const cleanPaperIdentityPart = (part?: string) => part?.toLowerCase().replace(/[^a-z0-9]/g, '') ?? '';
+
+const getUploadedPaperIdentity = (paper: z.infer<typeof uploadedPaperSchema>) => {
+  const title = cleanPaperIdentityPart(paper.title || paper.id);
+  const journal = cleanPaperIdentityPart(paper.journal);
+  const year = cleanPaperIdentityPart(paper.year);
+  const authors = paper.authors
+    .split(/\s*(?:,|;|\band\b|&|，|；)\s*/i)
+    .slice(0, 2)
+    .map(cleanPaperIdentityPart)
+    .join('');
+
+  return [title, authors, journal, year].filter(Boolean).join('') || cleanPaperIdentityPart(paper.id) || cleanPaperIdentityPart(paper.filePath);
+};
+
 const saveUploadedPapers = async (userId: string, papers: z.infer<typeof uploadedPapersSchema>) => {
+  const seenIdentities = new Set<string>();
+  const seenFilePaths = new Set<string>();
+  const dedupedPapers = papers.filter((paper) => {
+    const identity = getUploadedPaperIdentity(paper);
+
+    if (seenIdentities.has(identity) || seenFilePaths.has(paper.filePath)) return false;
+
+    seenIdentities.add(identity);
+    seenFilePaths.add(paper.filePath);
+
+    return true;
+  });
+
   await uploadTextAsAdmin(
-    `# Uploaded papers\n\n\`\`\`json\n${JSON.stringify(papers, null, 2)}\n\`\`\`\n`,
+    `# Uploaded papers\n\n\`\`\`json\n${JSON.stringify(dedupedPapers, null, 2)}\n\`\`\`\n`,
     getUploadedPapersPath(userId),
   );
 
-  return papers;
+  return dedupedPapers;
 };
 
 const saveUploadedPaper = async (userId: string, paper: z.infer<typeof uploadedPaperSchema>) => {
   const currentPapers = await loadUploadedPapers(userId);
-  const nextPapers = [paper, ...currentPapers.filter((currentPaper) => currentPaper.filePath !== paper.filePath)];
+  const paperIdentity = getUploadedPaperIdentity(paper);
+  const nextPapers = [
+    paper,
+    ...currentPapers.filter((currentPaper) => getUploadedPaperIdentity(currentPaper) !== paperIdentity && currentPaper.filePath !== paper.filePath),
+  ];
 
   return saveUploadedPapers(userId, nextPapers);
 };
@@ -196,7 +228,7 @@ const app = new Hono()
     const user = await getCurrentUser(getCookie(c, sessionCookieName));
     if (!user) return c.json({ error: 'Not authenticated.' }, 401);
 
-    return c.json({ papers: await loadUploadedPapers(user.id) });
+    return c.json({ papers: await saveUploadedPapers(user.id, await loadUploadedPapers(user.id)) });
   })
   .post('/uploaded-papers', zValidator('json', uploadedPaperSchema), async (c) => {
     const user = await getCurrentUser(getCookie(c, sessionCookieName));
