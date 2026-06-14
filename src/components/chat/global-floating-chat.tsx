@@ -57,8 +57,28 @@ export const GlobalFloatingChat = () => {
     [isAuthenticated],
   );
 
-  if (isSessionLoading && !paper) return null;
-  if (!isAuthenticated && !paper) return null;
+  useEffect(() => {
+    console.info('Global floating chat state.', {
+      isSessionLoading,
+      isAuthenticated,
+      hasPaper: Boolean(paper),
+      paperId: paper?.id,
+      hasPreferences: Boolean(preferences),
+      chatPosition: preferences?.chatPosition,
+      chatSize: preferences?.chatSize,
+    });
+  }, [isSessionLoading, isAuthenticated, paper, preferences]);
+
+  if (isSessionLoading && !paper) {
+    console.info('Global floating chat hidden: session loading and no paper context yet.');
+    return null;
+  }
+  if (!isAuthenticated && !paper) {
+    console.info('Global floating chat hidden: not authenticated and no paper context.');
+    return null;
+  }
+
+  console.info('Global floating chat rendering.', { paperId: paper?.id, isAuthenticated });
 
   return <FloatingChatBox initialPosition={preferences?.chatPosition} initialSize={preferences?.chatSize} onLayoutChange={saveLayout} paper={paper ?? undefined} selectedText={selectedText} />;
 };
