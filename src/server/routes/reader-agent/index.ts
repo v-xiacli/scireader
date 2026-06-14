@@ -21,6 +21,13 @@ type ExtractedPdf = {
   figureCaptions: string[];
 };
 
+type PaperMetadata = {
+  title?: string;
+  authors?: string[];
+  journal?: string;
+  year?: string;
+};
+
 type PdfPageImage = {
   pageNumber: number;
   data: string;
@@ -69,6 +76,22 @@ const imageRequestSchema = z.object({
   title: z.string().optional(),
   selectedText: z.string().optional(),
   model: z.string().optional(),
+});
+
+const tokenEstimateRequestSchema = z.object({
+  paperId: z.string().min(1),
+  pdfUrl: z.string().min(1),
+  title: z.string().optional(),
+  journal: z.string().optional(),
+  year: z.string().optional(),
+  volume: z.string().optional(),
+  prompt: z.string().optional(),
+  model: z.string().optional(),
+});
+
+const metadataRequestSchema = z.object({
+  pdfUrl: z.string().min(1),
+  fallbackTitle: z.string().optional(),
 });
 
 const TAVILY_API_URL = 'https://api.tavily.com/search';
@@ -198,11 +221,22 @@ const materializePdfToTempFile = async (storagePath: string) => {
   return { localPdfPath, outputDir, buffer };
 };
 
-const getPaperIdentitySlug = (request: Pick<z.infer<typeof readerRequestSchema>, 'paperId' | 'title' | 'journal' | 'year' | 'volume'>) =>
-  [request.title ?? request.paperId, request.journal, request.year, request.volume]
-    .map((part) => part?.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''))
-    .filter(Boolean)
-    .join('-') || request.paperId;
+const cleanPaperKeyPart = (part?: string) => part?.toLowerCase().replace(/[^a-z0-9]/g, '') ?? '';
+
+const getPaperIdentityKey = (paper: { title?: string; authors?: string[]; journal?: string; year?: string; paperId?: string }) => {
+  const parts = [paper.title, ...(paper.authors ?? []).slice(0, 2), paper.journal, paper.year].map(cleanPaperKeyPart).filter(Boolean);
+
+  return parts.join('') || cleanPaperKeyPart(paper.paperId) || 'uploadedpaper';
+};
+
+const getPaperIdentitySlug = (request: Pick<z.infer<typeof readerRequestSchema>, 'paperId' | 'title' | 'journal' | 'year'>) =>
+  getPaperIdentityKey({
+    paperId: request.paperId,
+    title: request.title ?? request.paperId,
+    authors: [],
+    journal: request.journal,
+    year: request.year,
+  });
 
 const getPaperSummaryStoragePath = (request: z.infer<typeof readerRequestSchema>, pdfStoragePath?: string | null) =>
   `paper-cache/${getPaperIdentitySlug(request)}/${pdfStoragePath ? 'uploaded' : 'sample'}.reader-summary.deep-v1.md`;
@@ -213,6 +247,68 @@ const downloadTextIfExists = async (filePath: string) => {
   } catch {
     return null;
   }
+};
+
+const normalizeMetadataText = (value?: string) => value?.replace(/\s+/g, ' ').trim();
+
+const getMetadataInfoValue = (info: Record<string, unknown>, key: string) => {
+  const value = info[key];
+
+  return typeof value === 'string' ? normalizeMetadataText(value) : undefined;
+};
+
+const parseAuthors = (value?: string) =>
+  value
+    ?.split(/\s*(?:,|;|\band\b|&|，|；)\s*/i)
+    .map((author) => author.replace(/\d+|\*|†|‡|§/g, '').trim())
+    .filter(Boolean)
+    .slice(0, 2) ?? [];
+
+const extractYear = (text: string) => text.match(/(?:19|20)\d{2}/)?.[0];
+
+const inferMetadataFromText = (text: string, fallbackTitle?: string): PaperMetadata => {
+  const lines = text
+    .split(/\n+/)
+    .map((line) => normalizeMetadataText(line))
+    .filter((line): line is string => Boolean(line));
+  const title = lines.find((line) => line.length >= 12 && !/^abstract\b/i.test(line)) ?? normalizeMetadataText(fallbackTitle);
+  const titleIndex = title ? lines.indexOf(title) : -1;
+  const authorLine = titleIndex >= 0 ? lines.slice(titleIndex + 1, titleIndex + 5).find((line) => /,|;|\band\b|&|，|；/i.test(line)) : undefined;
+  const journalLine = lines.find((line) => /\b(journal|transactions|proceedings|conference|letters|review|nature|science|ieee|acm)\b/i.test(line));
+  const year = extractYear(lines.slice(0, 20).join(' '));
+
+  return {
+    title,
+    authors: parseAuthors(authorLine),
+    journal: journalLine,
+    year,
+  };
+};
+
+const extractPaperMetadata = async (localPdfPath: string, fallbackTitle?: string): Promise<PaperMetadata> => {
+  const pdfjs = await loadPdfjs();
+  const data = new Uint8Array(await fs.readFile(localPdfPath));
+  const pdf = await pdfjs.getDocument({ data, useWorkerFetch: false, isEvalSupported: false, disableFontFace: true, standardFontDataUrl: getPdfjsStandardFontDataUrl() }).promise;
+  const metadata = await pdf.getMetadata().catch(() => null);
+  const info = (metadata?.info ?? {}) as Record<string, unknown>;
+  const metadataTitle = getMetadataInfoValue(info, 'Title');
+  const metadataAuthors = parseAuthors(getMetadataInfoValue(info, 'Author'));
+  const page = await pdf.getPage(1);
+  const textContent = await page.getTextContent();
+  const firstPageText = textContent.items
+    .map((item) => ('str' in item ? item.str : ''))
+    .join('\n')
+    .replace(/[ \t]+/g, ' ');
+  const inferred = inferMetadataFromText(firstPageText, fallbackTitle);
+
+  page.cleanup();
+
+  return {
+    title: metadataTitle ?? inferred.title ?? normalizeMetadataText(fallbackTitle),
+    authors: metadataAuthors.length ? metadataAuthors : inferred.authors,
+    journal: inferred.journal,
+    year: inferred.year,
+  };
 };
 
 const buildSystemPrompt = (hasPdfContext: boolean, hasWebSearch: boolean) => {
@@ -277,6 +373,14 @@ const selectImageModel = (request: z.infer<typeof imageRequestSchema>): Anthropi
   const defaultModel = process.env.ANTHROPIC_MODEL?.trim() || 'gpt-5.5';
 
   return { model: expertModel || defaultModel, target: expertModel ? 'expensive' : 'default' };
+};
+
+const selectTokenEstimateModel = (request: z.infer<typeof tokenEstimateRequestSchema>): AnthropicModelSelection => {
+  if (request.model) return { model: request.model, target: 'default' };
+
+  const defaultModel = process.env.ANTHROPIC_MODEL?.trim() || 'gpt-5.5';
+
+  return { model: defaultModel, target: 'default' };
 };
 
 const getAnthropicCredential = (target: AnthropicModelTarget) => {
@@ -529,7 +633,76 @@ const generateImage = async (request: z.infer<typeof imageRequestSchema>) => {
   };
 };
 
+const estimateTokenConsumption = async (request: z.infer<typeof tokenEstimateRequestSchema>) => {
+  const storagePath = resolveUploadedPdfStoragePath(request.pdfUrl);
+
+  if (!storagePath) throw new Error('Only uploaded PDFs can be estimated.');
+
+  const { buffer } = await downloadFileAsAdmin(storagePath);
+  const modelSelection = selectTokenEstimateModel(request);
+  const client = createAnthropicClient(modelSelection.target);
+  const prompt = request.prompt?.trim() || '请总结这篇文档';
+  const response = await client.messages.countTokens({
+    model: modelSelection.model,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'document',
+            source: {
+              type: 'base64',
+              media_type: 'application/pdf',
+              data: buffer.toString('base64'),
+            },
+            title: request.title ?? request.paperId,
+          },
+          { type: 'text', text: prompt },
+        ],
+      },
+    ],
+  });
+
+  return {
+    inputTokens: response.input_tokens,
+    model: modelSelection.model,
+    prompt,
+  };
+};
+
 const app = new Hono()
+  .post('/metadata', zValidator('json', metadataRequestSchema), async (c) => {
+    const request = c.req.valid('json');
+    const storagePath = resolveUploadedPdfStoragePath(request.pdfUrl);
+
+    if (!storagePath) return c.json({ error: 'Only uploaded PDFs can be inspected.' }, 400);
+
+    const tempPdf = await materializePdfToTempFile(storagePath);
+
+    try {
+      const metadata = await extractPaperMetadata(tempPdf.localPdfPath, request.fallbackTitle);
+      const paperKey = getPaperIdentityKey(metadata);
+
+      return c.json({ ...metadata, paperKey });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'PDF metadata extraction failed.';
+
+      return c.json({ error: 'PDF metadata extraction failed.', message }, 500);
+    } finally {
+      await fs.rm(tempPdf.outputDir, { recursive: true, force: true });
+    }
+  })
+  .post('/count-tokens', zValidator('json', tokenEstimateRequestSchema), async (c) => {
+    const request = c.req.valid('json');
+
+    try {
+      return c.json(await estimateTokenConsumption(request));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Token estimate failed.';
+
+      return c.json({ error: 'Token estimate failed.', message }, 500);
+    }
+  })
   .post('/ask', zValidator('json', readerRequestSchema), async (c) => {
     const request = c.req.valid('json');
 

@@ -10,6 +10,14 @@ import type { PaperSummary } from '@/types/paper';
 
 type AuthMode = 'login' | 'signup';
 type AuthUser = { id: string; email: string };
+type TokenEstimate = { inputTokens: number; model: string };
+type ExtractedPaperMetadata = {
+  paperKey: string;
+  title?: string;
+  authors?: string[];
+  journal?: string;
+  year?: string;
+};
 
 const normalizeDownloadUrl = (downloadUrl: string) => {
   const trimmed = downloadUrl.trim();
@@ -20,11 +28,7 @@ const normalizeDownloadUrl = (downloadUrl: string) => {
   return `https://${trimmed}`;
 };
 
-const buildPaperId = (title: string, journal: string, year: string, volume: string) =>
-  [title, journal, year, volume]
-    .map((part) => part.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''))
-    .filter(Boolean)
-    .join('-') || 'uploaded-paper';
+const fallbackPaperKey = (fileName: string) => fileName.replace(/\.pdf$/i, '').toLowerCase().replace(/[^a-z0-9]/g, '') || 'uploadedpaper';
 
 const HomePage = () => {
   const router = useRouter();
@@ -38,11 +42,9 @@ const HomePage = () => {
   const [isSessionLoading, setIsSessionLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
-  const [paperTitle, setPaperTitle] = useState('');
-  const [paperJournal, setPaperJournal] = useState('');
-  const [paperYear, setPaperYear] = useState('');
-  const [paperVolume, setPaperVolume] = useState('');
   const [uploadedPapers, setUploadedPapers] = useState<PaperSummary[]>([]);
+  const [tokenEstimate, setTokenEstimate] = useState<TokenEstimate | null>(null);
+  const [tokenEstimateMessage, setTokenEstimateMessage] = useState('Upload a PDF to estimate input tokens.');
 
   const isLoggedIn = Boolean(authUser);
   const papers = [...uploadedPapers, ...mockPapers];
@@ -114,6 +116,50 @@ const HomePage = () => {
     setAuthMessage('Logged out.');
   };
 
+  const estimateTokenConsumption = async (paper: PaperSummary) => {
+    if (!paper.filePath) return;
+
+    setTokenEstimate(null);
+    setTokenEstimateMessage('Calculating PDF input tokens...');
+
+    try {
+      const response = await fetch('/api/reader-agent/count-tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paperId: paper.id,
+          pdfUrl: paper.pdfUrl,
+          title: paper.title,
+          journal: paper.journal,
+          year: paper.year,
+          volume: paper.volume,
+          prompt: '请总结这篇文档',
+        }),
+      });
+      const result = await response.json();
+
+      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Token estimate failed.');
+
+      setTokenEstimate({ inputTokens: result.inputTokens, model: result.model });
+      setTokenEstimateMessage('Estimated before AI analysis.');
+    } catch (error) {
+      setTokenEstimateMessage(error instanceof Error ? error.message : 'Token estimate failed.');
+    }
+  };
+
+  const extractPaperMetadata = async (pdfUrl: string, fallbackTitle: string): Promise<ExtractedPaperMetadata> => {
+    const response = await fetch('/api/reader-agent/metadata', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pdfUrl, fallbackTitle }),
+    });
+    const result = await response.json();
+
+    if (!response.ok) throw new Error(result.message ?? result.error ?? 'PDF metadata extraction failed.');
+
+    return result;
+  };
+
   const handleUpload = async (file: File) => {
     if (!isLoggedIn) {
       setUploadMessage('Please log in before uploading a paper.');
@@ -168,6 +214,8 @@ const HomePage = () => {
 
       if (saveResponse.ok) setUploadedPapers(saveResult.papers);
 
+      await estimateTokenConsumption(uploadedPaper);
+
       setPaperTitle('');
       setPaperJournal('');
       setPaperYear('');
@@ -192,11 +240,24 @@ const HomePage = () => {
               Upload a PDF, read it on the left, and ask questions in the chat on the right.
             </p>
           </div>
-          <div className="rounded-2xl border bg-slate-50 p-4 text-right">
-            <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-              <WalletCards className="size-4" /> Manual balance
+          <div className="flex gap-3">
+            <div className="rounded-2xl border bg-slate-50 p-4 text-right">
+              <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
+                <WalletCards className="size-4" /> Token estimate
+              </div>
+              <p className="mt-2 text-2xl font-semibold">
+                {tokenEstimate ? tokenEstimate.inputTokens.toLocaleString() : '--'}
+              </p>
+              <p className="mt-1 max-w-44 text-xs text-muted-foreground">
+                {tokenEstimate ? `${tokenEstimate.model} input tokens` : tokenEstimateMessage}
+              </p>
             </div>
-            <p className="mt-2 text-2xl font-semibold">{mockUserAccount.balance}</p>
+            <div className="rounded-2xl border bg-slate-50 p-4 text-right">
+              <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
+                <WalletCards className="size-4" /> Manual balance
+              </div>
+              <p className="mt-2 text-2xl font-semibold">{mockUserAccount.balance}</p>
+            </div>
           </div>
         </header>
 
