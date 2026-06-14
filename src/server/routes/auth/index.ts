@@ -32,6 +32,19 @@ const viewerPreferencesSchema = z.object({
   chatSize: z.object({ width: z.number(), height: z.number() }).optional(),
 });
 
+const uploadedPaperSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  authors: z.string(),
+  pages: z.number(),
+  status: z.literal('uploaded'),
+  abstract: z.string(),
+  pdfUrl: z.string(),
+  filePath: z.string(),
+});
+
+const uploadedPapersSchema = z.array(uploadedPaperSchema);
+
 const hashPassword = async (password: string) => {
   const salt = randomBytes(16).toString('hex');
   const derivedKey = (await scrypt(password, salt, 64)) as Buffer;
@@ -52,14 +65,17 @@ const verifyPassword = async (password: string, storedHash: string) => {
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
 
 const getPreferencePath = (userId: string) => `user-preferences/${userId}.md`;
+const getUploadedPapersPath = (userId: string) => `user-papers/${userId}.md`;
+
+const parseJsonBlock = (content: string) => {
+  const match = content.match(/```json\n([\s\S]*?)\n```/);
+
+  return match ? JSON.parse(match[1]) : null;
+};
 
 const loadViewerPreferences = async (userId: string) => {
   try {
-    const content = await downloadTextAsAdmin(getPreferencePath(userId));
-    const match = content.match(/```json\n([\s\S]*?)\n```/);
-    if (!match) return null;
-
-    return viewerPreferencesSchema.parse(JSON.parse(match[1]));
+    return viewerPreferencesSchema.parse(parseJsonBlock(await downloadTextAsAdmin(getPreferencePath(userId))));
   } catch {
     return null;
   }
@@ -75,6 +91,26 @@ const saveViewerPreferences = async (userId: string, preferences: z.infer<typeof
   );
 
   return nextPreferences;
+};
+
+const loadUploadedPapers = async (userId: string) => {
+  try {
+    return uploadedPapersSchema.parse(parseJsonBlock(await downloadTextAsAdmin(getUploadedPapersPath(userId))) ?? []);
+  } catch {
+    return [];
+  }
+};
+
+const saveUploadedPaper = async (userId: string, paper: z.infer<typeof uploadedPaperSchema>) => {
+  const currentPapers = await loadUploadedPapers(userId);
+  const nextPapers = [paper, ...currentPapers.filter((currentPaper) => currentPaper.filePath !== paper.filePath)];
+
+  await uploadTextAsAdmin(
+    `# Uploaded papers\n\n\`\`\`json\n${JSON.stringify(nextPapers, null, 2)}\n\`\`\`\n`,
+    getUploadedPapersPath(userId),
+  );
+
+  return nextPapers;
 };
 
 const createSession = async (userId: string) => {
@@ -138,6 +174,18 @@ const app = new Hono()
 
     const preferences = c.req.valid('json');
     return c.json({ preferences: await saveViewerPreferences(user.id, preferences) });
+  })
+  .get('/uploaded-papers', async (c) => {
+    const user = await getCurrentUser(getCookie(c, sessionCookieName));
+    if (!user) return c.json({ error: 'Not authenticated.' }, 401);
+
+    return c.json({ papers: await loadUploadedPapers(user.id) });
+  })
+  .post('/uploaded-papers', zValidator('json', uploadedPaperSchema), async (c) => {
+    const user = await getCurrentUser(getCookie(c, sessionCookieName));
+    if (!user) return c.json({ error: 'Not authenticated.' }, 401);
+
+    return c.json({ papers: await saveUploadedPaper(user.id, c.req.valid('json')) }, 201);
   })
   .post('/signup', zValidator('json', credentialsSchema), async (c) => {
     const { email, password } = c.req.valid('json');

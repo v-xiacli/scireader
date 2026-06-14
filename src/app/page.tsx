@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
 import { mockPapers, mockUserAccount } from '@/features/papers/mock-data';
+import type { PaperSummary } from '@/types/paper';
 
 type AuthMode = 'login' | 'signup';
 type AuthUser = { id: string; email: string };
@@ -31,8 +32,20 @@ const HomePage = () => {
   const [isSessionLoading, setIsSessionLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const [uploadedPapers, setUploadedPapers] = useState<PaperSummary[]>([]);
 
   const isLoggedIn = Boolean(authUser);
+  const papers = [...uploadedPapers, ...mockPapers];
+
+  const loadUploadedPapers = async () => {
+    try {
+      const response = await fetch('/api/auth/uploaded-papers');
+      const result = await response.json();
+      setUploadedPapers(response.ok ? result.papers : []);
+    } catch {
+      setUploadedPapers([]);
+    }
+  };
 
   useEffect(() => {
     const loadSession = async () => {
@@ -40,7 +53,10 @@ const HomePage = () => {
         const response = await fetch('/api/auth/me');
         const result = await response.json();
 
-        if (response.ok && result.user) setAuthUser(result.user);
+        if (response.ok && result.user) {
+          setAuthUser(result.user);
+          await loadUploadedPapers();
+        }
       } catch {
         setAuthUser(null);
       } finally {
@@ -66,6 +82,7 @@ const HomePage = () => {
       if (!response.ok) throw new Error(result.error ?? result.message ?? 'Authentication failed.');
 
       setAuthUser(result.user);
+      await loadUploadedPapers();
       setAuthMessage(`${authMode === 'signup' ? 'Account created' : 'Logged in'} as ${result.user.email}.`);
       setPassword('');
       setUploadMessage(null);
@@ -83,6 +100,7 @@ const HomePage = () => {
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
     setAuthUser(null);
+    setUploadedPapers([]);
     setAuthMessage('Logged out.');
   };
 
@@ -115,8 +133,28 @@ const HomePage = () => {
 
       if (!response.ok) throw new Error(result.message ?? result.error ?? 'Upload failed.');
 
-      const paperId = encodeURIComponent(file.name.replace(/\.pdf$/i, '') || 'uploaded-paper');
-      router.push(`/papers/${paperId}?pdfUrl=${encodeURIComponent(normalizeDownloadUrl(result.downloadUrl))}&filePath=${encodeURIComponent(result.filePath)}&title=${encodeURIComponent(file.name)}`);
+      const paperId = file.name.replace(/\.pdf$/i, '') || 'uploaded-paper';
+      const uploadedPaper: PaperSummary = {
+        id: paperId,
+        title: file.name,
+        authors: 'Uploaded paper',
+        pages: 0,
+        status: 'uploaded',
+        abstract: 'Uploaded PDF ready for reading and chat.',
+        pdfUrl: normalizeDownloadUrl(result.downloadUrl),
+        filePath: result.filePath,
+      };
+
+      const saveResponse = await fetch('/api/auth/uploaded-papers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(uploadedPaper),
+      });
+      const saveResult = await saveResponse.json();
+
+      if (saveResponse.ok) setUploadedPapers(saveResult.papers);
+
+      router.push(`/papers/${encodeURIComponent(paperId)}?pdfUrl=${encodeURIComponent(uploadedPaper.pdfUrl)}&filePath=${encodeURIComponent(uploadedPaper.filePath ?? '')}&title=${encodeURIComponent(file.name)}`);
     } catch (error) {
       setUploadMessage(error instanceof Error ? error.message : 'Upload failed.');
     } finally {
@@ -263,14 +301,14 @@ const HomePage = () => {
           </div>
 
           <div className="mt-6 grid gap-4">
-            {mockPapers.map((paper) => {
+            {papers.map((paper) => {
               const content = (
                 <>
                   <div>
                     <h3 className="font-semibold">{paper.title}</h3>
                     <p className="mt-1 text-sm text-muted-foreground">{paper.authors}</p>
                     <p className="mt-2 text-xs uppercase tracking-wide text-muted-foreground">
-                      {paper.pages} pages · {paper.status}
+                      {paper.pages ? `${paper.pages} pages · ` : ''}{paper.status}
                     </p>
                   </div>
                   <ArrowRight className="size-5 text-muted-foreground transition group-hover:translate-x-1 group-hover:text-primary" />
@@ -280,7 +318,11 @@ const HomePage = () => {
               return isLoggedIn ? (
                 <Link
                   className="group flex items-center justify-between rounded-2xl border p-4 transition hover:border-primary hover:bg-slate-50"
-                  href={`/papers/${paper.id}`}
+                  href={
+                    paper.filePath
+                      ? `/papers/${encodeURIComponent(paper.id)}?pdfUrl=${encodeURIComponent(paper.pdfUrl)}&filePath=${encodeURIComponent(paper.filePath)}&title=${encodeURIComponent(paper.title)}`
+                      : `/papers/${paper.id}`
+                  }
                   key={paper.id}
                 >
                   {content}
