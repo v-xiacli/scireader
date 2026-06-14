@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { PaperChatContextBridge } from '@/components/chat/paper-chat-context-bridge';
 import { PdfReader } from '@/components/paper/pdf-reader';
@@ -21,18 +21,22 @@ interface PaperPageProps {
 
 const PaperPage = ({ params, searchParams }: PaperPageProps) => {
   const mockPaper = getMockPaper(params.paperId);
-  const paper = searchParams?.pdfUrl
-    ? {
-        ...mockPaper,
-        id: params.paperId,
-        title: searchParams.title ?? mockPaper.title,
-        authors: 'Uploaded paper',
-        pages: 0,
-        status: 'uploaded' as const,
-        pdfUrl: searchParams.pdfUrl,
-        filePath: searchParams.filePath,
-      }
-    : mockPaper;
+  const paper = useMemo(
+    () =>
+      searchParams?.pdfUrl
+        ? {
+            ...mockPaper,
+            id: params.paperId,
+            title: searchParams.title ?? mockPaper.title,
+            authors: 'Uploaded paper',
+            pages: 0,
+            status: 'uploaded' as const,
+            pdfUrl: searchParams.pdfUrl,
+            filePath: searchParams.filePath,
+          }
+        : mockPaper,
+    [mockPaper, params.paperId, searchParams?.filePath, searchParams?.pdfUrl, searchParams?.title],
+  );
   const [selectedText, setSelectedText] = useState<PaperSelection | null>(null);
   const didDeleteRef = useRef(false);
 

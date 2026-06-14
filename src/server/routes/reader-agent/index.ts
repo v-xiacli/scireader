@@ -1,5 +1,4 @@
 import { promises as fs } from 'node:fs';
-import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -9,7 +8,7 @@ import { zValidator } from '@hono/zod-validator';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
-import { downloadFileAsAdmin } from '@/lib/firebase/server/storage-admin';
+import { downloadFileAsAdmin, uploadFileAsAdmin } from '@/lib/firebase/server/storage-admin';
 
 type ExtractedPdfPage = {
   pageNumber: number;
@@ -39,7 +38,6 @@ const MAX_EXTRACTED_TEXT_CHARS = 140_000;
 const MAX_FIGURE_CAPTIONS = 40;
 const MAX_PAGE_IMAGES = 6;
 const PDF_RENDER_SCALE = 2;
-const require = createRequire(import.meta.url);
 
 const readerRequestSchema = z.object({
   paperId: z.string().min(1),
@@ -51,6 +49,15 @@ const readerRequestSchema = z.object({
   model: z.string().optional(),
   pdfUrl: z.string().optional(),
   title: z.string().optional(),
+  paperContextSummary: z.string().optional(),
+  conversationHistory: z
+    .array(
+      z.object({
+        role: z.enum(['user', 'assistant']),
+        content: z.string(),
+      }),
+    )
+    .optional(),
 });
 
 const imageRequestSchema = z.object({
@@ -76,7 +83,7 @@ const extractFigureCaptions = (text: string) => {
 };
 
 const getPdfjsStandardFontDataUrl = () => {
-  const pdfjsDistDir = path.dirname(require.resolve('pdfjs-dist/package.json'));
+  const pdfjsDistDir = path.join(process.cwd(), 'node_modules', 'pdfjs-dist');
   const standardFontsDir = path.join(pdfjsDistDir, 'standard_fonts');
 
   return pathToFileURL(`${standardFontsDir}${path.sep}`).href;
@@ -186,6 +193,18 @@ const materializePdfToTempFile = async (storagePath: string) => {
   await fs.writeFile(localPdfPath, buffer);
 
   return { localPdfPath, outputDir, buffer };
+};
+
+const getPaperSummaryStoragePath = (pdfStoragePath: string) => `${pdfStoragePath}.reader-summary.md`;
+
+const downloadTextIfExists = async (filePath: string) => {
+  try {
+    const { buffer } = await downloadFileAsAdmin(filePath);
+
+    return buffer.toString('utf8');
+  } catch {
+    return null;
+  }
 };
 
 const buildSystemPrompt = (hasPdfContext: boolean, hasWebSearch: boolean) => {
@@ -362,6 +381,42 @@ ${request.selectedText ? `选中文本：\n${request.selectedText}\n` : ''}${fig
 ${webSearchText}用户请求：${request.prompt}`;
 };
 
+const buildReaderSystemPrompt = (hasPdfContext: boolean, hasWebSearch: boolean) => {
+  const basePrompt = hasPdfContext
+    ? '你是 SCIReader 的论文阅读助手。请用中文回答用户问题，优先基于已提供的论文内容、论文速记、选中文本和页面截图。你擅长总结论文要点、解释方法和实验、提取公式、比较相关工作、解释图表。若论文中没有明确依据，请直接说明“论文中未明确找到”，不要编造。'
+    : '你是 SCIReader 的通用 AI 助手。请直接回答用户问题；如果用户要求写作、代码、解释、翻译或总结，请正常完成，不要假设一定有论文上下文。';
+
+  return hasWebSearch
+    ? `${basePrompt}\n用户问题涉及近期或实时信息。你会收到 Tavily Web search results，请优先基于这些结果回答，并在答案中引用相关来源 URL；如果搜索结果不足或互相矛盾，请明确说明。`
+    : basePrompt;
+};
+
+const buildReaderUserPrompt = (request: z.infer<typeof readerRequestSchema>, extractedPdf?: ExtractedPdf, webSearchResults: TavilySearchResult[] = []) => {
+  const webSearchText = webSearchResults.length ? `Tavily Web search results:\n${formatWebSearchResults(webSearchResults)}\n\n` : '';
+  const pageText = request.pageNumber ? extractedPdf?.pages.find((page) => page.pageNumber === request.pageNumber)?.text : undefined;
+  const paperContextSummary = request.paperContextSummary?.trim()
+    ? `\n已知论文速记：\n${request.paperContextSummary.trim().slice(0, 12000)}\n`
+    : '';
+  const figureCaptions = extractedPdf?.figureCaptions.length
+    ? `\n图题/图注候选：\n${extractedPdf.figureCaptions.map((caption, index) => `${index + 1}. ${caption}`).join('\n')}`
+    : '';
+  const pdfText = extractedPdf?.text
+    ? `\nPDF 提取正文：\n${request.scope === 'current-page' && pageText ? `[第 ${request.pageNumber} 页]\n${pageText}` : extractedPdf.text}`
+    : request.selectedText || request.paperContextSummary
+      ? '\nPDF 提取正文：本次未提供完整正文，请基于论文速记或选中文本回答；没有依据时说明未找到。'
+      : '';
+
+  if (!paperContextSummary && !figureCaptions && !pdfText && !request.selectedText) {
+    return `${webSearchText}用户请求：${request.prompt}`;
+  }
+
+  return `论文标题：${request.title ?? request.paperId}
+请求范围：${request.scope}
+${paperContextSummary}${request.selectedText ? `选中文本：\n${request.selectedText}\n` : ''}${figureCaptions}${pdfText}
+
+${webSearchText}用户请求：${request.prompt}`;
+};
+
 const askClaude = async (request: z.infer<typeof readerRequestSchema>) => {
   const storagePath = resolveUploadedPdfStoragePath(request.pdfUrl);
   const tempPdf = storagePath ? await materializePdfToTempFile(storagePath) : null;
@@ -383,7 +438,7 @@ const askClaude = async (request: z.infer<typeof readerRequestSchema>) => {
 
     const modelSelection = selectReaderModel(request);
     const client = createAnthropicClient(modelSelection.target);
-    const content: Anthropic.MessageParam['content'] = [{ type: 'text', text: buildUserPrompt(request, extractedPdf, webSearchResults) }];
+    const content: Anthropic.MessageParam['content'] = [{ type: 'text', text: buildReaderUserPrompt(request, extractedPdf, webSearchResults) }];
 
     for (const image of pageImages) {
       content.push({ type: 'text', text: `下面是 PDF 第 ${image.pageNumber} 页截图，请结合其中的图表进行解释。` });
@@ -414,8 +469,16 @@ const askClaude = async (request: z.infer<typeof readerRequestSchema>) => {
       model: modelSelection.model,
       max_tokens: 16000,
       cache_control: { type: 'ephemeral' },
-      system: buildSystemPrompt(Boolean(localPdfPath || extractedPdf || request.selectedText), hasWebSearch),
-      messages: [{ role: 'user', content }],
+      system: buildReaderSystemPrompt(Boolean(localPdfPath || extractedPdf || request.selectedText || request.paperContextSummary), hasWebSearch),
+      messages: [
+        ...(request.conversationHistory ?? [])
+          .slice(-8)
+          .map((message): Anthropic.MessageParam => ({
+            role: message.role,
+            content: message.content.slice(0, 4000),
+          })),
+        { role: 'user', content },
+      ],
     });
 
     return {
@@ -497,12 +560,45 @@ const app = new Hono()
   })
   .post('/summarize', zValidator('json', readerRequestSchema), async (c) => {
     const request = c.req.valid('json');
+    const storagePath = resolveUploadedPdfStoragePath(request.pdfUrl);
+    const summaryStoragePath = storagePath ? getPaperSummaryStoragePath(storagePath) : null;
 
-    return c.json({
-      summary: 'Summary placeholder for the requested paper context.',
-      scope: request.scope,
-      paperId: request.paperId,
-    });
+    try {
+      const cachedSummary = summaryStoragePath ? await downloadTextIfExists(summaryStoragePath) : null;
+
+      if (cachedSummary?.trim()) {
+        return c.json({
+          summary: cachedSummary,
+          cached: true,
+          scope: request.scope,
+          paperId: request.paperId,
+        });
+      }
+
+      const result = await askClaude({
+        ...request,
+        scope: 'whole-paper',
+        prompt:
+          request.prompt ||
+          '请用中文为这篇论文生成高密度速记：1 行主题，6-10 条核心要点，方法/数据/实验/结论/局限各尽量压缩到短句。不要写客套话。',
+      });
+      const summary = result.answer;
+
+      if (summaryStoragePath && summary.trim()) {
+        await uploadFileAsAdmin(Buffer.from(summary, 'utf8'), summaryStoragePath, 'text/markdown; charset=utf-8');
+      }
+
+      return c.json({
+        summary,
+        cached: false,
+        scope: request.scope,
+        paperId: request.paperId,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Paper summary failed.';
+
+      return c.json({ error: 'Paper summary failed.', message }, 500);
+    }
   })
   .post('/explain-selection', zValidator('json', readerRequestSchema), async (c) => {
     const request = c.req.valid('json');

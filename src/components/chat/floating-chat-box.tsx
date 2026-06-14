@@ -2,6 +2,7 @@
 
 import { Bot, CornerDownLeft, FileSearch, ImageIcon, Loader2, Quote } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
+import ReactMarkdown from 'react-markdown';
 
 import { mockMessages } from '@/features/papers/mock-data';
 import type { ChatMessage, PaperSelection, PaperSummary } from '@/types/paper';
@@ -12,11 +13,24 @@ interface FloatingChatBoxProps {
 }
 
 const defaultPosition = { x: 28, y: 96 };
-const defaultSize = { width: 460, height: 620 };
-const minSize = { width: 340, height: 420 };
+const defaultSize = { width: 560, height: 620 };
+const minSize = { width: 380, height: 420 };
 const edgePadding = 8;
 
 type ResizeHandle = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+type ConversationTurn = Pick<ChatMessage, 'role' | 'content'>;
+
+const compactPaperSummaryPrompt =
+  '请用中文为这篇论文生成高密度速记，适合显示在窄聊天框里：1 行主题；6-10 条核心要点，每条不超过 28 个汉字；再给出方法/数据/实验/结论/局限各一条短句。不要客套话。';
+
+const buildConversationHistory = (messages: ChatMessage[]): ConversationTurn[] =>
+  messages
+    .filter((message) => message.content && message.contextLabel !== 'Paper brief' && !message.imageBase64 && !message.imageUrl && message.content !== 'Analyzing...' && message.content !== 'Generating image...')
+    .slice(-8)
+    .map((message) => ({
+      role: message.role,
+      content: message.content.slice(0, 2000),
+    }));
 
 export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingChatBoxProps) => {
   const dragOffsetRef = useRef(defaultPosition);
@@ -30,7 +44,11 @@ export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingC
   const [isResizing, setIsResizing] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [isImageMode, setIsImageMode] = useState(false);
+  const [paperContextSummary, setPaperContextSummary] = useState('');
   const hasPaper = Boolean(paper);
+  const paperId = paper?.id;
+  const paperPdfUrl = paper?.pdfUrl;
+  const paperTitle = paper?.title;
 
   const askReaderAgent = useCallback(
     async (prompt: string, scope: 'whole-paper' | 'selected-text' = 'whole-paper') => {
@@ -38,13 +56,15 @@ export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingC
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          paperId: paper?.id ?? 'general-chat',
-          pdfUrl: paper?.pdfUrl,
-          title: paper?.title ?? 'SCIReader',
+          paperId: paperId ?? 'general-chat',
+          pdfUrl: paperPdfUrl,
+          title: paperTitle ?? 'SCIReader',
           prompt,
           scope,
           selectedText: selectedText?.text,
           pageNumber: selectedText?.pageNumber,
+          paperContextSummary,
+          conversationHistory: buildConversationHistory(messages),
         }),
       });
       const result = await response.json();
@@ -53,8 +73,29 @@ export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingC
 
       return result.answer as string;
     },
-    [paper?.id, paper?.pdfUrl, paper?.title, selectedText],
+    [messages, paperId, paperPdfUrl, paperTitle, paperContextSummary, selectedText],
   );
+
+  const summarizePaper = useCallback(async () => {
+    if (!paperId || !paperPdfUrl) return '';
+
+    const response = await fetch('/api/reader-agent/summarize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        paperId,
+        pdfUrl: paperPdfUrl,
+        title: paperTitle,
+        prompt: compactPaperSummaryPrompt,
+        scope: 'whole-paper',
+      }),
+    });
+    const result = await response.json();
+
+    if (!response.ok) throw new Error(result.message ?? result.error ?? 'Paper summary failed.');
+
+    return result.summary as string;
+  }, [paperId, paperPdfUrl, paperTitle]);
 
   const generateImage = useCallback(
     async (prompt: string) => {
@@ -63,8 +104,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingC
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt,
-          paperId: paper?.id,
-          title: paper?.title,
+          paperId,
+          title: paperTitle,
           selectedText: selectedText?.text,
         }),
       });
@@ -74,12 +115,60 @@ export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingC
 
       return result as { answer: string; imageUrl?: string; imageBase64?: string; prompt: string };
     },
-    [paper?.id, paper?.title, selectedText?.text],
+    [paperId, paperTitle, selectedText?.text],
   );
 
   useEffect(() => {
-    setMessages(mockMessages);
-  }, [paper?.id]);
+    if (!paperId || !paperPdfUrl) {
+      setPaperContextSummary('');
+      setMessages(mockMessages);
+      return;
+    }
+
+    let isActive = true;
+    const loadingId = crypto.randomUUID();
+
+    setPaperContextSummary('');
+    setMessages([
+      {
+        id: loadingId,
+        role: 'assistant',
+        content: '正在生成论文要点...',
+        contextLabel: 'Paper brief',
+      },
+    ]);
+
+    summarizePaper()
+      .then((summary) => {
+        if (!isActive) return;
+
+        setPaperContextSummary(summary);
+        setMessages([
+          {
+            id: loadingId,
+            role: 'assistant',
+            content: summary,
+            contextLabel: 'Paper brief',
+          },
+        ]);
+      })
+      .catch((error) => {
+        if (!isActive) return;
+
+        setMessages([
+          {
+            id: loadingId,
+            role: 'assistant',
+            content: error instanceof Error ? error.message : '论文要点生成失败，可以直接提问，我会读取论文回答。',
+            contextLabel: 'Paper brief',
+          },
+        ]);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [paperId, paperPdfUrl, summarizePaper]);
 
   const startDragging = (event: PointerEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
@@ -218,60 +307,75 @@ export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingC
 
   return (
     <aside
-      className="fixed z-50 flex max-w-[calc(100vw-1rem)] flex-col rounded-3xl border bg-white/95 shadow-2xl backdrop-blur"
+      className="fixed z-50 flex max-w-[calc(100vw-1rem)] flex-col rounded-2xl border bg-white/95 shadow-2xl backdrop-blur"
       style={{ left: position.x, top: position.y, width: size.width, height: size.height }}
     >
       <header
-        className={isDragging ? 'cursor-grabbing border-b p-5' : 'cursor-grab border-b p-5'}
+        className={isDragging ? 'cursor-grabbing border-b p-3' : 'cursor-grab border-b p-3'}
         onPointerDown={startDragging}
         onPointerMove={drag}
         onPointerUp={stopDragging}
       >
         <div className="flex items-center justify-between">
           <div className="min-w-0">
-            <p className="text-sm font-medium uppercase tracking-wide text-primary">AI reader</p>
-            <h2 className="mt-1 text-xl font-semibold">{hasPaper ? 'Paper chat' : 'SCIReader chat'}</h2>
+            <p className="text-xs font-medium uppercase tracking-wide text-primary">AI reader</p>
+            <h2 className="mt-0.5 text-base font-semibold">{hasPaper ? 'Paper chat' : 'SCIReader chat'}</h2>
             <p className="mt-1 truncate text-xs text-muted-foreground">{paper?.title ?? 'Ask without opening a paper'}</p>
           </div>
-          <div className="rounded-2xl bg-primary/10 p-3 text-primary">
-            <Bot className="size-6" />
+          <div className="rounded-xl bg-primary/10 p-2 text-primary">
+            <Bot className="size-5" />
           </div>
         </div>
-        <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
-          <button className="rounded-xl border p-2 hover:bg-slate-50" disabled={!hasPaper} type="button"><FileSearch className="mx-auto mb-1 size-4" />Paper</button>
-          <button className="rounded-xl border p-2 hover:bg-slate-50" disabled={!selectedText} type="button"><Quote className="mx-auto mb-1 size-4" />Selection</button>
+        <div className="mt-3 grid grid-cols-3 gap-1.5 text-xs">
+          <button className="rounded-lg border p-1.5 hover:bg-slate-50" disabled={!hasPaper} type="button"><FileSearch className="mx-auto mb-0.5 size-4" />Paper</button>
+          <button className="rounded-lg border p-1.5 hover:bg-slate-50" disabled={!selectedText} type="button"><Quote className="mx-auto mb-0.5 size-4" />Selection</button>
           <button
-            className={isImageMode ? 'rounded-xl border border-primary bg-primary/10 p-2 text-primary' : 'rounded-xl border p-2 hover:bg-slate-50'}
+            className={isImageMode ? 'rounded-lg border border-primary bg-primary/10 p-1.5 text-primary' : 'rounded-lg border p-1.5 hover:bg-slate-50'}
             onClick={() => setIsImageMode((current) => !current)}
             type="button"
           >
-            <ImageIcon className="mx-auto mb-1 size-4" />Image
+            <ImageIcon className="mx-auto mb-0.5 size-4" />Image
           </button>
         </div>
       </header>
 
       {selectedText && !isImageMode ? (
-        <div className="border-b bg-blue-50 p-4 text-sm">
+        <div className="border-b bg-blue-50 p-3 text-xs">
           <p className="font-medium text-blue-900">Selected text context</p>
-          <p className="mt-2 line-clamp-4 text-blue-800">{selectedText.text}</p>
+          <p className="mt-1 line-clamp-3 text-blue-800">{selectedText.text}</p>
         </div>
       ) : null}
 
-      <div className="min-h-0 flex-1 space-y-4 overflow-auto p-5">
+      <div className="min-h-0 flex-1 space-y-2 overflow-auto p-3">
         {messages.map((message) => (
-          <div className={message.role === 'user' ? 'ml-auto max-w-[85%] rounded-2xl bg-primary p-4 text-primary-foreground' : 'mr-auto max-w-[85%] rounded-2xl bg-slate-100 p-4'} key={message.id}>
-            {message.contextLabel ? <p className="mb-2 text-xs opacity-70">{message.contextLabel}</p> : null}
+          <div className={message.role === 'user' ? 'ml-auto max-w-[92%] rounded-xl bg-primary p-2.5 text-primary-foreground' : 'mr-auto max-w-[96%] rounded-xl bg-slate-100 p-2.5'} key={message.id}>
+            {message.contextLabel ? <p className="mb-1 text-[11px] opacity-70">{message.contextLabel}</p> : null}
             {message.imageUrl || message.imageBase64 ? (
-              <img alt={message.imageAlt ?? 'Generated image'} className="mb-3 max-h-80 w-full rounded-xl object-contain" src={message.imageUrl ?? message.imageBase64} />
+              <img alt={message.imageAlt ?? 'Generated image'} className="mb-2 max-h-80 w-full rounded-lg object-contain" src={message.imageUrl ?? message.imageBase64} />
             ) : null}
-            <p className="whitespace-pre-wrap break-words text-sm leading-6">{message.content}</p>
+            <div className="max-w-none break-words text-xs leading-5">
+              <ReactMarkdown
+                components={{
+                  p: ({ children }) => <p className="my-1 whitespace-pre-wrap">{children}</p>,
+                  li: ({ children }) => <li className="my-0.5 pl-0">{children}</li>,
+                  ul: ({ children }) => <ul className="my-1 list-disc space-y-0 pl-4">{children}</ul>,
+                  ol: ({ children }) => <ol className="my-1 list-decimal space-y-0 pl-4">{children}</ol>,
+                  h1: ({ children }) => <h1 className="my-1 text-sm font-semibold">{children}</h1>,
+                  h2: ({ children }) => <h2 className="my-1 text-sm font-semibold">{children}</h2>,
+                  h3: ({ children }) => <h3 className="my-1 text-xs font-semibold">{children}</h3>,
+                  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                }}
+              >
+                {message.content}
+              </ReactMarkdown>
+            </div>
           </div>
         ))}
       </div>
 
-      <footer className="border-t p-4">
+      <footer className="border-t p-3">
         <textarea
-          className="max-h-64 min-h-28 w-full resize-y rounded-2xl border bg-slate-50 p-3 text-sm outline-none focus:border-primary"
+          className="max-h-48 min-h-20 w-full resize-y rounded-xl border bg-slate-50 p-2.5 text-sm outline-none focus:border-primary"
           disabled={isThinking}
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={(event) => {
@@ -281,7 +385,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingC
           value={input}
         />
         <button
-          className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
+          className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
           disabled={isThinking}
           onClick={() => void sendMessage()}
           type="button"

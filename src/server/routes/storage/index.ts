@@ -9,6 +9,12 @@ import {
 } from '@/lib/firebase/server/storage-admin';
 import { getUserStoragePrefix } from '@/lib/storage-paths';
 
+const deleteStoredFile = async (filePath: string) => {
+  await deleteFileAsAdmin(filePath);
+
+  return { message: 'File deleted successfully' };
+};
+
 const app = new Hono()
   .post('/upload/private', async (c) => {
     try {
@@ -68,12 +74,20 @@ const app = new Hono()
       return c.json({ error: 'File not found or could not be downloaded' }, 404);
     }
   })
+  .post('/:filePath{.+}', async (c) => {
+    try {
+      const filePath = c.req.param('filePath');
+
+      return c.json(await deleteStoredFile(filePath));
+    } catch {
+      return c.json({ error: 'Could not delete file' }, 500);
+    }
+  })
   .delete('/:filePath{.+}', async (c) => {
     try {
       const filePath = c.req.param('filePath');
-      await deleteFileAsAdmin(filePath);
 
-      return c.json({ message: 'File deleted successfully' });
+      return c.json(await deleteStoredFile(filePath));
     } catch {
       return c.json({ error: 'Could not delete file' }, 500);
     }
