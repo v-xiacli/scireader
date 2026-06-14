@@ -132,7 +132,6 @@ const HomePage = () => {
           title: paper.title,
           journal: paper.journal,
           year: paper.year,
-          volume: paper.volume,
           prompt: '请总结这篇文档',
         }),
       });
@@ -218,7 +217,7 @@ const HomePage = () => {
 
       await estimateTokenConsumption(uploadedPaper);
 
-      router.push(`/papers/${encodeURIComponent(paperId)}?pdfUrl=${encodeURIComponent(uploadedPaper.pdfUrl)}&filePath=${encodeURIComponent(uploadedPaper.filePath ?? '')}&title=${encodeURIComponent(uploadedPaper.title)}&authors=${encodeURIComponent(uploadedPaper.authors)}&journal=${encodeURIComponent(uploadedPaper.journal ?? '')}&year=${encodeURIComponent(uploadedPaper.year ?? '')}&volume=${encodeURIComponent(uploadedPaper.volume ?? '')}`);
+      router.push(`/papers/${encodeURIComponent(paperId)}?pdfUrl=${encodeURIComponent(uploadedPaper.pdfUrl)}&filePath=${encodeURIComponent(uploadedPaper.filePath ?? '')}&title=${encodeURIComponent(uploadedPaper.title)}&authors=${encodeURIComponent(uploadedPaper.authors)}&journal=${encodeURIComponent(uploadedPaper.journal ?? '')}&year=${encodeURIComponent(uploadedPaper.year ?? '')}`);
     } catch (error) {
       setUploadMessage(error instanceof Error ? error.message : 'Upload failed.');
     } finally {
@@ -383,7 +382,7 @@ const HomePage = () => {
                 <>
                   <div>
                     <h3 className="font-semibold">{paper.title}</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">{paper.journal ? [paper.journal, paper.year, paper.volume].filter(Boolean).join(' · ') : paper.authors}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{paper.journal ? [paper.journal, paper.year].filter(Boolean).join(' · ') : paper.authors}</p>
                     <p className="mt-2 text-xs uppercase tracking-wide text-muted-foreground">
                       {paper.pages ? `${paper.pages} pages · ` : ''}{paper.status}
                     </p>
@@ -397,7 +396,7 @@ const HomePage = () => {
                   className="group flex items-center justify-between rounded-2xl border p-4 transition hover:border-primary hover:bg-slate-50"
                   href={
                     paper.filePath
-                      ? `/papers/${encodeURIComponent(paper.id)}?pdfUrl=${encodeURIComponent(paper.pdfUrl)}&filePath=${encodeURIComponent(paper.filePath)}&title=${encodeURIComponent(paper.title)}&authors=${encodeURIComponent(paper.authors)}&journal=${encodeURIComponent(paper.journal ?? '')}&year=${encodeURIComponent(paper.year ?? '')}&volume=${encodeURIComponent(paper.volume ?? '')}`
+                      ? `/papers/${encodeURIComponent(paper.id)}?pdfUrl=${encodeURIComponent(paper.pdfUrl)}&filePath=${encodeURIComponent(paper.filePath)}&title=${encodeURIComponent(paper.title)}&authors=${encodeURIComponent(paper.authors)}&journal=${encodeURIComponent(paper.journal ?? '')}&year=${encodeURIComponent(paper.year ?? '')}`
                       : `/papers/${paper.id}`
                   }
                   key={paper.id}

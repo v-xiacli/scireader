@@ -10,6 +10,7 @@ import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 
 import { downloadFileAsAdmin, downloadTextAsAdmin, uploadFileAsAdmin, uploadTextAsAdmin } from '@/lib/firebase/server/storage-admin';
+import { getUserStoragePrefix } from '@/lib/storage-paths';
 import { getCurrentUser, loadUploadedPapers, sessionCookieName } from '@/server/routes/auth';
 
 type ExtractedPdfPage = {
@@ -54,6 +55,8 @@ type StoredDialogTurn = {
   createdAt: string;
   model?: string;
   routedBy?: 'cheap-context' | 'expensive-reader';
+  inputTokens?: number;
+  outputTokens?: number;
 };
 
 type CheapTriageResult = {
@@ -81,7 +84,6 @@ const readerRequestSchema = z.object({
   authors: z.string().optional(),
   journal: z.string().optional(),
   year: z.string().optional(),
-  volume: z.string().optional(),
   paperContextSummary: z.string().optional(),
   conversationHistory: z
     .array(
@@ -107,7 +109,6 @@ const tokenEstimateRequestSchema = z.object({
   title: z.string().optional(),
   journal: z.string().optional(),
   year: z.string().optional(),
-  volume: z.string().optional(),
   prompt: z.string().optional(),
   model: z.string().optional(),
 });
@@ -234,6 +235,8 @@ const resolveUploadedPdfStoragePath = (pdfUrl?: string) => {
   return storagePath;
 };
 
+const isPendingUserUpload = (user: { id: string; email: string }, storagePath: string) => storagePath.startsWith(getUserStoragePrefix({ id: user.id, name: user.email }));
+
 const requirePaperAccess = async (c: Context, pdfUrl?: string): Promise<PaperAccess> => {
   const user = await getCurrentUser(getCookie(c, sessionCookieName));
 
@@ -244,7 +247,7 @@ const requirePaperAccess = async (c: Context, pdfUrl?: string): Promise<PaperAcc
   if (!storagePath) return { user, storagePath };
 
   const uploadedPapers = await loadUploadedPapers(user.id);
-  const canAccessPaper = uploadedPapers.some((paper) => paper.filePath === storagePath);
+  const canAccessPaper = uploadedPapers.some((paper) => paper.filePath === storagePath) || isPendingUserUpload(user, storagePath);
 
   if (!canAccessPaper) throw new Error('You do not have access to this PDF.');
 
@@ -702,6 +705,8 @@ const askClaude = async (request: z.infer<typeof readerRequestSchema>, forcedMod
       answer: textFromResponse(response),
       webSearchResults,
       model: modelSelection.model,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
     };
   } finally {
     if (tempPdf) await fs.rm(tempPdf.outputDir, { recursive: true, force: true });
@@ -739,6 +744,32 @@ const generateImage = async (request: z.infer<typeof imageRequestSchema>) => {
   };
 };
 
+const extractJsonObject = (text: string) => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('Cheap triage returned invalid JSON.');
+
+    return JSON.parse(match[0]);
+  }
+};
+
+const parseCheapTriageResult = (text: string): CheapTriageResult => {
+  const parsed = extractJsonObject(text) as Partial<CheapTriageResult>;
+  const contextSummary = typeof parsed.contextSummary === 'string' ? parsed.contextSummary : '';
+
+  if (parsed.sufficient === true && typeof parsed.answerDraft === 'string' && parsed.answerDraft.trim()) {
+    return { sufficient: true, contextSummary, answerDraft: parsed.answerDraft };
+  }
+
+  if (parsed.sufficient === false && typeof parsed.expensivePrompt === 'string' && parsed.expensivePrompt.trim()) {
+    return { sufficient: false, contextSummary, expensivePrompt: parsed.expensivePrompt };
+  }
+
+  throw new Error('Cheap triage returned incomplete JSON.');
+};
+
 const triageWithCheapModel = async (request: z.infer<typeof readerRequestSchema>, cachedSummary: string, storedHistory: StoredDialogTurn[]) => {
   const modelSelection = selectCheapTriageModel();
   const client = createAnthropicClient(modelSelection.target);
@@ -756,11 +787,13 @@ const triageWithCheapModel = async (request: z.infer<typeof readerRequestSchema>
     ],
   });
   const text = textFromResponse(response).trim();
-  const parsed = JSON.parse(text) as CheapTriageResult;
+  const parsed = parseCheapTriageResult(text);
 
   return {
     result: parsed,
     model: modelSelection.model,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
   };
 };
 
@@ -801,7 +834,29 @@ const estimateTokenConsumption = async (request: z.infer<typeof tokenEstimateReq
   };
 };
 
-const app = new Hono()
+  .get('/history', async (c) => {
+    const paperId = c.req.query('paperId');
+    const title = c.req.query('title');
+    const authors = c.req.query('authors');
+    const journal = c.req.query('journal');
+    const year = c.req.query('year');
+    const pdfUrl = c.req.query('pdfUrl');
+
+    if (!paperId) return c.json({ error: 'paperId is required.' }, 400);
+
+    try {
+      const { user } = await requirePaperAccess(c, pdfUrl);
+      const paperKey = getPaperIdentitySlug({ paperId, title, authors, journal, year });
+      const history = await loadDialogHistory(user.id, paperKey);
+
+      return c.json({ history });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Paper history failed.';
+      const status = message === 'Not authenticated.' ? 401 : message === 'You do not have access to this PDF.' ? 403 : 500;
+
+      return c.json({ error: 'Paper history failed.', message }, status);
+    }
+  })
   .post('/metadata', zValidator('json', metadataRequestSchema), async (c) => {
     const request = c.req.valid('json');
 
@@ -861,6 +916,8 @@ const app = new Hono()
             createdAt: now,
             model: triage.model,
             routedBy: 'cheap-context',
+            inputTokens: triage.inputTokens,
+            outputTokens: triage.outputTokens,
           },
         ]);
 
@@ -872,6 +929,7 @@ const app = new Hono()
           paperId: request.paperId,
           routedBy: 'cheap-context',
           contextSummary: triage.result.contextSummary,
+          usage: { inputTokens: triage.inputTokens, outputTokens: triage.outputTokens },
         });
       }
 
@@ -893,6 +951,8 @@ const app = new Hono()
           createdAt: now,
           model: expensiveResult.model,
           routedBy: 'expensive-reader',
+          inputTokens: triage.inputTokens + expensiveResult.inputTokens,
+          outputTokens: triage.outputTokens + expensiveResult.outputTokens,
         },
       ]);
 
@@ -908,6 +968,10 @@ const app = new Hono()
         paperId: request.paperId,
         routedBy: 'expensive-reader',
         contextSummary: triage.result.contextSummary,
+        usage: {
+          inputTokens: triage.inputTokens + expensiveResult.inputTokens,
+          outputTokens: triage.outputTokens + expensiveResult.outputTokens,
+        },
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Reader agent failed.';

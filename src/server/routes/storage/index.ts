@@ -1,13 +1,14 @@
+import { getCookie } from 'hono/cookie';
 import { Hono } from 'hono';
 
 import {
   buildProxyDownloadUrl,
-  deleteFileAsAdmin,
   downloadFileAsAdmin,
   generateSignedUrl,
   uploadFileAsAdmin,
 } from '@/lib/firebase/server/storage-admin';
 import { getUserStoragePrefix } from '@/lib/storage-paths';
+import { getCurrentUser, sessionCookieName } from '@/server/routes/auth';
 
 const delayedDeleteTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const delayedDeleteMs = Number(process.env.UPLOADED_PDF_DELETE_DELAY_MS ?? 24 * 60 * 60 * 1000);
@@ -46,7 +47,10 @@ const app = new Hono()
       if (clientFilePath.includes('..')) return c.json({ error: 'Invalid file path provided.' }, 400);
       if (file.type !== 'application/pdf') return c.json({ error: 'Only PDF uploads are supported.' }, 400);
 
-      const finalPath = `${getUserStoragePrefix(null)}${clientFilePath}`;
+      const user = await getCurrentUser(getCookie(c, sessionCookieName));
+      if (!user) return c.json({ error: 'Not authenticated.' }, 401);
+
+      const finalPath = `${getUserStoragePrefix({ id: user.id, name: user.email })}${clientFilePath}`;
       const buffer = Buffer.from(await file.arrayBuffer());
 
       await uploadFileAsAdmin(buffer, finalPath, file.type);

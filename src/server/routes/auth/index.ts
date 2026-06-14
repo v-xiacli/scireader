@@ -43,7 +43,6 @@ const uploadedPaperSchema = z.object({
   filePath: z.string(),
   journal: z.string().optional(),
   year: z.string().optional(),
-  volume: z.string().optional(),
 });
 
 const uploadedPapersSchema = z.array(uploadedPaperSchema);
