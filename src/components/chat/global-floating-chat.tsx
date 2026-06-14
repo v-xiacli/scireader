@@ -41,19 +41,24 @@ export const GlobalFloatingChat = () => {
     void loadSession();
   }, []);
 
-  const saveLayout = useCallback((layout: { position: { x: number; y: number }; size: { width: number; height: number } }) => {
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+  const saveLayout = useCallback(
+    (layout: { position: { x: number; y: number }; size: { width: number; height: number } }) => {
+      if (!isAuthenticated) return;
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
 
-    saveTimeoutRef.current = setTimeout(() => {
-      void fetch('/api/auth/viewer-preferences', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatPosition: layout.position, chatSize: layout.size }),
-      });
-    }, 400);
-  }, []);
+      saveTimeoutRef.current = setTimeout(() => {
+        void fetch('/api/auth/viewer-preferences', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chatPosition: layout.position, chatSize: layout.size }),
+        });
+      }, 400);
+    },
+    [isAuthenticated],
+  );
 
-  if (isSessionLoading || !isAuthenticated) return null;
+  if (isSessionLoading && !paper) return null;
+  if (!isAuthenticated && !paper) return null;
 
   return <FloatingChatBox initialPosition={preferences?.chatPosition} initialSize={preferences?.chatSize} onLayoutChange={saveLayout} paper={paper ?? undefined} selectedText={selectedText} />;
 };
