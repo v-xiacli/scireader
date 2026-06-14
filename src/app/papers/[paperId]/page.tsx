@@ -63,14 +63,14 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
   }, [paper.filePath]);
 
   return (
-    <main className="flex h-screen flex-col gap-4 px-4 pb-4 pt-10">
-      <nav className="flex items-center justify-between rounded-3xl bg-white px-5 py-3 shadow-sm">
+    <main className="relative h-screen overflow-hidden p-1">
+      <nav className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-4 rounded-2xl bg-white/90 px-4 py-2 shadow-sm backdrop-blur">
         <Link className="text-sm font-medium text-primary" href="/">
           ← Paper library
         </Link>
         <div className="text-sm text-muted-foreground">PDF viewer + large floating chat</div>
       </nav>
-      <div className="relative flex min-h-0 flex-1 justify-center overflow-hidden">
+      <div className="flex h-full min-h-0 justify-center overflow-hidden">
         <PdfReader onSelectionChange={setSelectedText} paper={paper} />
         <PaperChatContextBridge paper={paper} selectedText={selectedText} />
       </div>
