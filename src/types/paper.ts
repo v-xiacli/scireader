@@ -1,4 +1,4 @@
-export interface PaperSummary {
+﻿export interface PaperSummary {
   id: string;
   title: string;
   authors: string;
@@ -6,6 +6,7 @@ export interface PaperSummary {
   status: 'indexed' | 'processing' | 'uploaded';
   abstract: string;
   pdfUrl: string;
+  filePath?: string;
 }
 
 export interface UserAccountSummary {

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { ArrowRight, FileText, Loader2, MessageSquareText, WalletCards } from 'lucide-react';
 import Link from 'next/link';
@@ -125,7 +125,7 @@ const HomePage = () => {
                   <h3 className="font-semibold">{paper.title}</h3>
                   <p className="mt-1 text-sm text-muted-foreground">{paper.authors}</p>
                   <p className="mt-2 text-xs uppercase tracking-wide text-muted-foreground">
-                    {paper.pages} pages · {paper.status}
+                    {paper.pages} pages 路 {paper.status}
                   </p>
                 </div>
                 <ArrowRight className="size-5 text-muted-foreground transition group-hover:translate-x-1 group-hover:text-primary" />
@@ -139,3 +139,4 @@ const HomePage = () => {
 };
 
 export default HomePage;
+
