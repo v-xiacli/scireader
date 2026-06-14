@@ -1,15 +1,26 @@
-﻿import { randomBytes, scrypt as scryptCallback } from 'crypto';
+﻿import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
 
 import { zValidator } from '@hono/zod-validator';
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { z } from 'zod';
 
-import { ensureUserTable, getSql } from '@/server/db';
+import { ensureAuthTables, getSql } from '@/server/db';
 
 const scrypt = promisify(scryptCallback);
+const sessionCookieName = 'sci_session';
+const sessionMaxAgeSeconds = 60 * 60 * 24 * 30;
 
-const signupSchema = z.object({
+type UserRow = {
+  id: string;
+  email: string;
+  password_hash: string;
+  created_at: string;
+};
+
+const credentialsSchema = z.object({
   email: z.string().trim().email().max(254),
   password: z.string().min(8).max(128),
 });
@@ -21,29 +32,134 @@ const hashPassword = async (password: string) => {
   return `scrypt:${salt}:${derivedKey.toString('hex')}`;
 };
 
-const app = new Hono().post('/signup', zValidator('json', signupSchema), async (c) => {
-  const { email, password } = c.req.valid('json');
-  const normalizedEmail = email.toLowerCase();
+const verifyPassword = async (password: string, storedHash: string) => {
+  const [algorithm, salt, key] = storedHash.split(':');
+  if (algorithm !== 'scrypt' || !salt || !key) return false;
 
-  try {
-    await ensureUserTable();
+  const derivedKey = (await scrypt(password, salt, 64)) as Buffer;
+  const storedKey = Buffer.from(key, 'hex');
 
-    const passwordHash = await hashPassword(password);
-    const rows = await getSql()`
-      INSERT INTO users (email, password_hash)
-      VALUES (${normalizedEmail}, ${passwordHash})
-      RETURNING id, email, created_at
-    `;
+  return storedKey.length === derivedKey.length && timingSafeEqual(storedKey, derivedKey);
+};
 
-    return c.json({ user: rows[0] }, 201);
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('duplicate key')) {
-      return c.json({ error: 'An account with this email already exists.' }, 409);
+const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
+
+const createSession = async (userId: string) => {
+  const token = randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + sessionMaxAgeSeconds * 1000);
+
+  await getSql()`
+    INSERT INTO sessions (user_id, token_hash, expires_at)
+    VALUES (${userId}, ${hashToken(token)}, ${expiresAt.toISOString()})
+  `;
+
+  return token;
+};
+
+const setSessionCookie = (c: Context, token: string) => {
+  setCookie(c, sessionCookieName, token, {
+    httpOnly: true,
+    maxAge: sessionMaxAgeSeconds,
+    path: '/',
+    sameSite: 'Lax',
+    secure: process.env.NODE_ENV === 'production',
+  });
+};
+
+const getCurrentUser = async (token: string | undefined) => {
+  if (!token) return null;
+
+  await ensureAuthTables();
+
+  const rows = (await getSql()`
+    SELECT users.id, users.email, users.created_at
+    FROM sessions
+    JOIN users ON users.id = sessions.user_id
+    WHERE sessions.token_hash = ${hashToken(token)}
+      AND sessions.expires_at > now()
+    LIMIT 1
+  `) as Array<{ id: string; email: string; created_at: string }>;
+
+  return rows[0] ?? null;
+};
+
+const app = new Hono()
+  .get('/me', async (c) => {
+    try {
+      const user = await getCurrentUser(getCookie(c, sessionCookieName));
+      return c.json({ user });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not load session.';
+      return c.json({ error: 'Could not load session.', message }, 500);
+    }
+  })
+  .post('/signup', zValidator('json', credentialsSchema), async (c) => {
+    const { email, password } = c.req.valid('json');
+    const normalizedEmail = email.toLowerCase();
+
+    try {
+      await ensureAuthTables();
+
+      const passwordHash = await hashPassword(password);
+      const rows = (await getSql()`
+        INSERT INTO users (email, password_hash)
+        VALUES (${normalizedEmail}, ${passwordHash})
+        RETURNING id, email, created_at
+      `) as Array<{ id: string; email: string; created_at: string }>;
+      const token = await createSession(rows[0].id);
+      setSessionCookie(c, token);
+
+      return c.json({ user: rows[0] }, 201);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('duplicate key')) {
+        return c.json({ error: 'An account with this email already exists.' }, 409);
+      }
+
+      const message = error instanceof Error ? error.message : 'Signup failed.';
+      return c.json({ error: 'Signup failed.', message }, 500);
+    }
+  })
+  .post('/login', zValidator('json', credentialsSchema), async (c) => {
+    const { email, password } = c.req.valid('json');
+    const normalizedEmail = email.toLowerCase();
+
+    try {
+      await ensureAuthTables();
+
+      const rows = (await getSql()`
+        SELECT id, email, password_hash, created_at
+        FROM users
+        WHERE email = ${normalizedEmail}
+        LIMIT 1
+      `) as UserRow[];
+      const user = rows[0];
+
+      if (!user || !(await verifyPassword(password, user.password_hash))) {
+        return c.json({ error: 'Invalid email or password.' }, 401);
+      }
+
+      const token = await createSession(user.id);
+      setSessionCookie(c, token);
+
+      return c.json({ user: { id: user.id, email: user.email, created_at: user.created_at } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Login failed.';
+      return c.json({ error: 'Login failed.', message }, 500);
+    }
+  })
+  .post('/logout', async (c) => {
+    const token = getCookie(c, sessionCookieName);
+
+    if (token) {
+      try {
+        await ensureAuthTables();
+        await getSql()`DELETE FROM sessions WHERE token_hash = ${hashToken(token)}`;
+      } catch {}
     }
 
-    const message = error instanceof Error ? error.message : 'Signup failed.';
-    return c.json({ error: 'Signup failed.', message }, 500);
-  }
-});
+    deleteCookie(c, sessionCookieName, { path: '/' });
+    return c.json({ success: true });
+  });
 
 export default app;
+

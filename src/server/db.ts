@@ -14,7 +14,7 @@ export const getSql = () => {
   return client;
 };
 
-export const ensureUserTable = async () => {
+export const ensureAuthTables = async () => {
   if (initialized) return;
 
   await getSql()`
@@ -24,6 +24,16 @@ export const ensureUserTable = async () => {
       password_hash TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+
+  await getSql()`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `;
 
