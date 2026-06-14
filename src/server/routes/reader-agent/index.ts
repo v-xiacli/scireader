@@ -747,12 +747,34 @@ const generateImage = async (request: z.infer<typeof imageRequestSchema>) => {
 const extractJsonObject = (text: string) => {
   try {
     return JSON.parse(text);
-  } catch {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error('Cheap triage returned invalid JSON.');
+  } catch {}
 
-    return JSON.parse(match[0]);
+  const fencedMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+
+  if (fencedMatch?.[1]) {
+    try {
+      return JSON.parse(fencedMatch[1]);
+    } catch {}
   }
+
+  for (let start = text.indexOf('{'); start >= 0; start = text.indexOf('{', start + 1)) {
+    let depth = 0;
+
+    for (let index = start; index < text.length; index += 1) {
+      if (text[index] === '{') depth += 1;
+      if (text[index] === '}') depth -= 1;
+
+      if (depth === 0) {
+        try {
+          return JSON.parse(text.slice(start, index + 1));
+        } catch {
+          break;
+        }
+      }
+    }
+  }
+
+  throw new Error('Cheap triage returned invalid JSON.');
 };
 
 const parseCheapTriageResult = (text: string): CheapTriageResult => {
@@ -905,7 +927,23 @@ const app = new Hono()
       const summaryStoragePath = getPaperSummaryStoragePath(request, resolveUploadedPdfStoragePath(request.pdfUrl));
       const cachedSummary = (await downloadTextIfExists(summaryStoragePath)) ?? '';
       const storedHistory = await loadDialogHistory(user.id, paperKey);
-      const triage = await triageWithCheapModel(request, cachedSummary, storedHistory);
+      let triage;
+
+      try {
+        triage = await triageWithCheapModel(request, cachedSummary, storedHistory);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Cheap triage failed.';
+        triage = {
+          result: {
+            sufficient: false,
+            contextSummary: '',
+            expensivePrompt: `${request.prompt}\n\n低成本上下文检索失败：${message}`,
+          },
+          model: 'cheap-triage-failed',
+          inputTokens: 0,
+          outputTokens: 0,
+        };
+      }
       const now = new Date().toISOString();
 
       if (triage.result.sufficient && triage.result.answerDraft?.trim()) {
