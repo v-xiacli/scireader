@@ -2,7 +2,7 @@
 const nextConfig = {
   output: 'standalone',
   experimental: {
-    serverComponentsExternalPackages: ['pdfjs-dist', 'pdf-poppler'],
+    serverComponentsExternalPackages: ['pdfjs-dist', '@napi-rs/canvas'],
   },
 };
 

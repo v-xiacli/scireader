@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { Bot, CornerDownLeft, FileSearch, ImageIcon, Loader2, Quote } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
@@ -22,7 +22,6 @@ export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingC
   const dragOffsetRef = useRef(defaultPosition);
   const resizeStartRef = useRef({ x: 0, y: 0, width: defaultSize.width, height: defaultSize.height, left: defaultPosition.x, top: defaultPosition.y });
   const resizeHandleRef = useRef<ResizeHandle>('bottom-right');
-  const hasRequestedAnalysisRef = useRef(false);
   const [messages, setMessages] = useState<ChatMessage[]>(mockMessages);
   const [input, setInput] = useState('');
   const [position, setPosition] = useState(defaultPosition);
@@ -78,47 +77,9 @@ export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingC
     [paper?.id, paper?.title, selectedText?.text],
   );
 
-  const runInitialAnalysis = useCallback(async () => {
-    if (hasRequestedAnalysisRef.current || paper?.status !== 'uploaded' || !paper.pdfUrl) return;
-
-    hasRequestedAnalysisRef.current = true;
-    const loadingId = crypto.randomUUID();
-    setIsThinking(true);
-    setMessages((current) => [
-      ...current,
-      {
-        id: loadingId,
-        role: 'assistant',
-        content: '正在阅读论文，并生成中文分析：标题、摘要、结论、公式 LaTeX、图表解释、创新点、不足和相关前作...',
-      },
-    ]);
-
-    try {
-      const answer = await askReaderAgent(
-        '请完整阅读这篇论文，并用中文输出：1. 标题中文翻译；2. 摘要中文翻译；3. 结论中文翻译；4. 逐条列出每个公式并给出 LaTeX 版本；5. 逐图解释每张图在说明什么；6. 总结论文创新点；7. 总结论文缺陷或不足；8. 总结主要前人工作，并给出论文标题。',
-      );
-      setMessages((current) => current.map((message) => (message.id === loadingId ? { ...message, content: answer } : message)));
-    } catch (error) {
-      setMessages((current) =>
-        current.map((message) =>
-          message.id === loadingId
-            ? { ...message, content: error instanceof Error ? error.message : 'Reader agent failed.' }
-            : message,
-        ),
-      );
-    } finally {
-      setIsThinking(false);
-    }
-  }, [askReaderAgent, paper?.pdfUrl, paper?.status]);
-
   useEffect(() => {
-    hasRequestedAnalysisRef.current = false;
     setMessages(mockMessages);
   }, [paper?.id]);
-
-  useEffect(() => {
-    void runInitialAnalysis();
-  }, [runInitialAnalysis]);
 
   const startDragging = (event: PointerEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
@@ -217,7 +178,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingC
     setMessages((current) => [
       ...current,
       userMessage,
-      { id: loadingId, role: 'assistant', content: isImageMode ? '正在生成图像...' : '正在分析...' },
+      { id: loadingId, role: 'assistant', content: isImageMode ? 'Generating image...' : 'Analyzing...' },
     ]);
     setInput('');
     setIsThinking(true);
@@ -316,7 +277,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingC
           onKeyDown={(event) => {
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) void sendMessage();
           }}
-          placeholder={isImageMode ? 'Describe the image you want generated...' : 'Ask about the paper, selected text, methods, citations, or figures...'}
+          placeholder={isImageMode ? 'Describe the image you want generated...' : 'Ask about the paper, selected text, methods, or citations...'}
           value={input}
         />
         <button
@@ -355,3 +316,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null }: FloatingC
     </aside>
   );
 };
+
+
+
+

@@ -1,6 +1,8 @@
 import { promises as fs } from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import Anthropic from '@anthropic-ai/sdk';
 import { zValidator } from '@hono/zod-validator';
@@ -36,6 +38,8 @@ type TavilySearchResult = {
 const MAX_EXTRACTED_TEXT_CHARS = 140_000;
 const MAX_FIGURE_CAPTIONS = 40;
 const MAX_PAGE_IMAGES = 6;
+const PDF_RENDER_SCALE = 2;
+const require = createRequire(import.meta.url);
 
 const readerRequestSchema = z.object({
   paperId: z.string().min(1),
@@ -71,10 +75,38 @@ const extractFigureCaptions = (text: string) => {
     .slice(0, MAX_FIGURE_CAPTIONS);
 };
 
+const getPdfjsStandardFontDataUrl = () => {
+  const pdfjsDistDir = path.dirname(require.resolve('pdfjs-dist/package.json'));
+  const standardFontsDir = path.join(pdfjsDistDir, 'standard_fonts');
+
+  return pathToFileURL(`${standardFontsDir}${path.sep}`).href;
+};
+
+const ensurePdfCanvasPolyfills = async () => {
+  const canvas = await import('@napi-rs/canvas');
+  const globalScope = globalThis as typeof globalThis & {
+    DOMMatrix?: typeof DOMMatrix;
+    ImageData?: typeof ImageData;
+    Path2D?: typeof Path2D;
+  };
+
+  globalScope.DOMMatrix ??= canvas.DOMMatrix as unknown as typeof DOMMatrix;
+  globalScope.ImageData ??= canvas.ImageData as unknown as typeof ImageData;
+  globalScope.Path2D ??= canvas.Path2D as unknown as typeof Path2D;
+
+  return canvas;
+};
+
+const loadPdfjs = async () => {
+  await ensurePdfCanvasPolyfills();
+
+  return import('pdfjs-dist/legacy/build/pdf.mjs');
+};
+
 const extractPdfText = async (localPdfPath: string): Promise<ExtractedPdf> => {
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const pdfjs = await loadPdfjs();
   const data = new Uint8Array(await fs.readFile(localPdfPath));
-  const pdf = await pdfjs.getDocument({ data, useWorkerFetch: false, isEvalSupported: false, disableFontFace: true }).promise;
+  const pdf = await pdfjs.getDocument({ data, useWorkerFetch: false, isEvalSupported: false, disableFontFace: true, standardFontDataUrl: getPdfjsStandardFontDataUrl() }).promise;
   const pages: ExtractedPdfPage[] = [];
 
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
@@ -100,40 +132,29 @@ const extractPdfText = async (localPdfPath: string): Promise<ExtractedPdf> => {
 };
 
 const renderPdfPageImages = async (localPdfPath: string, pageNumbers?: number[]): Promise<PdfPageImage[]> => {
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const poppler = (await import('pdf-poppler')) as { default?: { convert: (file: string, opts: Record<string, unknown>) => Promise<unknown> }; convert?: (file: string, opts: Record<string, unknown>) => Promise<unknown> };
-  const convert = poppler.default?.convert ?? poppler.convert;
-
-  if (!convert) throw new Error('PDF page renderer is unavailable.');
+  const canvas = await ensurePdfCanvasPolyfills();
+  const pdfjs = await loadPdfjs();
 
   const data = new Uint8Array(await fs.readFile(localPdfPath));
-  const pdf = await pdfjs.getDocument({ data, useWorkerFetch: false, isEvalSupported: false, disableFontFace: true }).promise;
+  const pdf = await pdfjs.getDocument({ data, useWorkerFetch: false, isEvalSupported: false, disableFontFace: true, standardFontDataUrl: getPdfjsStandardFontDataUrl() }).promise;
   const pagesToRender = (pageNumbers?.length ? pageNumbers : Array.from({ length: Math.min(pdf.numPages, MAX_PAGE_IMAGES) }, (_, index) => index + 1))
     .filter((pageNumber) => pageNumber >= 1 && pageNumber <= pdf.numPages)
     .slice(0, MAX_PAGE_IMAGES);
-  const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'scireader-pages-'));
   const images: PdfPageImage[] = [];
 
-  try {
-    for (const pageNumber of pagesToRender) {
-      const prefix = `page-${pageNumber}`;
-      await convert(localPdfPath, {
-        format: 'png',
-        out_dir: outputDir,
-        out_prefix: prefix,
-        page: pageNumber,
-        scale: 1400,
-      });
-      const files = await fs.readdir(outputDir);
-      const imageFile = files.find((file) => file.startsWith(prefix) && file.endsWith('.png'));
+  for (const pageNumber of pagesToRender) {
+    const page = await pdf.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: PDF_RENDER_SCALE });
+    const pageCanvas = canvas.createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+    const context = pageCanvas.getContext('2d');
 
-      if (!imageFile) continue;
+    await page.render({
+      canvasContext: context as unknown as CanvasRenderingContext2D,
+      viewport,
+    }).promise;
 
-      const png = await fs.readFile(path.join(outputDir, imageFile));
-      images.push({ pageNumber, data: png.toString('base64') });
-    }
-  } finally {
-    await fs.rm(outputDir, { recursive: true, force: true });
+    images.push({ pageNumber, data: pageCanvas.toBuffer('image/png').toString('base64') });
+    page.cleanup();
   }
 
   return images;
