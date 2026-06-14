@@ -1,5 +1,3 @@
-# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
-# More GitHub Actions for Azure: https://github.com/Azure/actions
 name: Build and deploy Node.js app to Azure Web App - scireader
 on:
   push:
@@ -10,7 +8,6 @@ on:
 permissions:
   contents: read
   packages: write
-  id-token: write
 
 jobs:
   build:
@@ -50,21 +47,3 @@ jobs:
           context: .
           push: true
           tags: ghcr.io/v-xiacli/scireader:latest
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_2B2060B7BF1849D9902A336ECB2287CC }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_885E95EEFDDF450ABF0BBE6D31771D19 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_A28EC31E685849D98010538A5C4F9777 }}
-
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: 'scireader2'
-          slot-name: 'Production'
-          images: 'ghcr.io/v-xiacli/scireader:latest'
