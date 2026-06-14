@@ -189,20 +189,22 @@ const HomePage = () => {
 
       if (!response.ok) throw new Error(result.message ?? result.error ?? 'Upload failed.');
 
-      const paperTitleValue = paperTitle.trim() || file.name.replace(/\.pdf$/i, '') || 'Uploaded paper';
-      const paperId = buildPaperId(paperTitleValue, paperJournal, paperYear, paperVolume);
+      const fallbackTitle = file.name.replace(/\.pdf$/i, '') || 'Uploaded paper';
+      const metadata = await extractPaperMetadata(normalizeDownloadUrl(result.downloadUrl), fallbackTitle);
+      const paperTitleValue = metadata.title?.trim() || fallbackTitle;
+      const authorNames = metadata.authors?.filter(Boolean) ?? [];
+      const paperId = metadata.paperKey || fallbackPaperKey(file.name);
       const uploadedPaper: PaperSummary = {
         id: paperId,
         title: paperTitleValue,
-        authors: paperJournal.trim() ? paperJournal.trim() : 'Uploaded paper',
+        authors: authorNames.length ? authorNames.join(', ') : 'Uploaded paper',
         pages: 0,
         status: 'uploaded',
         abstract: 'Uploaded PDF ready for reading and chat.',
         pdfUrl: normalizeDownloadUrl(result.downloadUrl),
         filePath: result.filePath,
-        journal: paperJournal.trim(),
-        year: paperYear.trim(),
-        volume: paperVolume.trim(),
+        journal: metadata.journal?.trim(),
+        year: metadata.year?.trim(),
       };
 
       const saveResponse = await fetch('/api/auth/uploaded-papers', {
@@ -216,12 +218,7 @@ const HomePage = () => {
 
       await estimateTokenConsumption(uploadedPaper);
 
-      setPaperTitle('');
-      setPaperJournal('');
-      setPaperYear('');
-      setPaperVolume('');
-
-      router.push(`/papers/${encodeURIComponent(paperId)}?pdfUrl=${encodeURIComponent(uploadedPaper.pdfUrl)}&filePath=${encodeURIComponent(uploadedPaper.filePath ?? '')}&title=${encodeURIComponent(uploadedPaper.title)}&journal=${encodeURIComponent(uploadedPaper.journal ?? '')}&year=${encodeURIComponent(uploadedPaper.year ?? '')}&volume=${encodeURIComponent(uploadedPaper.volume ?? '')}`);
+      router.push(`/papers/${encodeURIComponent(paperId)}?pdfUrl=${encodeURIComponent(uploadedPaper.pdfUrl)}&filePath=${encodeURIComponent(uploadedPaper.filePath ?? '')}&title=${encodeURIComponent(uploadedPaper.title)}&authors=${encodeURIComponent(uploadedPaper.authors)}&journal=${encodeURIComponent(uploadedPaper.journal ?? '')}&year=${encodeURIComponent(uploadedPaper.year ?? '')}&volume=${encodeURIComponent(uploadedPaper.volume ?? '')}`);
     } catch (error) {
       setUploadMessage(error instanceof Error ? error.message : 'Upload failed.');
     } finally {
@@ -343,32 +340,7 @@ const HomePage = () => {
 
         <section className="rounded-3xl bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-4 md:flex-row md:items-center">
-            <div className="grid gap-3 md:grid-cols-5">
-              <input
-                className="rounded-xl border px-3 py-2 text-sm"
-                onChange={(event) => setPaperTitle(event.target.value)}
-                placeholder="Paper title"
-                value={paperTitle}
-              />
-              <input
-                className="rounded-xl border px-3 py-2 text-sm"
-                onChange={(event) => setPaperJournal(event.target.value)}
-                placeholder="Journal"
-                value={paperJournal}
-              />
-              <input
-                className="rounded-xl border px-3 py-2 text-sm"
-                onChange={(event) => setPaperYear(event.target.value)}
-                placeholder="Year"
-                value={paperYear}
-              />
-              <input
-                className="rounded-xl border px-3 py-2 text-sm"
-                onChange={(event) => setPaperVolume(event.target.value)}
-                placeholder="Volume"
-                value={paperVolume}
-              />
-              <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3">
               <input
                 accept="application/pdf"
                 className="hidden"
@@ -398,7 +370,6 @@ const HomePage = () => {
                 {isUploading ? 'Uploading...' : isLoggedIn ? 'Upload paper' : 'Login to upload'}
               </button>
               {uploadMessage ? <p className="text-sm text-muted-foreground">{uploadMessage}</p> : null}
-              </div>
             </div>
             <div>
               <h2 className="text-xl font-semibold">Your papers</h2>
@@ -426,7 +397,7 @@ const HomePage = () => {
                   className="group flex items-center justify-between rounded-2xl border p-4 transition hover:border-primary hover:bg-slate-50"
                   href={
                     paper.filePath
-                      ? `/papers/${encodeURIComponent(paper.id)}?pdfUrl=${encodeURIComponent(paper.pdfUrl)}&filePath=${encodeURIComponent(paper.filePath)}&title=${encodeURIComponent(paper.title)}&journal=${encodeURIComponent(paper.journal ?? '')}&year=${encodeURIComponent(paper.year ?? '')}&volume=${encodeURIComponent(paper.volume ?? '')}`
+                      ? `/papers/${encodeURIComponent(paper.id)}?pdfUrl=${encodeURIComponent(paper.pdfUrl)}&filePath=${encodeURIComponent(paper.filePath)}&title=${encodeURIComponent(paper.title)}&authors=${encodeURIComponent(paper.authors)}&journal=${encodeURIComponent(paper.journal ?? '')}&year=${encodeURIComponent(paper.year ?? '')}&volume=${encodeURIComponent(paper.volume ?? '')}`
                       : `/papers/${paper.id}`
                   }
                   key={paper.id}

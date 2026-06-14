@@ -16,6 +16,7 @@ interface PaperPageProps {
     filePath?: string;
     pdfUrl?: string;
     title?: string;
+    authors?: string;
     journal?: string;
     year?: string;
     volume?: string;
@@ -44,7 +45,7 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
             ...mockPaper,
             id: params.paperId,
             title: searchParams.title ?? mockPaper.title,
-            authors: 'Uploaded paper',
+            authors: searchParams.authors ?? 'Uploaded paper',
             pages: 0,
             status: 'uploaded' as const,
             pdfUrl: normalizePdfUrl(searchParams.pdfUrl),

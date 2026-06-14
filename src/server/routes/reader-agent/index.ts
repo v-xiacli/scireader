@@ -56,6 +56,7 @@ const readerRequestSchema = z.object({
   model: z.string().optional(),
   pdfUrl: z.string().optional(),
   title: z.string().optional(),
+  authors: z.string().optional(),
   journal: z.string().optional(),
   year: z.string().optional(),
   volume: z.string().optional(),
@@ -229,11 +230,11 @@ const getPaperIdentityKey = (paper: { title?: string; authors?: string[]; journa
   return parts.join('') || cleanPaperKeyPart(paper.paperId) || 'uploadedpaper';
 };
 
-const getPaperIdentitySlug = (request: Pick<z.infer<typeof readerRequestSchema>, 'paperId' | 'title' | 'journal' | 'year'>) =>
+const getPaperIdentitySlug = (request: Pick<z.infer<typeof readerRequestSchema>, 'paperId' | 'title' | 'authors' | 'journal' | 'year'>) =>
   getPaperIdentityKey({
     paperId: request.paperId,
     title: request.title ?? request.paperId,
-    authors: [],
+    authors: parseAuthors(request.authors),
     journal: request.journal,
     year: request.year,
   });
