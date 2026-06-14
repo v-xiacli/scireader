@@ -19,7 +19,6 @@ interface PaperPageProps {
     authors?: string;
     journal?: string;
     year?: string;
-    volume?: string;
   };
 }
 
@@ -52,7 +51,6 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
             filePath: searchParams.filePath,
             journal: searchParams.journal,
             year: searchParams.year,
-            volume: searchParams.volume,
           }
         : mockPaper,
     [mockPaper, params.paperId, searchParams?.filePath, searchParams?.pdfUrl, searchParams?.title],

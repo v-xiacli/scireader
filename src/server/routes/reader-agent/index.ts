@@ -834,6 +834,7 @@ const estimateTokenConsumption = async (request: z.infer<typeof tokenEstimateReq
   };
 };
 
+const app = new Hono()
   .get('/history', async (c) => {
     const paperId = c.req.query('paperId');
     const title = c.req.query('title');

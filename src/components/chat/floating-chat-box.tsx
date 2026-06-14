@@ -22,6 +22,13 @@ const edgePadding = 8;
 
 type ResizeHandle = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 type ConversationTurn = Pick<ChatMessage, 'role' | 'content'>;
+type StoredHistoryTurn = ConversationTurn & {
+  createdAt: string;
+  model?: string;
+  routedBy?: 'cheap-context' | 'expensive-reader';
+  inputTokens?: number;
+  outputTokens?: number;
+};
 
 const deepPaperSummaryPrompt =
   `请用中文生成一份“深度论文阅读笔记”，不是短摘要。要求：
@@ -102,7 +109,6 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
           authors: paper?.authors,
           journal: paper?.journal,
           year: paper?.year,
-          volume: paper?.volume,
           prompt,
           scope,
           selectedText: selectedText?.text,
@@ -115,10 +121,31 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
 
       if (!response.ok) throw new Error(result.message ?? result.error ?? 'Reader agent failed.');
 
-      return result.answer as string;
+      return result as { answer: string; usage?: { inputTokens?: number; outputTokens?: number }; routedBy?: string };
     },
-    [messages, paperId, paperPdfUrl, paperTitle, paperContextSummary, selectedText, paper?.authors, paper?.journal, paper?.year, paper?.volume],
+    [messages, paperId, paperPdfUrl, paperTitle, paperContextSummary, selectedText, paper?.authors, paper?.journal, paper?.year],
   );
+
+  const loadPaperHistory = useCallback(async () => {
+    if (!paperId || !paperPdfUrl) return [];
+
+    const params = new URLSearchParams({
+      paperId,
+      pdfUrl: paperPdfUrl,
+      title: paperTitle ?? paperId,
+    });
+
+    if (paper?.authors) params.set('authors', paper.authors);
+    if (paper?.journal) params.set('journal', paper.journal);
+    if (paper?.year) params.set('year', paper.year);
+
+    const response = await fetch(`/api/reader-agent/history?${params.toString()}`);
+    const result = await response.json();
+
+    if (!response.ok) throw new Error(result.message ?? result.error ?? 'Paper history failed.');
+
+    return Array.isArray(result.history) ? (result.history as StoredHistoryTurn[]) : [];
+  }, [paperId, paperPdfUrl, paperTitle, paper?.authors, paper?.journal, paper?.year]);
 
   const summarizePaper = useCallback(async () => {
     if (!paperId || !paperPdfUrl) return '';
@@ -133,7 +160,6 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
         authors: paper?.authors,
         journal: paper?.journal,
         year: paper?.year,
-        volume: paper?.volume,
         prompt: deepPaperSummaryPrompt,
         scope: 'whole-paper',
       }),
@@ -143,7 +169,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     if (!response.ok) throw new Error(result.message ?? result.error ?? 'Paper summary failed.');
 
     return result.summary as string;
-  }, [paperId, paperPdfUrl, paperTitle, paper?.authors, paper?.journal, paper?.year, paper?.volume]);
+  }, [paperId, paperPdfUrl, paperTitle, paper?.authors, paper?.journal, paper?.year]);
 
   const generateImage = useCallback(
     async (prompt: string) => {
@@ -187,7 +213,10 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     ]);
 
     summarizePaper()
-      .then((summary) => {
+      .then(async (summary) => {
+        if (!isActive) return;
+
+        const history = await loadPaperHistory().catch(() => []);
         if (!isActive) return;
 
         setPaperContextSummary(summary);
@@ -198,6 +227,14 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
             content: summary,
             contextLabel: 'Deep brief',
           },
+          ...history.map((turn, index): ChatMessage => ({
+            id: `history-${turn.createdAt}-${index}`,
+            role: turn.role,
+            content: turn.content,
+            contextLabel: turn.role === 'assistant'
+              ? `${turn.routedBy === 'cheap-context' ? 'Saved answer · cheap context' : 'Saved answer · expensive reader'}${turn.inputTokens ? ` · ${turn.inputTokens.toLocaleString()} in / ${(turn.outputTokens ?? 0).toLocaleString()} out` : ''}`
+              : 'Saved question',
+          })),
         ]);
       })
       .catch((error) => {
@@ -216,7 +253,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     return () => {
       isActive = false;
     };
-  }, [paperId, paperPdfUrl, summarizePaper]);
+  }, [paperId, paperPdfUrl, summarizePaper, loadPaperHistory]);
 
   const startDragging = (event: PointerEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
@@ -337,8 +374,13 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
           ),
         );
       } else {
-        const answer = await askReaderAgent(trimmed, selectedText ? 'selected-text' : 'whole-paper');
-        setMessages((current) => current.map((message) => (message.id === loadingId ? { ...message, content: answer } : message)));
+        const result = await askReaderAgent(trimmed, selectedText ? 'selected-text' : 'whole-paper');
+        const usageLabel = result.usage?.inputTokens
+          ? ` · ${result.usage.inputTokens.toLocaleString()} in / ${(result.usage.outputTokens ?? 0).toLocaleString()} out`
+          : '';
+        const contextLabel = result.routedBy === 'cheap-context' ? `Cheap context${usageLabel}` : result.routedBy === 'expensive-reader' ? `Expensive reader${usageLabel}` : undefined;
+
+        setMessages((current) => current.map((message) => (message.id === loadingId ? { ...message, content: result.answer, contextLabel } : message)));
       }
     } catch (error) {
       setMessages((current) =>
