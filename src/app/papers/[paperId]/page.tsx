@@ -63,7 +63,7 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
   }, [paper.filePath]);
 
   return (
-    <main className="flex h-screen flex-col gap-4 p-4">
+    <main className="flex h-screen flex-col gap-4 px-4 pb-4 pt-10">
       <nav className="flex items-center justify-between rounded-3xl bg-white px-5 py-3 shadow-sm">
         <Link className="text-sm font-medium text-primary" href="/">
           ← Paper library

@@ -130,9 +130,9 @@ const HomePage = () => {
         <header className="flex items-center justify-between rounded-3xl bg-white p-6 shadow-sm">
           <div>
             <p className="text-sm font-medium uppercase tracking-wide text-primary">SCIReader</p>
-            <h1 className="mt-2 text-3xl font-semibold">Paper library</h1>
+            <h1 className="mt-2 text-3xl font-semibold">Read papers with AI</h1>
             <p className="mt-2 max-w-2xl text-muted-foreground">
-              Read scientific papers with PDF text selection, persistent conversations, and routed LLM assistants.
+              Upload a PDF, read it on the left, and ask questions in the chat on the right.
             </p>
           </div>
           <div className="rounded-2xl border bg-slate-50 p-4 text-right">
@@ -208,29 +208,24 @@ const HomePage = () => {
         <div className="grid gap-5 md:grid-cols-3">
           <div className="rounded-2xl bg-white p-5 shadow-sm">
             <FileText className="size-6 text-primary" />
-            <h2 className="mt-4 font-semibold">PDF-first workspace</h2>
-            <p className="mt-2 text-sm text-muted-foreground">Canvas editing is removed; the main surface is a paper reader.</p>
+            <h2 className="mt-4 font-semibold">Read PDFs</h2>
+            <p className="mt-2 text-sm text-muted-foreground">Open papers in a clean PDF reader.</p>
           </div>
           <div className="rounded-2xl bg-white p-5 shadow-sm">
             <MessageSquareText className="size-6 text-primary" />
-            <h2 className="mt-4 font-semibold">Large AI chat</h2>
-            <p className="mt-2 text-sm text-muted-foreground">Chat can use whole paper, current page, selected text, or figure context.</p>
+            <h2 className="mt-4 font-semibold">Ask AI</h2>
+            <p className="mt-2 text-sm text-muted-foreground">Ask questions about the paper or selected text.</p>
           </div>
           <div className="rounded-2xl bg-white p-5 shadow-sm">
             <WalletCards className="size-6 text-primary" />
-            <h2 className="mt-4 font-semibold">Manual account balance</h2>
-            <p className="mt-2 text-sm text-muted-foreground">No online billing; admins maintain credits outside the checkout flow.</p>
+            <h2 className="mt-4 font-semibold">Your account</h2>
+            <p className="mt-2 text-sm text-muted-foreground">Check your credits before using AI features.</p>
           </div>
         </div>
 
         <section className="rounded-3xl bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-xl font-semibold">Recent papers</h2>
-              <p className="text-sm text-muted-foreground">Each paper keeps its own PDF state, chat history, and extracted context.</p>
-            </div>
+          <div className="flex flex-col gap-4 md:flex-row md:items-center">
             <div className="flex items-center gap-3">
-              {uploadMessage ? <p className="text-sm text-muted-foreground">{uploadMessage}</p> : null}
               <input
                 accept="application/pdf"
                 className="hidden"
@@ -259,6 +254,11 @@ const HomePage = () => {
                 {isUploading ? <Loader2 className="size-4 animate-spin" /> : null}
                 {isUploading ? 'Uploading...' : isLoggedIn ? 'Upload paper' : 'Login to upload'}
               </button>
+              {uploadMessage ? <p className="text-sm text-muted-foreground">{uploadMessage}</p> : null}
+            </div>
+            <div>
+              <h2 className="text-xl font-semibold">Your papers</h2>
+              <p className="text-sm text-muted-foreground">Choose a paper to read, or upload a new PDF.</p>
             </div>
           </div>
 
