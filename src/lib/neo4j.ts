@@ -1,4 +1,4 @@
-import neo4j, { type Driver } from 'neo4j-driver';
+import neo4j, { type Driver, type Record as Neo4jRecord } from 'neo4j-driver';
 
 let driver: Driver | null | undefined;
 
@@ -58,7 +58,7 @@ export const writeNeo4j = async (query: string, params: Record<string, unknown> 
   return { skipped: false };
 };
 
-export const readNeo4j = async <T>(query: string, params: Record<string, unknown> = {}, mapRecord: (record: neo4j.Record) => T) => {
+export const readNeo4j = async <T>(query: string, params: Record<string, unknown> = {}, mapRecord: (record: Neo4jRecord) => T) => {
   const activeDriver = getNeo4jDriver();
   const config = getNeo4jConfig();
 
@@ -74,19 +74,43 @@ export const readNeo4j = async <T>(query: string, params: Record<string, unknown
     }
   };
 
+  let result;
+
   try {
-    let result;
+    result = await runWithDatabase(config.database);
+  } catch (error) {
+    if (!isDatabaseSelectionError(error)) throw error;
+    result = await runWithDatabase();
+  }
+
+  return {
+    skipped: false,
+    records: result.records.map(mapRecord),
+  };
+};
+
+export const verifyNeo4jConnection = async () => {
+  const activeDriver = getNeo4jDriver();
+  const config = getNeo4jConfig();
+
+  if (!activeDriver || !config) return { configured: false, ok: false, database: null as string | null, fallbackUsed: false };
+
+  const runWithDatabase = async (database?: string) => {
+    const session = activeDriver.session(database ? { database } : undefined);
 
     try {
-      result = await runWithDatabase(config.database);
-    } catch (error) {
-      if (!isDatabaseSelectionError(error)) throw error;
-      result = await runWithDatabase();
+      await session.executeRead((transaction) => transaction.run('RETURN 1 AS ok'));
+    } finally {
+      await session.close();
     }
+  };
 
-    return {
-      skipped: false,
-      records: result.records.map(mapRecord),
-    };
+  try {
+    await runWithDatabase(config.database);
+    return { configured: true, ok: true, database: config.database, fallbackUsed: false };
+  } catch (error) {
+    if (!isDatabaseSelectionError(error)) throw error;
+    await runWithDatabase();
+    return { configured: true, ok: true, database: config.database, fallbackUsed: true };
   }
 };

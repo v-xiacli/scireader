@@ -10,7 +10,7 @@ import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 
 import { downloadFileAsAdmin, downloadTextAsAdmin, uploadFileAsAdmin, uploadTextAsAdmin } from '@/lib/firebase/server/storage-admin';
-import { readNeo4j, writeNeo4j } from '@/lib/neo4j';
+import { readNeo4j, verifyNeo4jConnection, writeNeo4j } from '@/lib/neo4j';
 import { getUserStoragePrefix } from '@/lib/storage-paths';
 import { getCurrentUser, loadUploadedPapers, sessionCookieName } from '@/server/routes/auth';
 
@@ -2369,6 +2369,19 @@ const app = new Hono()
       const status = message === 'Not authenticated.' ? 401 : message === 'You do not have access to this PDF.' ? 403 : 500;
 
       return c.json({ error: 'Paper history failed.', message }, status);
+    }
+  })
+  .get('/neo4j/status', async (c) => {
+    try {
+      await requirePaperAccess(c);
+      const status = await verifyNeo4jConnection();
+
+      return c.json(status);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Neo4j status check failed.';
+      const status = message === 'Not authenticated.' ? 401 : 500;
+
+      return c.json({ configured: false, ok: false, error: 'Neo4j status check failed.', message }, status);
     }
   })
   .post('/metadata', zValidator('json', metadataRequestSchema), async (c) => {
