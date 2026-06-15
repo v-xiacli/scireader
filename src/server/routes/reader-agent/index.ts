@@ -170,12 +170,13 @@ const extractPdfText = async (localPdfPath: string): Promise<ExtractedPdf> => {
   const startedAt = Date.now();
   const pdfjs = await loadPdfjs();
   const data = new Uint8Array(await fs.readFile(localPdfPath));
+  const pdfBytes = data.byteLength;
   const pdf = await pdfjs.getDocument(getPdfDocumentOptions(data)).promise;
   const pages: ExtractedPdfPage[] = [];
 
   console.log('[reader-agent:pdf] text extraction started', {
     localPdfPath,
-    bytes: data.byteLength,
+    bytes: pdfBytes,
     pages: pdf.numPages,
   });
 
@@ -909,6 +910,8 @@ const triageWithCheapModel = async (request: z.infer<typeof readerRequestSchema>
   };
 };
 
+const estimateTokensLocally = (pdfBytes: number, prompt: string) => Math.ceil((pdfBytes * 4) / 3 / 4) + Math.ceil(prompt.length / 2);
+
 const estimateTokenConsumption = async (request: z.infer<typeof tokenEstimateRequestSchema>) => {
   const startedAt = Date.now();
   const storagePath = resolveUploadedPdfStoragePath(request.pdfUrl);
@@ -925,41 +928,69 @@ const estimateTokenConsumption = async (request: z.infer<typeof tokenEstimateReq
   const modelSelection = selectTokenEstimateModel(request);
   const client = createAnthropicClient(modelSelection.target);
   const prompt = request.prompt?.trim() || '请总结这篇文档';
-  const response = await client.messages.countTokens({
-    model: modelSelection.model,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'document',
-            source: {
-              type: 'base64',
-              media_type: 'application/pdf',
-              data: buffer.toString('base64'),
+
+  try {
+    const response = await client.messages.countTokens({
+      model: modelSelection.model,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'document',
+              source: {
+                type: 'base64',
+                media_type: 'application/pdf',
+                data: buffer.toString('base64'),
+              },
+              title: request.title ?? request.paperId,
             },
-            title: request.title ?? request.paperId,
-          },
-          { type: 'text', text: prompt },
-        ],
-      },
-    ],
-  });
+            { type: 'text', text: prompt },
+          ],
+        },
+      ],
+    });
 
-  console.log('[reader-agent:count-tokens] finished', {
-    paperId: request.paperId,
-    model: modelSelection.model,
-    target: modelSelection.target,
-    inputTokens: response.input_tokens,
-    pdfBytes: buffer.byteLength,
-    durationMs: Date.now() - startedAt,
-  });
+    console.log('[reader-agent:count-tokens] finished', {
+      paperId: request.paperId,
+      model: modelSelection.model,
+      target: modelSelection.target,
+      inputTokens: response.input_tokens,
+      pdfBytes: buffer.byteLength,
+      durationMs: Date.now() - startedAt,
+    });
 
-  return {
-    inputTokens: response.input_tokens,
-    model: modelSelection.model,
-    prompt,
-  };
+    return {
+      inputTokens: response.input_tokens,
+      model: modelSelection.model,
+      prompt,
+      estimated: false,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Remote token count failed.';
+
+    if (!message.includes('/messages/count_tokens') && !message.includes('count_tokens')) throw error;
+
+    const inputTokens = estimateTokensLocally(buffer.byteLength, prompt);
+
+    console.warn('[reader-agent:count-tokens] remote count unsupported; using local estimate', {
+      paperId: request.paperId,
+      model: modelSelection.model,
+      target: modelSelection.target,
+      inputTokens,
+      pdfBytes: buffer.byteLength,
+      durationMs: Date.now() - startedAt,
+      message,
+    });
+
+    return {
+      inputTokens,
+      model: modelSelection.model,
+      prompt,
+      estimated: true,
+      warning: 'Remote token count is unsupported by the configured endpoint; returned a local estimate.',
+    };
+  }
 };
 
 const app = new Hono()

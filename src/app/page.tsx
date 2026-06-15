@@ -216,7 +216,7 @@ const HomePage = () => {
 
       if (saveResponse.ok) setUploadedPapers(saveResult.papers);
 
-      await estimateTokenConsumption(uploadedPaper);
+      void estimateTokenConsumption(uploadedPaper);
 
       router.push(`/papers/${encodeURIComponent(paperId)}?pdfUrl=${encodeURIComponent(uploadedPaper.pdfUrl)}&filePath=${encodeURIComponent(uploadedPaper.filePath ?? '')}&title=${encodeURIComponent(uploadedPaper.title)}&authors=${encodeURIComponent(uploadedPaper.authors)}&journal=${encodeURIComponent(uploadedPaper.journal ?? '')}&year=${encodeURIComponent(uploadedPaper.year ?? '')}`);
     } catch (error) {
