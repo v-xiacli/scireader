@@ -337,6 +337,8 @@ const getPaperDialogHistoryPath = (userId: string, paperKey: string) => `user-pa
 
 const getSharedPaperDialogHistoryPath = (paperKey: string) => `paper-cache/${paperKey}/reader-dialog.shared-v1.md`;
 
+const summaryJobs = new Map<string, { startedAt: string; promise: Promise<void> }>();
+
 const parseJsonBlock = (content: string) => {
   const match = content.match(/```json\n([\s\S]*?)\n```/);
 
@@ -1148,6 +1150,8 @@ const estimateTokensLocally = (text: string, prompt: string) => estimateTextToke
 
 const estimatePdfTokensFromBytes = (pdfBytes: number, prompt: string) => Math.ceil(pdfBytes / 5) + estimateTextTokensLocally(prompt);
 
+const SUMMARY_CHUNK_MAX_CHARS = 18_000;
+
 const estimateTokenConsumption = async (request: z.infer<typeof tokenEstimateRequestSchema>) => {
   const startedAt = Date.now();
   const storagePath = resolveUploadedPdfStoragePath(request.pdfUrl);
@@ -1212,6 +1216,181 @@ const estimateTokenConsumption = async (request: z.infer<typeof tokenEstimateReq
   } finally {
     await fs.rm(tempPdf.outputDir, { recursive: true, force: true });
   }
+};
+
+const chunkExtractedPdfPages = (pages: ExtractedPdfPage[]) => {
+  const chunks: Array<{ pageNumbers: number[]; text: string }> = [];
+  let currentPages: number[] = [];
+  let currentText = '';
+
+  for (const page of pages) {
+    const pageText = `[Page ${page.pageNumber}]\n${page.text}`;
+    const nextText = currentText ? `${currentText}\n\n${pageText}` : pageText;
+
+    if (currentText && nextText.length > SUMMARY_CHUNK_MAX_CHARS) {
+      chunks.push({ pageNumbers: currentPages, text: currentText });
+      currentPages = [page.pageNumber];
+      currentText = pageText;
+    } else {
+      currentPages.push(page.pageNumber);
+      currentText = nextText;
+    }
+  }
+
+  if (currentText) chunks.push({ pageNumbers: currentPages, text: currentText });
+
+  return chunks.length ? chunks : [{ pageNumbers: [], text: 'No extractable PDF text was found.' }];
+};
+
+const createExpensiveTextResponse = async (system: string, userContent: string, maxTokens = 6000) => {
+  const modelSelection = selectExpensiveReaderModel();
+  const client = createAnthropicClient(modelSelection.target);
+  const response = await client.messages.create({
+    model: modelSelection.model,
+    max_tokens: maxTokens,
+    system,
+    messages: [{ role: 'user', content: userContent }],
+  });
+
+  return {
+    answer: textFromResponse(response),
+    model: modelSelection.model,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+  };
+};
+
+const generateChunkedEnglishSummary = async (request: z.infer<typeof readerRequestSchema>) => {
+  const storagePath = resolveUploadedPdfStoragePath(request.pdfUrl);
+
+  if (!storagePath) {
+    const result = await createExpensiveTextResponse(
+      buildReaderSystemPrompt(Boolean(request.paperContextSummary), false, request.modePrompt, 'english'),
+      `Paper title: ${request.title ?? request.paperId}\n\nTask:\n${request.prompt}`,
+      12000,
+    );
+
+    return { answer: result.answer, inputTokens: result.inputTokens, outputTokens: result.outputTokens, model: result.model };
+  }
+
+  const tempPdf = await materializePdfToTempFile(storagePath);
+
+  try {
+    const extractedPdf = await extractPdfText(tempPdf.localPdfPath);
+    const chunks = chunkExtractedPdfPages(extractedPdf.pages);
+    const chunkNotes: string[] = [];
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let model = '';
+
+    console.log('[reader-agent:summarize] chunked summary extraction ready', {
+      paperId: request.paperId,
+      chunks: chunks.length,
+      extractedChars: extractedPdf.text.length,
+    });
+
+    for (const [index, chunk] of chunks.entries()) {
+      const chunkResult = await createExpensiveTextResponse(
+        `${request.modePrompt?.trim() || 'You are SCIReader, a careful academic paper reading assistant.'}
+
+Respond in English. This is batch ${index + 1} of ${chunks.length}. Write dense notes only for the provided pages. Preserve concrete numbers, equations, figure/table labels, methods, evidence, limitations, and open questions. Do not pretend to have read pages outside this batch.`,
+        `Paper title: ${request.title ?? request.paperId}
+Reading mode: ${getReadingMode(request)}
+Pages in this batch: ${chunk.pageNumbers.join(', ') || 'unknown'}
+
+Overall summary task:
+${request.prompt}
+
+Extracted text for this batch:
+${chunk.text}`,
+        6000,
+      );
+
+      model = chunkResult.model;
+      inputTokens += chunkResult.inputTokens;
+      outputTokens += chunkResult.outputTokens;
+      chunkNotes.push(`## Batch ${index + 1}/${chunks.length} - Pages ${chunk.pageNumbers.join(', ') || 'unknown'}\n\n${chunkResult.answer}`);
+    }
+
+    const finalResult = await createExpensiveTextResponse(
+      `${request.modePrompt?.trim() || 'You are SCIReader, a careful academic paper reading assistant.'}
+
+Respond in English. Synthesize the batch notes into one coherent final paper-reading report. Do not add claims that are not supported by the notes. Preserve important numerical evidence and explicitly mention when evidence is insufficient.`,
+      `Paper title: ${request.title ?? request.paperId}
+Reading mode: ${getReadingMode(request)}
+
+Final report task:
+${request.prompt}
+
+Batch notes:
+${chunkNotes.join('\n\n---\n\n')}`,
+      12000,
+    );
+
+    inputTokens += finalResult.inputTokens;
+    outputTokens += finalResult.outputTokens;
+    model = finalResult.model || model;
+
+    return {
+      answer: finalResult.answer,
+      inputTokens,
+      outputTokens,
+      model,
+    };
+  } finally {
+    await fs.rm(tempPdf.outputDir, { recursive: true, force: true });
+  }
+};
+
+const startSummaryGenerationJob = (
+  request: z.infer<typeof readerRequestSchema>,
+  summaryStoragePath: string,
+  freshness?: { inputTokens: number; outputTokens: number },
+) => {
+  const existingJob = summaryJobs.get(summaryStoragePath);
+
+  if (existingJob) return { started: false, startedAt: existingJob.startedAt };
+
+  const startedAt = new Date().toISOString();
+  const promise = (async () => {
+    console.log('[reader-agent:summarize] background summary generation started', {
+      paperId: request.paperId,
+      title: request.title,
+      summaryStoragePath,
+      readingMode: getReadingMode(request),
+    });
+
+    const result = await generateChunkedEnglishSummary(request);
+    const translatedSummary = await translateReaderAnswerToChinese(result.answer, request);
+    const summary = translatedSummary.text;
+
+    console.log('[reader-agent:summarize] background summary generation finished', {
+      paperId: request.paperId,
+      model: result.model,
+      inputTokens: (freshness?.inputTokens ?? 0) + result.inputTokens + translatedSummary.inputTokens,
+      outputTokens: (freshness?.outputTokens ?? 0) + result.outputTokens + translatedSummary.outputTokens,
+      saved: Boolean(summary.trim()),
+    });
+
+    if (summary.trim()) {
+      await uploadTextAsAdmin(summary, summaryStoragePath);
+    }
+  })()
+    .catch((error) => {
+      console.error('[reader-agent:summarize] background summary generation failed', {
+        paperId: request.paperId,
+        summaryStoragePath,
+        message: error instanceof Error ? error.message : 'Unknown background summary error.',
+      });
+    })
+    .finally(() => {
+      summaryJobs.delete(summaryStoragePath);
+    });
+
+  summaryJobs.set(summaryStoragePath, { startedAt, promise });
+  void promise;
+
+  return { started: true, startedAt };
 };
 
 const app = new Hono()
@@ -1611,6 +1790,33 @@ const app = new Hono()
           reason: freshness.result.reason,
         });
 
+        const job = startSummaryGenerationJob(
+          {
+            ...request,
+            prompt: freshness.result.improvementPrompt?.trim() || request.prompt,
+          },
+          summaryStoragePath,
+          { inputTokens: freshness.inputTokens, outputTokens: freshness.outputTokens },
+        );
+
+        return c.json({
+          summary: cachedSummary,
+          cached: true,
+          refreshed: true,
+          refreshing: true,
+          processing: true,
+          jobStarted: job.started,
+          retryAfterSeconds: 5,
+          scope: request.scope,
+          paperId: request.paperId,
+          summaryFreshness: {
+            ...freshness.result,
+            model: freshness.model,
+            inputTokens: freshness.inputTokens,
+            outputTokens: freshness.outputTokens,
+          },
+        });
+
         const result = await askClaude({
           ...request,
           scope: 'whole-paper',
@@ -1651,6 +1857,18 @@ const app = new Hono()
           },
         });
       }
+
+      const job = startSummaryGenerationJob(request, summaryStoragePath);
+
+      return c.json({
+        summary: '',
+        cached: false,
+        processing: true,
+        jobStarted: job.started,
+        retryAfterSeconds: 5,
+        scope: request.scope,
+        paperId: request.paperId,
+      }, 202);
 
       const result = await askClaude({
         ...request,

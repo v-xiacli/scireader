@@ -36,6 +36,12 @@ type SummaryProgress = {
   elapsedSeconds: number;
 };
 
+type SummaryResponse = {
+  summary?: string;
+  processing?: boolean;
+  retryAfterSeconds?: number;
+};
+
 const paperReadingPrompts: Record<PaperReadingMode, string> = {
   reviewer: `You are an experienced academic reviewer, research advisor, and reproducibility auditor.
 
@@ -94,6 +100,8 @@ const getSummaryProgress = (elapsedSeconds: number): SummaryProgress => {
 
 const formatSummaryProgressMessage = (progress: SummaryProgress) =>
   `${progress.label}\n\n${progress.percent}% complete · ${progress.elapsedSeconds}s elapsed\n\nI will show the summary here automatically when it is ready. After that, future opens should load the saved summary instead of regenerating.`;
+
+const wait = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
 const clampLayout = (position: { x: number; y: number }, size: { width: number; height: number }) => {
   if (typeof window === 'undefined') return { position, size };
@@ -242,27 +250,33 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const summarizePaper = useCallback(async () => {
     if (!paperId || !paperPdfUrl) return '';
 
-    const response = await fetch('/api/reader-agent/summarize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        paperId,
-        pdfUrl: paperPdfUrl,
-        title: paperTitle,
-        authors: paper?.authors,
-        journal: paper?.journal,
-        year: paper?.year,
-        prompt: readingModePrompt,
-        readingMode,
-        modePrompt: readingModePrompt,
-        scope: 'whole-paper',
-      }),
-    });
-    const result = await response.json();
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      const response = await fetch('/api/reader-agent/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paperId,
+          pdfUrl: paperPdfUrl,
+          title: paperTitle,
+          authors: paper?.authors,
+          journal: paper?.journal,
+          year: paper?.year,
+          prompt: readingModePrompt,
+          readingMode,
+          modePrompt: readingModePrompt,
+          scope: 'whole-paper',
+        }),
+      });
+      const result = (await response.json()) as SummaryResponse & { message?: string; error?: string };
 
-    if (!response.ok) throw new Error(result.message ?? result.error ?? 'Paper summary failed.');
+      if (!response.ok && response.status !== 202) throw new Error(result.message ?? result.error ?? 'Paper summary failed.');
+      if (result.summary?.trim()) return result.summary;
 
-    return result.summary as string;
+      const retryAfterSeconds = typeof result.retryAfterSeconds === 'number' ? result.retryAfterSeconds : 5;
+      await wait(Math.max(2, retryAfterSeconds) * 1000);
+    }
+
+    throw new Error('Paper summary is still processing. Please reopen this paper in a moment.');
   }, [paperId, paperPdfUrl, paperTitle, readingMode, readingModePrompt, paper?.authors, paper?.journal, paper?.year]);
 
   const generateImage = useCallback(
@@ -657,5 +671,3 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     </aside>
   );
 };
-
-
