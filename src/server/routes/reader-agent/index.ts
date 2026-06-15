@@ -10,6 +10,7 @@ import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 
 import { downloadFileAsAdmin, downloadTextAsAdmin, uploadFileAsAdmin, uploadTextAsAdmin } from '@/lib/firebase/server/storage-admin';
+import { readNeo4j, writeNeo4j } from '@/lib/neo4j';
 import { getUserStoragePrefix } from '@/lib/storage-paths';
 import { getCurrentUser, loadUploadedPapers, sessionCookieName } from '@/server/routes/auth';
 
@@ -1160,6 +1161,160 @@ const appendReferenceEvaluationRecords = async (storagePath: string, records: Re
   return saveReferenceEvaluationRecords(storagePath, [...recordMap.values()], title);
 };
 
+const getReferenceEvaluationGraphId = (record: ReferenceEvaluationRecord) =>
+  cleanPaperKeyPart([record.sourcePaperKey, record.referenceKey, record.citedAs, record.evidenceText ?? record.evaluation].filter(Boolean).join('|')).slice(0, 180);
+
+let neo4jSchemaReady = false;
+
+const ensureNeo4jReferenceSchema = async () => {
+  if (neo4jSchemaReady) return;
+
+  await writeNeo4j('CREATE CONSTRAINT paper_key_unique IF NOT EXISTS FOR (paper:Paper) REQUIRE paper.key IS UNIQUE');
+  await writeNeo4j('CREATE CONSTRAINT evaluation_id_unique IF NOT EXISTS FOR (evaluation:Evaluation) REQUIRE evaluation.id IS UNIQUE');
+  await writeNeo4j('CREATE CONSTRAINT author_name_unique IF NOT EXISTS FOR (author:Author) REQUIRE author.name IS UNIQUE');
+  await writeNeo4j('CREATE CONSTRAINT venue_name_unique IF NOT EXISTS FOR (venue:Venue) REQUIRE venue.name IS UNIQUE');
+  await writeNeo4j('CREATE TEXT INDEX paper_title_text IF NOT EXISTS FOR (paper:Paper) ON (paper.title)');
+  await writeNeo4j('CREATE TEXT INDEX evaluation_text_text IF NOT EXISTS FOR (evaluation:Evaluation) ON (evaluation.text)');
+
+  neo4jSchemaReady = true;
+};
+
+const syncReferenceEvaluationRecordsToNeo4j = async (records: ReferenceEvaluationRecord[], jobId?: string, paperId?: string) => {
+  if (!records.length) return;
+
+  const graphRecords = records.map((record) => ({
+    ...record,
+    evaluationId: getReferenceEvaluationGraphId(record),
+  }));
+
+  try {
+    await ensureNeo4jReferenceSchema();
+
+    const result = await writeNeo4j(
+      `
+UNWIND $records AS record
+MERGE (source:Paper {key: record.sourcePaperKey})
+SET source.title = coalesce(record.sourceTitle, source.title),
+    source.authors = coalesce(record.sourceAuthors, source.authors),
+    source.journal = coalesce(record.sourceJournal, source.journal),
+    source.year = coalesce(record.sourceYear, source.year)
+MERGE (reference:Paper {key: record.referenceKey})
+SET reference.title = coalesce(record.referenceTitle, reference.title),
+    reference.authors = coalesce(record.referenceAuthors, reference.authors),
+    reference.journal = coalesce(record.referenceJournal, reference.journal),
+    reference.year = coalesce(record.referenceYear, reference.year)
+MERGE (source)-[citation:CITES {citedAs: coalesce(record.citedAs, record.referenceKey)}]->(reference)
+SET citation.updatedAt = datetime()
+FOREACH (authorName IN coalesce(record.sourceAuthors, []) |
+  MERGE (author:Author {name: authorName})
+  MERGE (author)-[:AUTHORED]->(source)
+)
+FOREACH (authorName IN coalesce(record.referenceAuthors, []) |
+  MERGE (author:Author {name: authorName})
+  MERGE (author)-[:AUTHORED]->(reference)
+)
+FOREACH (_ IN CASE WHEN record.sourceJournal IS NULL OR record.sourceJournal = '' THEN [] ELSE [1] END |
+  MERGE (venue:Venue {name: record.sourceJournal})
+  MERGE (source)-[:PUBLISHED_IN]->(venue)
+)
+FOREACH (_ IN CASE WHEN record.referenceJournal IS NULL OR record.referenceJournal = '' THEN [] ELSE [1] END |
+  MERGE (venue:Venue {name: record.referenceJournal})
+  MERGE (reference)-[:PUBLISHED_IN]->(venue)
+)
+MERGE (evaluation:Evaluation {id: record.evaluationId})
+SET evaluation.text = record.evaluation,
+    evaluation.evidenceText = record.evidenceText,
+    evaluation.type = record.evaluationType,
+    evaluation.sourceSection = record.extractedFrom,
+    evaluation.createdAt = datetime(record.createdAt),
+    evaluation.updatedAt = datetime()
+MERGE (source)-[:EVALUATES]->(evaluation)
+MERGE (evaluation)-[:ABOUT]->(reference)
+      `,
+      { records: graphRecords },
+    );
+
+    console.log('[reader-agent:references] neo4j sync finished', {
+      jobId,
+      paperId,
+      records: graphRecords.length,
+      skipped: result.skipped,
+    });
+  } catch (error) {
+    console.error('[reader-agent:references] neo4j sync failed', {
+      jobId,
+      paperId,
+      records: graphRecords.length,
+      message: error instanceof Error ? error.message : 'Unknown Neo4j sync error.',
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+  }
+};
+
+const loadExternalReferenceEvaluationsFromNeo4j = async (paperKey: string): Promise<ReferenceEvaluationRecord[]> => {
+  try {
+    const result = await readNeo4j(
+      `
+MATCH (source:Paper)-[:EVALUATES]->(evaluation:Evaluation)-[:ABOUT]->(reference:Paper {key: $paperKey})
+OPTIONAL MATCH (source)-[:CITES]->(reference)
+WITH source, reference, evaluation
+ORDER BY evaluation.updatedAt DESC
+RETURN
+  reference.key AS referenceKey,
+  reference.title AS referenceTitle,
+  reference.authors AS referenceAuthors,
+  reference.journal AS referenceJournal,
+  reference.year AS referenceYear,
+  source.key AS sourcePaperKey,
+  source.title AS sourceTitle,
+  source.authors AS sourceAuthors,
+  source.journal AS sourceJournal,
+  source.year AS sourceYear,
+  evaluation.text AS evaluation,
+  evaluation.evidenceText AS evidenceText,
+  evaluation.type AS evaluationType,
+  evaluation.sourceSection AS extractedFrom,
+  toString(evaluation.createdAt) AS createdAt
+LIMIT 80
+      `,
+      { paperKey },
+      (record): ReferenceEvaluationRecord => ({
+        referenceKey: String(record.get('referenceKey') ?? paperKey),
+        referenceTitle: typeof record.get('referenceTitle') === 'string' ? record.get('referenceTitle') : undefined,
+        referenceAuthors: Array.isArray(record.get('referenceAuthors')) ? record.get('referenceAuthors') : undefined,
+        referenceJournal: typeof record.get('referenceJournal') === 'string' ? record.get('referenceJournal') : undefined,
+        referenceYear: typeof record.get('referenceYear') === 'string' ? record.get('referenceYear') : undefined,
+        sourcePaperKey: String(record.get('sourcePaperKey') ?? ''),
+        sourceTitle: typeof record.get('sourceTitle') === 'string' ? record.get('sourceTitle') : undefined,
+        sourceAuthors: Array.isArray(record.get('sourceAuthors')) ? record.get('sourceAuthors') : undefined,
+        sourceJournal: typeof record.get('sourceJournal') === 'string' ? record.get('sourceJournal') : undefined,
+        sourceYear: typeof record.get('sourceYear') === 'string' ? record.get('sourceYear') : undefined,
+        extractedFrom: record.get('extractedFrom') === 'introduction' ? 'introduction' : 'introduction',
+        evaluation: String(record.get('evaluation') ?? ''),
+        evidenceText: typeof record.get('evidenceText') === 'string' ? record.get('evidenceText') : undefined,
+        evaluationType: typeof record.get('evaluationType') === 'string' ? record.get('evaluationType') : undefined,
+        createdAt: String(record.get('createdAt') ?? new Date().toISOString()),
+      }),
+    );
+
+    console.log('[reader-agent:references] neo4j external evaluations loaded', {
+      paperKey,
+      records: result.records.length,
+      skipped: result.skipped,
+    });
+
+    return result.records.filter((record) => record.sourcePaperKey && record.evaluation);
+  } catch (error) {
+    console.error('[reader-agent:references] neo4j external evaluation load failed', {
+      paperKey,
+      message: error instanceof Error ? error.message : 'Unknown Neo4j read error.',
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+
+    return [];
+  }
+};
+
 const extractAndStoreIntroductionReferenceEvaluations = async (request: z.infer<typeof readerRequestSchema>, extractedPdf: ExtractedPdf, jobId?: string) => {
   const { introductionText, referencesText } = extractIntroductionReferenceContext(extractedPdf);
 
@@ -1239,6 +1394,8 @@ ${referencesText || '[References section not found]'}`,
         'External evaluations of this paper from other papers',
       );
     }
+
+    await syncReferenceEvaluationRecordsToNeo4j(records, jobId, request.paperId);
   }
 
   console.log('[reader-agent:references] introduction evaluation extraction finished', {
