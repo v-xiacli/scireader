@@ -11,6 +11,10 @@ import type { PaperReadingMode, PaperSummary } from '@/types/paper';
 type AuthMode = 'login' | 'signup';
 type AuthUser = { id: string; email: string };
 type TokenEstimate = { inputTokens: number; model: string };
+type ViewerPreferences = {
+  readingMode?: PaperReadingMode;
+  detailedReport?: boolean;
+};
 type ExtractedPaperMetadata = {
   paperKey: string;
   title?: string;
@@ -57,6 +61,30 @@ const HomePage = () => {
   const isLoggedIn = Boolean(authUser);
   const papers = [...uploadedPapers, ...mockPapers];
 
+  const applyViewerPreferences = (preferences?: ViewerPreferences | null) => {
+    if (preferences?.readingMode) setReadingMode(preferences.readingMode);
+    if (typeof preferences?.detailedReport === 'boolean') setDetailedReport(preferences.detailedReport);
+  };
+
+  const loadViewerPreferences = async () => {
+    try {
+      const response = await fetch('/api/auth/viewer-preferences');
+      const result = await response.json();
+
+      if (response.ok) applyViewerPreferences(result.preferences);
+    } catch {}
+  };
+
+  const saveReadingPreferences = (next: { readingMode?: PaperReadingMode; detailedReport?: boolean }) => {
+    if (!isLoggedIn) return;
+
+    void fetch('/api/auth/viewer-preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(next),
+    });
+  };
+
   const loadUploadedPapers = async () => {
     try {
       const response = await fetch('/api/auth/uploaded-papers');
@@ -75,6 +103,7 @@ const HomePage = () => {
 
         if (response.ok && result.user) {
           setAuthUser(result.user);
+          await loadViewerPreferences();
           await loadUploadedPapers();
         }
       } catch {
@@ -102,6 +131,7 @@ const HomePage = () => {
       if (!response.ok) throw new Error(result.error ?? result.message ?? 'Authentication failed.');
 
       setAuthUser(result.user);
+      await loadViewerPreferences();
       await loadUploadedPapers();
       setAuthMessage(`${authMode === 'signup' ? 'Account created' : 'Logged in'} as ${result.user.email}.`);
       setPassword('');
@@ -408,7 +438,10 @@ const HomePage = () => {
                   <button
                     className={`rounded-lg px-3 py-1.5 text-sm transition ${readingMode === mode.id ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
                     key={mode.id}
-                    onClick={() => setReadingMode(mode.id)}
+                    onClick={() => {
+                      setReadingMode(mode.id);
+                      saveReadingPreferences({ readingMode: mode.id, detailedReport });
+                    }}
                     title={mode.description}
                     type="button"
                   >
@@ -418,7 +451,14 @@ const HomePage = () => {
               </div>
               <button
                 className={`rounded-xl border px-3 py-2 text-sm font-medium transition ${detailedReport ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
-                onClick={() => setDetailedReport((current) => !current)}
+                onClick={() => {
+                  setDetailedReport((current) => {
+                    const nextDetailedReport = !current;
+                    saveReadingPreferences({ readingMode, detailedReport: nextDetailedReport });
+
+                    return nextDetailedReport;
+                  });
+                }}
                 title={detailedReport ? '生成完整深度报告' : '只显示极简速览'}
                 type="button"
               >
