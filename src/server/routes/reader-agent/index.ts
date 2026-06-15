@@ -1161,6 +1161,19 @@ const appendReferenceEvaluationRecords = async (storagePath: string, records: Re
   return saveReferenceEvaluationRecords(storagePath, [...recordMap.values()], title);
 };
 
+const getReferenceEvaluationDedupKey = (record: ReferenceEvaluationRecord) =>
+  [record.referenceKey, record.sourcePaperKey, record.citedAs ?? '', record.evidenceText ?? record.evaluation.slice(0, 160)].join('|');
+
+const mergeReferenceEvaluationRecords = (...recordGroups: ReferenceEvaluationRecord[][]) => {
+  const recordMap = new Map<string, ReferenceEvaluationRecord>();
+
+  for (const record of recordGroups.flat()) {
+    recordMap.set(getReferenceEvaluationDedupKey(record), record);
+  }
+
+  return [...recordMap.values()];
+};
+
 const getReferenceEvaluationGraphId = (record: ReferenceEvaluationRecord) =>
   cleanPaperKeyPart([record.sourcePaperKey, record.referenceKey, record.citedAs, record.evidenceText ?? record.evaluation].filter(Boolean).join('|')).slice(0, 180);
 
@@ -2412,11 +2425,17 @@ const app = new Hono()
       const cachedSummary = (await downloadTextIfExists(summaryStoragePath)) ?? '';
       const storedHistory = await loadDialogHistory(user.id, paperKey);
       const sharedHistory = await loadSharedPaperDialogHistory(paperKey);
-      const externalEvaluations = await loadReferenceEvaluationRecords(getReferenceExternalEvaluationsPath(paperKey));
+      const [neo4jExternalEvaluations, blobExternalEvaluations] = await Promise.all([
+        loadExternalReferenceEvaluationsFromNeo4j(paperKey),
+        loadReferenceEvaluationRecords(getReferenceExternalEvaluationsPath(paperKey)),
+      ]);
+      const externalEvaluations = mergeReferenceEvaluationRecords(neo4jExternalEvaluations, blobExternalEvaluations);
       console.log('[reader-agent:references] external evaluations loaded for retrieval', {
         paperId: request.paperId,
         paperKey,
         records: externalEvaluations.length,
+        neo4jRecords: neo4jExternalEvaluations.length,
+        blobRecords: blobExternalEvaluations.length,
       });
       const translatedPrompt = await translateUserQuestionToEnglish(request);
       const nowForTranslatedPipeline = new Date().toISOString();
