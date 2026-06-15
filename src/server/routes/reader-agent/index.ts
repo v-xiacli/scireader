@@ -335,7 +335,7 @@ const getReadingMode = (request: Pick<z.infer<typeof readerRequestSchema>, 'read
 const getSummaryDetailMode = (request: Pick<z.infer<typeof readerRequestSchema>, 'detailedReport'>) => request.detailedReport === false ? 'brief' : 'detailed';
 
 const getPaperSummaryStoragePath = (request: z.infer<typeof readerRequestSchema>, pdfStoragePath?: string | null) =>
-  `paper-cache/${getPaperIdentitySlug(request)}/${pdfStoragePath ? 'uploaded' : 'sample'}.reader-summary.${getReadingMode(request)}.${getSummaryDetailMode(request)}.deep-v1.md`;
+  `paper-cache/${getPaperIdentitySlug(request)}/${pdfStoragePath ? 'uploaded' : 'sample'}.reader-summary.${getReadingMode(request)}.${getSummaryDetailMode(request)}.physics-v2.md`;
 
 const getPaperDialogHistoryPath = (userId: string, paperKey: string) => `user-paper-history/${userId}/${paperKey}.md`;
 
@@ -990,11 +990,11 @@ const checkSummaryFreshnessWithCheapModel = async (request: z.infer<typeof reade
     model: modelSelection.model,
     max_tokens: 1200,
     system:
-      '你是 SCIReader 的低成本总结质检助手。你只能检查已保存论文总结是否已经足够完整、结构化，并适合继续复用。不要重新总结论文，不要做深度论文理解。只输出 JSON。',
+      '你是 SCIReader 的低成本总结质检助手。你只能检查已保存论文报告是否已经足够简洁、结构化，并包含物理机制、关键数值、证据强度和主要局限。不要重新总结论文，不要做深度论文理解。只输出 JSON。',
     messages: [
       {
         role: 'user',
-        content: `论文标题: ${request.title ?? request.paperId}\n期刊: ${request.journal ?? '未知'}\n年份: ${request.year ?? '未知'}\n\n用户期望的总结任务:\n${request.prompt}\n\n已保存总结:\n${cachedSummary.slice(0, 20000)}\n\n请判断已保存总结是否需要用高成本模型重新读取 PDF 更新。只有当总结明显为空泛、缺少方法/实验/结果/局限/图表公式说明、与用户期望不匹配，或看起来被截断时，fresh=false。输出 JSON，格式为 {"fresh": boolean, "reason": string, "improvementPrompt": string }。fresh=false 时 improvementPrompt 给高成本模型明确说明需要补强什么；fresh=true 时不要输出 improvementPrompt。`,
+        content: `论文标题: ${request.title ?? request.paperId}\n期刊: ${request.journal ?? '未知'}\n年份: ${request.year ?? '未知'}\n\n用户期望的总结任务:\n${request.prompt}\n\n已保存总结:\n${cachedSummary.slice(0, 20000)}\n\n请判断已保存总结是否需要用高成本模型重新读取 PDF 更新。只有当总结明显为空泛、过长失控、缺少物理机制/关键数值/证据强度/主要局限、与用户期望不匹配，或看起来被截断时，fresh=false。输出 JSON，格式为 {"fresh": boolean, "reason": string, "improvementPrompt": string }。fresh=false 时 improvementPrompt 给高成本模型明确说明需要补强什么；fresh=true 时不要输出 improvementPrompt。`,
       },
     ],
   });
@@ -1043,7 +1043,7 @@ const translateReaderAnswerToChinese = async (englishAnswer: string, request: z.
   const client = createAnthropicClient(modelSelection.target);
   const response = await client.messages.create({
     model: modelSelection.model,
-    max_tokens: 12000,
+    max_tokens: 5000,
     system:
       'You are a precise academic translator. Translate the assistant answer into natural Chinese for the user interface. Preserve Markdown structure, equations, variable names, units, numbers, figure/table labels, citations, URLs, and field-specific terminology. Do not add new analysis or remove caveats.',
     messages: [
@@ -1238,14 +1238,14 @@ const estimateTokensLocally = (text: string, prompt: string) => estimateTextToke
 
 const estimatePdfTokensFromBytes = (pdfBytes: number, prompt: string) => Math.ceil(pdfBytes / 5) + estimateTextTokensLocally(prompt);
 
-const SUMMARY_CHUNK_MAX_CHARS = 8_000;
+const SUMMARY_CHUNK_MAX_CHARS = 12_000;
 const SUMMARY_CHUNK_TIMEOUT_MS = 90_000;
 const SUMMARY_FINAL_TIMEOUT_MS = 120_000;
 
 const getCompactSummaryInstruction = (mode: PaperReadingMode) =>
   mode === 'reviewer'
-    ? 'You are preparing notes for a critical paper review. Focus on the real contribution, novelty, assumptions, evidence, quantitative results, credibility concerns, limitations, and questions for follow-up.'
-    : 'You are preparing notes for a research reader. Focus on the core idea, reusable design patterns, literature positioning, key evidence, comparison metrics, limitations, and future opportunities.';
+    ? 'You are a physics/electromagnetics reviewer. Extract only the real physical mechanism, novelty, key numbers with units, evidence strength, and the largest credibility risk. Be terse.'
+    : 'You are a physics/electromagnetics research reader. Extract only the core physical idea, mechanism, key numbers with units, reusable design insight, and limits. Be terse.';
 
 const briefSummaryPrompt = `你将收到一份针对某篇论文生成的"深度阅读笔记"（完整版，可能来自"审稿模式"或"写稿模式"两种模板之一）。
 
@@ -1483,7 +1483,13 @@ const generateChunkedEnglishSummary = async (
         chunkResult = await createExpensiveTextResponse(
           `${compactInstruction}
 
-Respond in English. This is batch ${index + 1} of ${chunks.length}. Write compact notes only for the provided pages. Keep the output under 900 words. Preserve concrete numbers, equations, figure/table labels, methods, evidence, limitations, and open questions. Do not write a full report yet. Do not pretend to have read pages outside this batch.`,
+Respond in English. This is batch ${index + 1} of ${chunks.length}. Write exactly 5 bullets, each under 28 words:
+- mechanism/design trick
+- key structure or equation only if essential
+- strongest 1-3 numbers with units
+- evidence type: simulation/measurement/baseline
+- main weakness or missing proof
+Do not write paragraphs. Do not write a full report. Do not mention pages outside this batch.`,
           `Paper title: ${request.title ?? request.paperId}
 Reading mode: ${getReadingMode(request)}
 Pages in this batch: ${chunk.pageNumbers.join(', ') || 'unknown'}
@@ -1493,7 +1499,7 @@ ${request.prompt}
 
 Extracted text for this batch:
 ${chunk.text}`,
-          1400,
+          450,
           { jobId, paperId: request.paperId, phase: 'chunk', chunk: index + 1, chunks: chunks.length, pages: chunk.pageNumbers.join(',') },
           SUMMARY_CHUNK_TIMEOUT_MS,
         );
@@ -1515,13 +1521,13 @@ ${chunk.text}`,
         chunkResult = await createExpensiveTextResponse(
           `${compactInstruction}
 
-Respond in English. This is a retry for batch ${index + 1} of ${chunks.length}. Write very short notes under 350 words. Extract only the most important contribution, method/evidence, numbers, limitations, and figure/table references from the provided text.`,
+Respond in English. Retry output: exactly 4 bullets, each under 22 words. Keep only mechanism, key numbers, evidence type, and main weakness.`,
           `Paper title: ${request.title ?? request.paperId}
 Pages in this batch: ${chunk.pageNumbers.join(', ') || 'unknown'}
 
 Extracted text for this batch:
 ${chunk.text.slice(0, 5000)}`,
-          700,
+          260,
           { jobId, paperId: request.paperId, phase: 'chunk-retry', chunk: index + 1, chunks: chunks.length, pages: chunk.pageNumbers.join(',') },
           60_000,
         ).catch((error) => {
@@ -1560,6 +1566,33 @@ ${chunk.text.slice(0, 5000)}`,
       });
     }
 
+    if (request.detailedReport === false) {
+      const combinedChunkNotes = chunkNotes.join('\n\n---\n\n');
+
+      setJobStatus({
+        phase: 'translating',
+        currentChunk: undefined,
+        totalChunks: chunks.length,
+        message: 'Brief mode: skipping final GPT-5.5 synthesis; cheap model will compress chunk notes.',
+      });
+
+      console.log('[reader-agent:summarize] brief mode skipped final synthesis', {
+        jobId,
+        paperId: request.paperId,
+        chunks: chunks.length,
+        noteChars: combinedChunkNotes.length,
+        inputTokens,
+        outputTokens,
+      });
+
+      return {
+        answer: combinedChunkNotes,
+        inputTokens,
+        outputTokens,
+        model: model || selectExpensiveReaderModel().model,
+      };
+    }
+
     console.log('[reader-agent:summarize] final synthesis started', {
       jobId,
       paperId: request.paperId,
@@ -1588,9 +1621,16 @@ ${chunkNotes.join('\n\n---\n\n')}`;
       finalResult = await createExpensiveTextResponse(
         `${compactInstruction}
 
-Respond in English. Synthesize the batch notes into one coherent final paper-reading report. Do not add claims that are not supported by the notes. Preserve important numerical evidence and explicitly mention when evidence is insufficient. Keep it concise but useful; avoid repeating the same point across sections.`,
+Respond in English. Synthesize the batch notes into a compact physics reading report under 900 words.
+Use exactly these sections:
+1. Verdict
+2. Physical mechanism
+3. Key numbers
+4. Evidence and credibility
+5. Main limitations
+Do not add unsupported claims. Do not repeat points. Do not include a follow-up question index.`,
         finalInput,
-        4500,
+        1800,
         { jobId, paperId: request.paperId, phase: 'final-synthesis', chunks: chunks.length },
         SUMMARY_FINAL_TIMEOUT_MS,
       );
@@ -1611,9 +1651,9 @@ Respond in English. Synthesize the batch notes into one coherent final paper-rea
       finalResult = await createExpensiveTextResponse(
         `${compactInstruction}
 
-Respond in English. Create a short final report under 1800 words from these batch notes. Preserve only the strongest evidence and mark missing/failed batches as incomplete evidence.`,
+Respond in English. Create a short final report under 600 words from these batch notes. Preserve only mechanism, key numbers, evidence strength, and limits.`,
         finalInput.slice(0, 35_000),
-        2500,
+        1200,
         { jobId, paperId: request.paperId, phase: 'final-synthesis-retry', chunks: chunks.length },
         75_000,
       ).catch((error) => {
