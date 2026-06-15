@@ -152,6 +152,9 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const dragOffsetRef = useRef(defaultPosition);
   const resizeStartRef = useRef({ x: 0, y: 0, width: defaultSize.width, height: defaultSize.height, left: defaultPosition.x, top: defaultPosition.y });
   const resizeHandleRef = useRef<ResizeHandle>('bottom-right');
+  const appliedInitialPositionKeyRef = useRef('');
+  const appliedInitialSizeKeyRef = useRef('');
+  const sizeRef = useRef(initialSize ?? defaultSize);
   const [messages, setMessages] = useState<ChatMessage[]>(mockMessages);
   const [input, setInput] = useState('');
   const [position, setPosition] = useState(initialPosition ?? defaultPosition);
@@ -172,6 +175,10 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const readingModeLabel = readingMode === 'reviewer' ? '审稿人模式' : '读者模式';
 
   useEffect(() => {
+    sizeRef.current = size;
+  }, [size]);
+
+  useEffect(() => {
     console.info('Floating chat mounted/rendered.', {
       hasPaper,
       paperId,
@@ -185,6 +192,9 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
 
   useEffect(() => {
     if (!initialPosition) return;
+    const initialPositionKey = `${initialPosition.x}:${initialPosition.y}`;
+    if (appliedInitialPositionKeyRef.current === initialPositionKey) return;
+    appliedInitialPositionKeyRef.current = initialPositionKey;
 
     setPosition((current) => {
       const nextPosition = clampLayout(initialPosition, size).position;
@@ -195,10 +205,20 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
 
   useEffect(() => {
     if (!initialSize) return;
+    const initialSizeKey = `${initialSize.width}:${initialSize.height}`;
+    if (appliedInitialSizeKeyRef.current === initialSizeKey) return;
+    appliedInitialSizeKeyRef.current = initialSizeKey;
 
-    const layout = clampLayout(position, initialSize);
-    setPosition((current) => (current.x === layout.position.x && current.y === layout.position.y ? current : layout.position));
-    setSize((current) => (current.width === layout.size.width && current.height === layout.size.height ? current : layout.size));
+    setPosition((current) => {
+      const layout = clampLayout(current, initialSize);
+
+      return current.x === layout.position.x && current.y === layout.position.y ? current : layout.position;
+    });
+    setSize((current) => {
+      const layout = clampLayout(position, initialSize);
+
+      return current.width === layout.size.width && current.height === layout.size.height ? current : layout.size;
+    });
   }, [initialSize, position]);
 
   useEffect(() => {
@@ -211,7 +231,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
         if (initialPosition) return current;
 
         return {
-          x: Math.max(edgePadding, window.innerWidth - size.width - 28),
+          x: Math.max(edgePadding, window.innerWidth - sizeRef.current.width - 28),
           y: current.y,
         };
       });
@@ -221,7 +241,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     window.addEventListener('resize', placeOnRight);
 
     return () => window.removeEventListener('resize', placeOnRight);
-  }, [initialPosition, size.width]);
+  }, [initialPosition]);
 
   const askReaderAgent = useCallback(
     async (prompt: string, scope: 'whole-paper' | 'selected-text' = 'whole-paper') => {
