@@ -158,11 +158,26 @@ const loadPdfjs = async () => {
   return import('pdfjs-dist/legacy/build/pdf.mjs');
 };
 
+const getPdfDocumentOptions = (data: Uint8Array) => ({
+  data,
+  useWorkerFetch: false,
+  isEvalSupported: false,
+  disableFontFace: true,
+  standardFontDataUrl: path.join(process.cwd(), 'node_modules', 'pdfjs-dist', 'standard_fonts') + path.sep,
+});
+
 const extractPdfText = async (localPdfPath: string): Promise<ExtractedPdf> => {
+  const startedAt = Date.now();
   const pdfjs = await loadPdfjs();
   const data = new Uint8Array(await fs.readFile(localPdfPath));
-  const pdf = await pdfjs.getDocument({ data, useWorkerFetch: false, isEvalSupported: false, disableFontFace: true }).promise;
+  const pdf = await pdfjs.getDocument(getPdfDocumentOptions(data)).promise;
   const pages: ExtractedPdfPage[] = [];
+
+  console.log('[reader-agent:pdf] text extraction started', {
+    localPdfPath,
+    bytes: data.byteLength,
+    pages: pdf.numPages,
+  });
 
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
     const page = await pdf.getPage(pageNumber);
@@ -178,24 +193,41 @@ const extractPdfText = async (localPdfPath: string): Promise<ExtractedPdf> => {
 
   const fullText = pages.map((page) => `[第 ${page.pageNumber} 页]\n${page.text}`).join('\n\n');
   const text = fullText.length > MAX_EXTRACTED_TEXT_CHARS ? `${fullText.slice(0, MAX_EXTRACTED_TEXT_CHARS)}\n\n[PDF 文本过长，已截断。]` : fullText;
+  const figureCaptions = extractFigureCaptions(fullText);
+
+  console.log('[reader-agent:pdf] text extraction finished', {
+    localPdfPath,
+    durationMs: Date.now() - startedAt,
+    pagesWithText: pages.length,
+    extractedChars: fullText.length,
+    returnedChars: text.length,
+    figureCaptions: figureCaptions.length,
+  });
 
   return {
     pages,
     text,
-    figureCaptions: extractFigureCaptions(fullText),
+    figureCaptions,
   };
 };
 
 const renderPdfPageImages = async (localPdfPath: string, pageNumbers?: number[]): Promise<PdfPageImage[]> => {
+  const startedAt = Date.now();
   const canvas = await ensurePdfCanvasPolyfills();
   const pdfjs = await loadPdfjs();
 
   const data = new Uint8Array(await fs.readFile(localPdfPath));
-  const pdf = await pdfjs.getDocument({ data, useWorkerFetch: false, isEvalSupported: false, disableFontFace: true }).promise;
+  const pdf = await pdfjs.getDocument(getPdfDocumentOptions(data)).promise;
   const pagesToRender = (pageNumbers?.length ? pageNumbers : Array.from({ length: Math.min(pdf.numPages, MAX_PAGE_IMAGES) }, (_, index) => index + 1))
     .filter((pageNumber) => pageNumber >= 1 && pageNumber <= pdf.numPages)
     .slice(0, MAX_PAGE_IMAGES);
   const images: PdfPageImage[] = [];
+
+  console.log('[reader-agent:pdf] page rendering started', {
+    localPdfPath,
+    pages: pdf.numPages,
+    pagesToRender,
+  });
 
   for (const pageNumber of pagesToRender) {
     const page = await pdf.getPage(pageNumber);
@@ -211,6 +243,12 @@ const renderPdfPageImages = async (localPdfPath: string, pageNumbers?: number[])
     images.push({ pageNumber, data: pageCanvas.toBuffer('image/png').toString('base64') });
     page.cleanup();
   }
+
+  console.log('[reader-agent:pdf] page rendering finished', {
+    localPdfPath,
+    durationMs: Date.now() - startedAt,
+    renderedPages: images.map((image) => image.pageNumber),
+  });
 
   return images;
 };
@@ -380,7 +418,7 @@ const inferMetadataFromText = (text: string, fallbackTitle?: string): PaperMetad
 const extractPaperMetadata = async (localPdfPath: string, fallbackTitle?: string): Promise<PaperMetadata> => {
   const pdfjs = await loadPdfjs();
   const data = new Uint8Array(await fs.readFile(localPdfPath));
-  const pdf = await pdfjs.getDocument({ data, useWorkerFetch: false, isEvalSupported: false, disableFontFace: true }).promise;
+  const pdf = await pdfjs.getDocument(getPdfDocumentOptions(data)).promise;
   const metadata = await pdf.getMetadata().catch(() => null);
   const info = (metadata?.info ?? {}) as Record<string, unknown>;
   const metadataTitle = getMetadataInfoValue(info, 'Title');
@@ -872,9 +910,16 @@ const triageWithCheapModel = async (request: z.infer<typeof readerRequestSchema>
 };
 
 const estimateTokenConsumption = async (request: z.infer<typeof tokenEstimateRequestSchema>) => {
+  const startedAt = Date.now();
   const storagePath = resolveUploadedPdfStoragePath(request.pdfUrl);
 
   if (!storagePath) throw new Error('Only uploaded PDFs can be estimated.');
+
+  console.log('[reader-agent:count-tokens] started', {
+    paperId: request.paperId,
+    title: request.title,
+    storagePath,
+  });
 
   const { buffer } = await downloadFileAsAdmin(storagePath);
   const modelSelection = selectTokenEstimateModel(request);
@@ -899,6 +944,15 @@ const estimateTokenConsumption = async (request: z.infer<typeof tokenEstimateReq
         ],
       },
     ],
+  });
+
+  console.log('[reader-agent:count-tokens] finished', {
+    paperId: request.paperId,
+    model: modelSelection.model,
+    target: modelSelection.target,
+    inputTokens: response.input_tokens,
+    pdfBytes: buffer.byteLength,
+    durationMs: Date.now() - startedAt,
   });
 
   return {
@@ -966,6 +1020,12 @@ const app = new Hono()
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Token estimate failed.';
       const status = message === 'Not authenticated.' ? 401 : message === 'You do not have access to this PDF.' ? 403 : 500;
+
+      console.error('[reader-agent:count-tokens] failed', {
+        paperId: request.paperId,
+        status,
+        message,
+      });
 
       return c.json({ error: 'Token estimate failed.', message }, status);
     }
