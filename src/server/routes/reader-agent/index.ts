@@ -1093,6 +1093,13 @@ const app = new Hono()
       const summaryStoragePath = getPaperSummaryStoragePath(request, storagePath);
       const cachedSummary = await downloadTextIfExists(summaryStoragePath);
 
+      console.log('[reader-agent:summarize] request', {
+        paperId: request.paperId,
+        title: request.title,
+        hasCachedSummary: Boolean(cachedSummary?.trim()),
+        summaryStoragePath,
+      });
+
       if (cachedSummary?.trim()) {
         let freshness;
 
@@ -1100,6 +1107,11 @@ const app = new Hono()
           freshness = await checkSummaryFreshnessWithCheapModel(request, cachedSummary);
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Cheap summary freshness check failed.';
+
+          console.error('[reader-agent:summarize] cheap freshness check failed; reusing cached summary', {
+            paperId: request.paperId,
+            message,
+          });
 
           return c.json({
             summary: cachedSummary,
@@ -1117,6 +1129,14 @@ const app = new Hono()
         }
 
         if (freshness.result.fresh) {
+          console.log('[reader-agent:summarize] cheap freshness check passed; reusing cached summary', {
+            paperId: request.paperId,
+            model: freshness.model,
+            inputTokens: freshness.inputTokens,
+            outputTokens: freshness.outputTokens,
+            reason: freshness.result.reason,
+          });
+
           return c.json({
             summary: cachedSummary,
             cached: true,
@@ -1131,12 +1151,28 @@ const app = new Hono()
           });
         }
 
+        console.log('[reader-agent:summarize] cheap freshness check failed; refreshing summary with expensive model', {
+          paperId: request.paperId,
+          model: freshness.model,
+          inputTokens: freshness.inputTokens,
+          outputTokens: freshness.outputTokens,
+          reason: freshness.result.reason,
+        });
+
         const result = await askClaude({
           ...request,
           scope: 'whole-paper',
           prompt: freshness.result.improvementPrompt?.trim() || request.prompt,
         }, selectExpensiveReaderModel());
         const summary = result.answer;
+
+        console.log('[reader-agent:summarize] expensive summary generation finished', {
+          paperId: request.paperId,
+          model: result.model,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          saved: Boolean(summary.trim()),
+        });
 
         if (summary.trim()) {
           await uploadTextAsAdmin(summary, summaryStoragePath);
@@ -1170,6 +1206,14 @@ const app = new Hono()
       }, selectExpensiveReaderModel());
       const summary = result.answer;
 
+      console.log('[reader-agent:summarize] no cached summary; expensive summary generation finished', {
+        paperId: request.paperId,
+        model: result.model,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        saved: Boolean(summary.trim()),
+      });
+
       if (summary.trim()) {
         await uploadTextAsAdmin(summary, summaryStoragePath);
       }
@@ -1183,6 +1227,12 @@ const app = new Hono()
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Paper summary failed.';
       const status = message === 'Not authenticated.' ? 401 : message === 'You do not have access to this PDF.' ? 403 : 500;
+
+      console.error('[reader-agent:summarize] request failed', {
+        paperId: request.paperId,
+        status,
+        message,
+      });
 
       return c.json({ error: 'Paper summary failed.', message }, status);
     }
