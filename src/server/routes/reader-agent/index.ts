@@ -1067,47 +1067,47 @@ const normalizeReferenceEvaluationRecords = (rawRecords: unknown[], request: z.i
   const createdAt = new Date().toISOString();
 
   const normalizedRecords = rawRecords.map((rawRecord): ReferenceEvaluationRecord | null => {
-      if (!rawRecord || typeof rawRecord !== 'object') return null;
+    if (!rawRecord || typeof rawRecord !== 'object') return null;
 
-      const record = rawRecord as Record<string, unknown>;
-      const referenceTitle = typeof record.referenceTitle === 'string' ? record.referenceTitle.trim() : undefined;
-      const referenceAuthors = Array.isArray(record.referenceAuthors)
-        ? record.referenceAuthors.filter((author): author is string => typeof author === 'string' && Boolean(author.trim())).map((author) => author.trim()).slice(0, 4)
-        : parseAuthors(typeof record.referenceAuthors === 'string' ? record.referenceAuthors : undefined);
-      const referenceJournal = typeof record.referenceJournal === 'string' ? record.referenceJournal.trim() : undefined;
-      const referenceYear = typeof record.referenceYear === 'string' ? record.referenceYear.trim() : undefined;
-      const citedAs = typeof record.citedAs === 'string' ? record.citedAs.trim() : undefined;
-      const evaluation = typeof record.evaluation === 'string' ? record.evaluation.trim() : '';
-      const evidenceText = typeof record.evidenceText === 'string' ? record.evidenceText.trim() : undefined;
-      const evaluationType = typeof record.evaluationType === 'string' ? record.evaluationType.trim() : undefined;
-      const referenceKey = getPaperIdentityKey({
-        title: referenceTitle,
-        authors: referenceAuthors,
-        journal: referenceJournal,
-        year: referenceYear,
-        paperId: citedAs,
-      });
+    const record = rawRecord as Record<string, unknown>;
+    const referenceTitle = typeof record.referenceTitle === 'string' ? record.referenceTitle.trim() : undefined;
+    const referenceAuthors = Array.isArray(record.referenceAuthors)
+      ? record.referenceAuthors.filter((author): author is string => typeof author === 'string' && Boolean(author.trim())).map((author) => author.trim()).slice(0, 4)
+      : parseAuthors(typeof record.referenceAuthors === 'string' ? record.referenceAuthors : undefined);
+    const referenceJournal = typeof record.referenceJournal === 'string' ? record.referenceJournal.trim() : undefined;
+    const referenceYear = typeof record.referenceYear === 'string' ? record.referenceYear.trim() : undefined;
+    const citedAs = typeof record.citedAs === 'string' ? record.citedAs.trim() : undefined;
+    const evaluation = typeof record.evaluation === 'string' ? record.evaluation.trim() : '';
+    const evidenceText = typeof record.evidenceText === 'string' ? record.evidenceText.trim() : undefined;
+    const evaluationType = typeof record.evaluationType === 'string' ? record.evaluationType.trim() : undefined;
+    const referenceKey = getPaperIdentityKey({
+      title: referenceTitle,
+      authors: referenceAuthors,
+      journal: referenceJournal,
+      year: referenceYear,
+      paperId: citedAs,
+    });
 
-      if (!evaluation || referenceKey === 'uploadedpaper') return null;
+    if (!evaluation || referenceKey === 'uploadedpaper') return null;
 
-      return {
-        referenceKey,
-        referenceTitle,
-        referenceAuthors,
-        referenceJournal,
-        referenceYear,
-        citedAs,
-        sourcePaperKey,
-        sourceTitle: request.title ?? request.paperId,
-        sourceAuthors,
-        sourceJournal: request.journal,
-        sourceYear: request.year,
-        extractedFrom: 'introduction' as const,
-        evaluation,
-        evidenceText,
-        evaluationType,
-        createdAt,
-      };
+    return {
+      referenceKey,
+      referenceTitle,
+      referenceAuthors,
+      referenceJournal,
+      referenceYear,
+      citedAs,
+      sourcePaperKey,
+      sourceTitle: request.title ?? request.paperId,
+      sourceAuthors,
+      sourceJournal: request.journal,
+      sourceYear: request.year,
+      extractedFrom: 'introduction' as const,
+      evaluation,
+      evidenceText,
+      evaluationType,
+      createdAt,
+    };
     });
 
   return normalizedRecords.filter((record): record is ReferenceEvaluationRecord => record !== null).slice(0, 30);
