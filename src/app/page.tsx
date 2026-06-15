@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
 import { mockPapers, mockUserAccount } from '@/features/papers/mock-data';
-import type { PaperSummary } from '@/types/paper';
+import type { PaperReadingMode, PaperSummary } from '@/types/paper';
 
 type AuthMode = 'login' | 'signup';
 type AuthUser = { id: string; email: string };
@@ -18,6 +18,11 @@ type ExtractedPaperMetadata = {
   journal?: string;
   year?: string;
 };
+
+const readingModes: Array<{ id: PaperReadingMode; label: string; description: string }> = [
+  { id: 'reviewer', label: '审稿人模式', description: '重点检查创新性、证据强度、可信度和局限。' },
+  { id: 'reader', label: '读者模式', description: '重点提炼思路、可复用方法、文献定位和后续问题。' },
+];
 
 const normalizeDownloadUrl = (downloadUrl: string) => {
   const trimmed = downloadUrl.trim();
@@ -46,6 +51,7 @@ const HomePage = () => {
   const [deletingFilePath, setDeletingFilePath] = useState<string | null>(null);
   const [tokenEstimate, setTokenEstimate] = useState<TokenEstimate | null>(null);
   const [tokenEstimateMessage, setTokenEstimateMessage] = useState('Upload a PDF to estimate input tokens.');
+  const [readingMode, setReadingMode] = useState<PaperReadingMode>('reviewer');
 
   const isLoggedIn = Boolean(authUser);
   const papers = [...uploadedPapers, ...mockPapers];
@@ -205,6 +211,7 @@ const HomePage = () => {
         filePath: result.filePath,
         journal: metadata.journal?.trim(),
         year: metadata.year?.trim(),
+        readingMode,
       };
 
       const saveResponse = await fetch('/api/auth/uploaded-papers', {
@@ -218,7 +225,7 @@ const HomePage = () => {
 
       void estimateTokenConsumption(uploadedPaper);
 
-      router.push(`/papers/${encodeURIComponent(paperId)}?pdfUrl=${encodeURIComponent(uploadedPaper.pdfUrl)}&filePath=${encodeURIComponent(uploadedPaper.filePath ?? '')}&title=${encodeURIComponent(uploadedPaper.title)}&authors=${encodeURIComponent(uploadedPaper.authors)}&journal=${encodeURIComponent(uploadedPaper.journal ?? '')}&year=${encodeURIComponent(uploadedPaper.year ?? '')}`);
+      router.push(`/papers/${encodeURIComponent(paperId)}?pdfUrl=${encodeURIComponent(uploadedPaper.pdfUrl)}&filePath=${encodeURIComponent(uploadedPaper.filePath ?? '')}&title=${encodeURIComponent(uploadedPaper.title)}&authors=${encodeURIComponent(uploadedPaper.authors)}&journal=${encodeURIComponent(uploadedPaper.journal ?? '')}&year=${encodeURIComponent(uploadedPaper.year ?? '')}&readingMode=${readingMode}`);
     } catch (error) {
       setUploadMessage(error instanceof Error ? error.message : 'Upload failed.');
     } finally {
@@ -400,13 +407,27 @@ const HomePage = () => {
               <h2 className="text-xl font-semibold">Your papers</h2>
               <p className="text-sm text-muted-foreground">Choose a paper to read, or upload a new PDF.</p>
             </div>
+            <div className="ml-auto flex rounded-xl border p-1">
+              {readingModes.map((mode) => (
+                <button
+                  className={`rounded-lg px-3 py-2 text-left text-sm transition ${readingMode === mode.id ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
+                  key={mode.id}
+                  onClick={() => setReadingMode(mode.id)}
+                  title={mode.description}
+                  type="button"
+                >
+                  <span className="block font-medium">{mode.label}</span>
+                  <span className={`block text-[11px] ${readingMode === mode.id ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>{mode.description}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="mt-6 grid gap-4">
             {papers.map((paper) => {
               const paperHref = paper.filePath
-                ? `/papers/${encodeURIComponent(paper.id)}?pdfUrl=${encodeURIComponent(paper.pdfUrl)}&filePath=${encodeURIComponent(paper.filePath)}&title=${encodeURIComponent(paper.title)}&authors=${encodeURIComponent(paper.authors)}&journal=${encodeURIComponent(paper.journal ?? '')}&year=${encodeURIComponent(paper.year ?? '')}`
-                : `/papers/${paper.id}`;
+                ? `/papers/${encodeURIComponent(paper.id)}?pdfUrl=${encodeURIComponent(paper.pdfUrl)}&filePath=${encodeURIComponent(paper.filePath)}&title=${encodeURIComponent(paper.title)}&authors=${encodeURIComponent(paper.authors)}&journal=${encodeURIComponent(paper.journal ?? '')}&year=${encodeURIComponent(paper.year ?? '')}&readingMode=${readingMode}`
+                : `/papers/${paper.id}?readingMode=${readingMode}`;
               const content = (
                 <>
                   <div>
@@ -458,4 +479,3 @@ const HomePage = () => {
 };
 
 export default HomePage;
-

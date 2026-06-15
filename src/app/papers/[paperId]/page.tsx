@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PaperChatContextBridge } from '@/components/chat/paper-chat-context-bridge';
 import { PdfReader } from '@/components/paper/pdf-reader';
 import { getMockPaper } from '@/features/papers/mock-data';
-import type { PaperSelection } from '@/types/paper';
+import type { PaperReadingMode, PaperSelection } from '@/types/paper';
 
 interface PaperPageProps {
   params: {
@@ -19,6 +19,7 @@ interface PaperPageProps {
     authors?: string;
     journal?: string;
     year?: string;
+    readingMode?: string;
   };
 }
 
@@ -35,8 +36,11 @@ const normalizePdfUrl = (pdfUrl: string) => {
   return `https://${trimmed}`;
 };
 
+const normalizeReadingMode = (mode?: string): PaperReadingMode => (mode === 'reader' ? 'reader' : 'reviewer');
+
 const PaperPage = ({ params, searchParams }: PaperPageProps) => {
   const mockPaper = getMockPaper(params.paperId);
+  const readingMode = normalizeReadingMode(searchParams?.readingMode);
   const paper = useMemo(
     () =>
       searchParams?.pdfUrl
@@ -51,9 +55,10 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
             filePath: searchParams.filePath,
             journal: searchParams.journal,
             year: searchParams.year,
+            readingMode,
           }
-        : mockPaper,
-    [mockPaper, params.paperId, searchParams?.filePath, searchParams?.pdfUrl, searchParams?.title],
+        : { ...mockPaper, readingMode },
+    [mockPaper, params.paperId, readingMode, searchParams?.authors, searchParams?.filePath, searchParams?.journal, searchParams?.pdfUrl, searchParams?.title, searchParams?.year],
   );
   const [selectedText, setSelectedText] = useState<PaperSelection | null>(null);
   const [preferences, setPreferences] = useState<ViewerPreferences | null>(null);
@@ -87,6 +92,7 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
           ← Paper library
         </Link>
         <div className="text-sm text-muted-foreground">PDF viewer + large floating chat</div>
+        <div className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">{readingMode === 'reviewer' ? '审稿人模式' : '读者模式'}</div>
       </nav>
       <div className="flex h-full min-h-0 justify-center overflow-hidden">
         <PdfReader initialZoom={preferences?.pdfZoom} onSelectionChange={setSelectedText} onZoomChange={saveZoom} paper={paper} />
@@ -97,4 +103,3 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
 };
 
 export default PaperPage;
-

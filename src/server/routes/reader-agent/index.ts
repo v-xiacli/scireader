@@ -71,6 +71,8 @@ type SummaryFreshnessResult = {
   improvementPrompt?: string;
 };
 
+type PaperReadingMode = 'reviewer' | 'reader';
+
 const MAX_EXTRACTED_TEXT_CHARS = 140_000;
 const MAX_FIGURE_CAPTIONS = 40;
 const MAX_PAGE_IMAGES = 6;
@@ -90,6 +92,8 @@ const readerRequestSchema = z.object({
   journal: z.string().optional(),
   year: z.string().optional(),
   paperContextSummary: z.string().optional(),
+  readingMode: z.enum(['reviewer', 'reader']).optional(),
+  modePrompt: z.string().optional(),
   conversationHistory: z
     .array(
       z.object({
@@ -318,8 +322,10 @@ const getPaperIdentitySlug = (request: Pick<z.infer<typeof readerRequestSchema>,
     year: request.year,
   });
 
+const getReadingMode = (request: Pick<z.infer<typeof readerRequestSchema>, 'readingMode'>): PaperReadingMode => request.readingMode ?? 'reviewer';
+
 const getPaperSummaryStoragePath = (request: z.infer<typeof readerRequestSchema>, pdfStoragePath?: string | null) =>
-  `paper-cache/${getPaperIdentitySlug(request)}/${pdfStoragePath ? 'uploaded' : 'sample'}.reader-summary.deep-v1.md`;
+  `paper-cache/${getPaperIdentitySlug(request)}/${pdfStoragePath ? 'uploaded' : 'sample'}.reader-summary.${getReadingMode(request)}.deep-v1.md`;
 
 const getPaperDialogHistoryPath = (userId: string, paperKey: string) => `user-paper-history/${userId}/${paperKey}.md`;
 
@@ -516,9 +522,9 @@ const selectTokenEstimateModel = (request: z.infer<typeof tokenEstimateRequestSc
 
 const selectCheapTriageModel = (): AnthropicModelSelection => {
   const textModel = process.env.ANTHROPIC_CHEAP_MODEL?.trim();
-  const defaultModel = process.env.ANTHROPIC_MODEL?.trim() || 'gpt-5.5';
+  const defaultModel = 'gpt-5.4-mini';
 
-  return { model: textModel || defaultModel, target: textModel ? 'cheap' : 'default' };
+  return { model: textModel || defaultModel, target: 'cheap' };
 };
 
 const selectExpensiveReaderModel = (): AnthropicModelSelection => {
@@ -638,7 +644,18 @@ ${request.selectedText ? `选中文本：\n${request.selectedText}\n` : ''}${fig
 ${webSearchText}用户请求：${request.prompt}`;
 };
 
-const buildReaderSystemPrompt = (hasPdfContext: boolean, hasWebSearch: boolean) => {
+const buildReaderSystemPrompt = (hasPdfContext: boolean, hasWebSearch: boolean, modePrompt?: string, responseLanguage: 'english' | 'chinese' = 'chinese') => {
+  const languageInstruction = responseLanguage === 'english'
+    ? 'Respond in English. The answer will be translated to Chinese by a separate low-cost model, so keep terminology precise and preserve all numbers, equations, figure/table labels, citations, and Markdown structure.'
+    : 'Respond entirely in Chinese. Preserve all important numbers, equations, figure/table labels, citations, and Markdown structure.';
+  const nextBasePrompt = hasPdfContext
+    ? `${modePrompt?.trim() || 'You are SCIReader, a careful academic paper reading assistant. Prioritize the provided paper content, saved paper notes, selected text, and page images. If the paper does not provide clear evidence, explicitly say that the paper does not provide sufficient information to determine.'}\n\n${languageInstruction}\n\nUse only the provided paper evidence unless the user asks for outside context. Do not fabricate details.`
+    : `You are SCIReader's general AI assistant. Answer the user's question directly.\n\n${languageInstruction}`;
+
+  return hasWebSearch
+    ? `${nextBasePrompt}\nThe user question involves recent or real-time information. You will receive Tavily Web search results. Prioritize those results, cite relevant source URLs, and state clearly when the search results are insufficient or conflicting.`
+    : nextBasePrompt;
+
   const basePrompt = hasPdfContext
     ? '你是 SCIReader 的论文阅读助手。请用中文回答用户问题，优先基于已提供的论文内容、论文速记、选中文本和页面截图。你擅长总结论文要点、解释方法和实验、提取公式、比较相关工作、解释图表。若论文中没有明确依据，请直接说明“论文中未明确找到”，不要编造。'
     : '你是 SCIReader 的通用 AI 助手。请直接回答用户问题；如果用户要求写作、代码、解释、翻译或总结，请正常完成，不要假设一定有论文上下文。';
@@ -674,7 +691,7 @@ ${paperContextSummary}${request.selectedText ? `选中文本：\n${request.selec
 ${webSearchText}用户请求：${request.prompt}`;
 };
 
-const askClaude = async (request: z.infer<typeof readerRequestSchema>, forcedModelSelection?: AnthropicModelSelection) => {
+const askClaude = async (request: z.infer<typeof readerRequestSchema>, forcedModelSelection?: AnthropicModelSelection, responseLanguage: 'english' | 'chinese' = 'chinese') => {
   const storagePath = resolveUploadedPdfStoragePath(request.pdfUrl);
   const tempPdf = storagePath ? await materializePdfToTempFile(storagePath) : null;
   const localPdfPath = tempPdf?.localPdfPath;
@@ -726,7 +743,7 @@ const askClaude = async (request: z.infer<typeof readerRequestSchema>, forcedMod
       model: modelSelection.model,
       max_tokens: 16000,
       cache_control: { type: 'ephemeral' },
-      system: buildReaderSystemPrompt(Boolean(localPdfPath || extractedPdf || request.selectedText || request.paperContextSummary), hasWebSearch),
+      system: buildReaderSystemPrompt(Boolean(localPdfPath || extractedPdf || request.selectedText || request.paperContextSummary), hasWebSearch, request.modePrompt, responseLanguage),
       messages: [
         ...(request.conversationHistory ?? [])
           .slice(-8)
@@ -864,6 +881,61 @@ const checkSummaryFreshnessWithCheapModel = async (request: z.infer<typeof reade
 
   return {
     result: parseSummaryFreshnessResult(textFromResponse(response).trim()),
+    model: modelSelection.model,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+  };
+};
+
+const translateUserQuestionToEnglish = async (request: z.infer<typeof readerRequestSchema>) => {
+  const modelSelection = selectCheapTriageModel();
+  const client = createAnthropicClient(modelSelection.target);
+  const context = [
+    request.title ? `Paper title: ${request.title}` : null,
+    request.scope ? `Question scope: ${request.scope}` : null,
+    request.selectedText ? `Selected text:\n${request.selectedText.slice(0, 3000)}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+  const response = await client.messages.create({
+    model: modelSelection.model,
+    max_tokens: 2000,
+    system:
+      'You are a precise academic translator. Translate the user question into clear English for a paper-reading AI. Preserve technical terms, symbols, units, equations, figure/table labels, citations, and the user intent. Output only the translated English question.',
+    messages: [
+      {
+        role: 'user',
+        content: `${context ? `${context}\n\n` : ''}User question:\n${request.prompt}`,
+      },
+    ],
+  });
+
+  return {
+    text: textFromResponse(response).trim() || request.prompt,
+    model: modelSelection.model,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+  };
+};
+
+const translateReaderAnswerToChinese = async (englishAnswer: string, request: z.infer<typeof readerRequestSchema>) => {
+  const modelSelection = selectCheapTriageModel();
+  const client = createAnthropicClient(modelSelection.target);
+  const response = await client.messages.create({
+    model: modelSelection.model,
+    max_tokens: 12000,
+    system:
+      'You are a precise academic translator. Translate the assistant answer into natural Chinese for the user interface. Preserve Markdown structure, equations, variable names, units, numbers, figure/table labels, citations, URLs, and field-specific terminology. Do not add new analysis or remove caveats.',
+    messages: [
+      {
+        role: 'user',
+        content: `Paper title: ${request.title ?? request.paperId}\n\nEnglish answer:\n${englishAnswer}`,
+      },
+    ],
+  });
+
+  return {
+    text: textFromResponse(response).trim() || englishAnswer,
     model: modelSelection.model,
     inputTokens: response.usage.input_tokens,
     outputTokens: response.usage.output_tokens,
@@ -1070,12 +1142,59 @@ const app = new Hono()
       const summaryStoragePath = getPaperSummaryStoragePath(request, resolveUploadedPdfStoragePath(request.pdfUrl));
       const cachedSummary = (await downloadTextIfExists(summaryStoragePath)) ?? '';
       const storedHistory = await loadDialogHistory(user.id, paperKey);
+      const translatedPrompt = await translateUserQuestionToEnglish(request);
+      const nowForTranslatedPipeline = new Date().toISOString();
+      const expensiveTranslatedResult = await askClaude(
+        {
+          ...request,
+          prompt: translatedPrompt.text,
+          paperContextSummary: [cachedSummary, request.paperContextSummary].filter(Boolean).join('\n\n'),
+          conversationHistory: storedHistory.slice(-8).map((turn) => ({ role: turn.role, content: turn.content })),
+        },
+        selectExpensiveReaderModel(),
+        'english',
+      );
+      const translatedAnswer = await translateReaderAnswerToChinese(expensiveTranslatedResult.answer, request);
+      const translatedInputTokens = translatedPrompt.inputTokens + expensiveTranslatedResult.inputTokens + translatedAnswer.inputTokens;
+      const translatedOutputTokens = translatedPrompt.outputTokens + expensiveTranslatedResult.outputTokens + translatedAnswer.outputTokens;
+
+      await appendDialogTurns(user.id, paperKey, [
+        { role: 'user', content: request.prompt, createdAt: nowForTranslatedPipeline },
+        {
+          role: 'assistant',
+          content: translatedAnswer.text,
+          createdAt: nowForTranslatedPipeline,
+          model: `${translatedPrompt.model} -> ${expensiveTranslatedResult.model} -> ${translatedAnswer.model}`,
+          routedBy: 'expensive-reader',
+          inputTokens: translatedInputTokens,
+          outputTokens: translatedOutputTokens,
+        },
+      ]);
+
+      return c.json({
+        answer: translatedAnswer.text,
+        citations: [],
+        sources: expensiveTranslatedResult.webSearchResults.map((item) => ({
+          title: item.title,
+          url: item.url,
+          publishedDate: item.publishedDate,
+        })),
+        scope: request.scope,
+        paperId: request.paperId,
+        routedBy: 'expensive-reader',
+        translatedPrompt: translatedPrompt.text,
+        usage: {
+          inputTokens: translatedInputTokens,
+          outputTokens: translatedOutputTokens,
+        },
+      });
       let triage;
 
       try {
         triage = await triageWithCheapModel(request, cachedSummary, storedHistory);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Cheap triage failed.';
+      } catch (caughtError: unknown) {
+        const caughtRecord = caughtError as { message?: unknown };
+        const message = typeof caughtRecord.message === 'string' ? caughtRecord.message : 'Cheap triage failed.';
         triage = {
           result: {
             sufficient: false,

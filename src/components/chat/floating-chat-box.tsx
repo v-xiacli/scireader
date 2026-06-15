@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'rea
 import ReactMarkdown from 'react-markdown';
 
 import { mockMessages } from '@/features/papers/mock-data';
-import type { ChatMessage, PaperSelection, PaperSummary } from '@/types/paper';
+import type { ChatMessage, PaperReadingMode, PaperSelection, PaperSummary } from '@/types/paper';
 
 interface FloatingChatBoxProps {
   paper?: PaperSummary | null;
@@ -36,15 +36,43 @@ type SummaryProgress = {
   elapsedSeconds: number;
 };
 
-const deepPaperSummaryPrompt =
-  `请用中文生成一份“深度论文阅读笔记”，不是短摘要。要求：
-1. 先用 3-5 句话说明论文解决的问题、核心方案、为什么重要。
-2. 按论文结构展开：背景/动机、核心设计、关键工艺或算法、实验设置、主要结果、局限与风险。
-3. 逐图分析：尽量覆盖每个 Figure/Table，说明它展示了什么、作者想证明什么、读者应该怎么解读。
-4. 逐公式/关键参数分析：列出论文中的重要公式、变量含义、工程意义；如果没有显式公式，就分析关键指标和参数。
-5. 给出“可追问索引”：列出 8-12 个后续可问的问题，方便继续追问。
-6. 不要为了省字牺牲解释；用紧凑排版，但每一点要有论述。保留关键数值、频段、dB、尺寸、良率等证据。
-7. 输出 Markdown，使用二级标题和项目符号。`;
+const paperReadingPrompts: Record<PaperReadingMode, string> = {
+  reviewer: `You are an experienced academic reviewer, research advisor, and reproducibility auditor.
+
+Your task is not to produce a section-by-section summary or translation. Help a researcher quickly determine what problem the paper truly solves, whether the claimed novelty is genuine, whether the evidence supports the claims, whether the results appear credible, and what limitations or opportunities remain.
+
+Be analytical rather than descriptive. Do not blindly accept the authors' claims. Do not make accusations without evidence. When evidence is insufficient, explicitly state: "The paper does not provide sufficient information to determine."
+
+Produce a rigorous review report covering:
+1. Executive assessment: paper category, one-sentence value assessment, and why it is or is not worth careful reading.
+2. Core idea and novelty: the real technical trick, assumptions, boundary conditions, difference from prior work, genuine novelty versus incremental or framing-only parts, and publication logic.
+3. Key design choices and experimental evidence: why the system was designed this way, causal links between choices and performance, baseline fairness, ablations, mechanism validation, and important quantitative results.
+4. Key figures and tables: only central items; explain what they show, what the authors try to prove, whether the data supports the conclusion, and how an independent reader should interpret them.
+5. Key equations and parameters: engineering meaning, performance impact, sensitivity, and implementation cost.
+6. Evidence strength and credibility: numerical consistency, physical or algorithmic plausibility, simulation/training versus measurement/test consistency, data presentation, baseline fairness, reproducibility, and an overall High/Medium/Low evidence rating.
+7. Limitations and risks: applicability boundaries, validation weaknesses, unanswered questions, overgeneralization risks, engineering limitations, and scalability concerns.
+8. Follow-up question index: high-value paper-specific, research-extension, and fundamental-principle questions anchored to concrete elements of the paper.
+
+Output requirements: prioritize insight over coverage, preserve important numerical results, support every evaluation with evidence from the paper, use Markdown headings, and be concise, information-dense, and technically rigorous.`,
+  reader: `You are an experienced researcher, academic reviewer, and research advisor.
+
+Your task is not to summarize the paper section by section. Help a researcher understand the core research idea, extract reusable design principles and research insights, understand why the paper is publishable, position it within the existing literature, collect material for literature reviews and comparison tables, evaluate evidence strength, and identify limitations and future opportunities.
+
+Focus on research value rather than paper narration.
+
+Produce a research-reading report covering:
+1. Executive assessment: paper category, specific research field/sub-field, true problem solved, novelty type, and why the paper is worth studying.
+2. Idea mining: the real idea behind the work, the likely reasoning process, the limitation observed by the authors, why existing solutions were insufficient, the key observation behind the solution, the design philosophy, and the generalizable insight.
+3. Reusable design patterns: practical techniques that could be reused in future projects; for each, explain what problem it solves, why it works, and whether it is general-purpose or paper-specific.
+4. Literature positioning: dominant previous research routes, limitations of prior work, claimed gap, actual gap, why this paper is publishable, and 3-5 introduction-ready academic sentences.
+5. Key design choices and evidence: causal relationships between design choices and reported improvements, experimental setup, baselines, ablations, mechanism validation, operating-condition coverage, hard evidence, and narrative claims.
+6. Comparison table information: identify field-appropriate metrics actually reported by the paper, add a small number of standard metrics for the sub-field, and present a Markdown table with Item and Value. Use "Not Reported" when unavailable.
+7. Key figures, equations, and engineering meaning: focus only on central figures, tables, equations, and parameters; explain insight, practical meaning, sensitivity, and implementation impact.
+8. Evidence strength, limitations, and future opportunities: High/Medium/Low evidence rating, credibility check, limitations, and promising future directions.
+9. Follow-up question index: understanding, reproduction, extension, and fundamental-principle questions anchored to concrete paper elements.
+
+Output requirements: prioritize insight over coverage, preserve important numerical results, focus on reusable research value, support every evaluation with evidence from the paper, use Markdown headings, and be concise, technically rigorous, and information-dense.`,
+};
 
 const buildConversationHistory = (messages: ChatMessage[]): ConversationTurn[] =>
   messages
@@ -103,6 +131,9 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const paperId = paper?.id;
   const paperPdfUrl = paper?.pdfUrl;
   const paperTitle = paper?.title;
+  const readingMode: PaperReadingMode = paper?.readingMode ?? 'reviewer';
+  const readingModePrompt = paperReadingPrompts[readingMode];
+  const readingModeLabel = readingMode === 'reviewer' ? '审稿人模式' : '读者模式';
 
   useEffect(() => {
     console.info('Floating chat mounted/rendered.', {
@@ -169,6 +200,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
           journal: paper?.journal,
           year: paper?.year,
           prompt,
+          readingMode,
+          modePrompt: readingModePrompt,
           scope,
           selectedText: selectedText?.text,
           pageNumber: selectedText?.pageNumber,
@@ -182,7 +215,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
 
       return result as { answer: string; usage?: { inputTokens?: number; outputTokens?: number }; routedBy?: string };
     },
-    [messages, paperId, paperPdfUrl, paperTitle, paperContextSummary, selectedText, paper?.authors, paper?.journal, paper?.year],
+    [messages, paperId, paperPdfUrl, paperTitle, paperContextSummary, readingMode, readingModePrompt, selectedText, paper?.authors, paper?.journal, paper?.year],
   );
 
   const loadPaperHistory = useCallback(async () => {
@@ -219,7 +252,9 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
         authors: paper?.authors,
         journal: paper?.journal,
         year: paper?.year,
-        prompt: deepPaperSummaryPrompt,
+        prompt: readingModePrompt,
+        readingMode,
+        modePrompt: readingModePrompt,
         scope: 'whole-paper',
       }),
     });
@@ -228,7 +263,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     if (!response.ok) throw new Error(result.message ?? result.error ?? 'Paper summary failed.');
 
     return result.summary as string;
-  }, [paperId, paperPdfUrl, paperTitle, paper?.authors, paper?.journal, paper?.year]);
+  }, [paperId, paperPdfUrl, paperTitle, readingMode, readingModePrompt, paper?.authors, paper?.journal, paper?.year]);
 
   const generateImage = useCallback(
     async (prompt: string) => {
@@ -334,7 +369,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
       window.clearInterval(progressTimer);
       setIsSummarizing(false);
     };
-  }, [paperId, paperPdfUrl, summarizePaper, loadPaperHistory]);
+  }, [paperId, paperPdfUrl, readingMode, summarizePaper, loadPaperHistory]);
 
   const startDragging = (event: PointerEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
@@ -501,7 +536,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
         <div className="flex items-center gap-2">
           <div className="min-w-0">
             <div className="flex items-baseline gap-2">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-primary">AI reader</p>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-primary">{readingModeLabel}</p>
               <h2 className="text-sm font-semibold">{hasPaper ? 'Paper chat' : 'SCIReader chat'}</h2>
             </div>
             <p className="truncate text-[11px] text-muted-foreground">{paper?.title ?? 'Ask without opening a paper'}</p>
@@ -622,7 +657,5 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     </aside>
   );
 };
-
-
 
 

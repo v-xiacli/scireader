@@ -1,4 +1,6 @@
-﻿export interface PaperSummary {
+export type PaperReadingMode = 'reviewer' | 'reader';
+
+export interface PaperSummary {
   id: string;
   title: string;
   authors: string;
@@ -9,6 +11,7 @@
   filePath?: string;
   journal?: string;
   year?: string;
+  readingMode?: PaperReadingMode;
 }
 
 export interface UserAccountSummary {

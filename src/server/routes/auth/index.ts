@@ -43,6 +43,7 @@ const uploadedPaperSchema = z.object({
   filePath: z.string(),
   journal: z.string().optional(),
   year: z.string().optional(),
+  readingMode: z.enum(['reviewer', 'reader']).optional(),
 });
 
 const uploadedPapersSchema = z.array(uploadedPaperSchema);
@@ -311,4 +312,3 @@ const app = new Hono()
   });
 
 export default app;
-
