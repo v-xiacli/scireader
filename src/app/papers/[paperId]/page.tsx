@@ -20,6 +20,7 @@ interface PaperPageProps {
     journal?: string;
     year?: string;
     readingMode?: string;
+    detailedReport?: string;
   };
 }
 
@@ -38,9 +39,12 @@ const normalizePdfUrl = (pdfUrl: string) => {
 
 const normalizeReadingMode = (mode?: string): PaperReadingMode => (mode === 'reader' ? 'reader' : 'reviewer');
 
+const normalizeDetailedReport = (value?: string) => value !== '0' && value !== 'false';
+
 const PaperPage = ({ params, searchParams }: PaperPageProps) => {
   const mockPaper = getMockPaper(params.paperId);
   const readingMode = normalizeReadingMode(searchParams?.readingMode);
+  const detailedReport = normalizeDetailedReport(searchParams?.detailedReport);
   const paper = useMemo(
     () =>
       searchParams?.pdfUrl
@@ -56,9 +60,10 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
             journal: searchParams.journal,
             year: searchParams.year,
             readingMode,
+            detailedReport,
           }
-        : { ...mockPaper, readingMode },
-    [mockPaper, params.paperId, readingMode, searchParams?.authors, searchParams?.filePath, searchParams?.journal, searchParams?.pdfUrl, searchParams?.title, searchParams?.year],
+        : { ...mockPaper, readingMode, detailedReport },
+    [mockPaper, params.paperId, readingMode, detailedReport, searchParams?.authors, searchParams?.filePath, searchParams?.journal, searchParams?.pdfUrl, searchParams?.title, searchParams?.year],
   );
   const [selectedText, setSelectedText] = useState<PaperSelection | null>(null);
   const [preferences, setPreferences] = useState<ViewerPreferences | null>(null);
@@ -93,6 +98,7 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
         </Link>
         <div className="text-sm text-muted-foreground">PDF viewer + large floating chat</div>
         <div className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">{readingMode === 'reviewer' ? '审稿人模式' : '读者模式'}</div>
+        <div className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{detailedReport ? '详细报告' : '极简速览'}</div>
       </nav>
       <div className="flex h-full min-h-0 justify-center overflow-hidden">
         <PdfReader initialZoom={preferences?.pdfZoom} onSelectionChange={setSelectedText} onZoomChange={saveZoom} paper={paper} />

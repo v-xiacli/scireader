@@ -172,7 +172,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const paperTitle = paper?.title;
   const readingMode: PaperReadingMode = paper?.readingMode ?? 'reviewer';
   const readingModePrompt = paperReadingPrompts[readingMode];
-  const readingModeLabel = readingMode === 'reviewer' ? '审稿人模式' : '读者模式';
+  const detailedReport = paper?.detailedReport ?? true;
+  const readingModeLabel = `${readingMode === 'reviewer' ? '审稿人模式' : '读者模式'} · ${detailedReport ? '详细' : '极简'}`;
 
   useEffect(() => {
     sizeRef.current = size;
@@ -321,6 +322,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
           prompt: readingModePrompt,
           readingMode,
           modePrompt: readingModePrompt,
+          detailedReport,
           scope: 'whole-paper',
         }),
       });
@@ -349,7 +351,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     }
 
     throw new Error('Paper summary is still processing. Please reopen this paper in a moment.');
-  }, [paperId, paperPdfUrl, paperTitle, readingMode, readingModePrompt, paper?.authors, paper?.journal, paper?.year]);
+  }, [paperId, paperPdfUrl, paperTitle, readingMode, readingModePrompt, detailedReport, paper?.authors, paper?.journal, paper?.year]);
 
   const generateImage = useCallback(
     async (prompt: string) => {

@@ -12,6 +12,7 @@ export interface PaperSummary {
   journal?: string;
   year?: string;
   readingMode?: PaperReadingMode;
+  detailedReport?: boolean;
 }
 
 export interface UserAccountSummary {

@@ -101,6 +101,7 @@ const readerRequestSchema = z.object({
   paperContextSummary: z.string().optional(),
   readingMode: z.enum(['reviewer', 'reader']).optional(),
   modePrompt: z.string().optional(),
+  detailedReport: z.boolean().optional(),
   conversationHistory: z
     .array(
       z.object({
@@ -331,8 +332,10 @@ const getPaperIdentitySlug = (request: Pick<z.infer<typeof readerRequestSchema>,
 
 const getReadingMode = (request: Pick<z.infer<typeof readerRequestSchema>, 'readingMode'>): PaperReadingMode => request.readingMode ?? 'reviewer';
 
+const getSummaryDetailMode = (request: Pick<z.infer<typeof readerRequestSchema>, 'detailedReport'>) => request.detailedReport === false ? 'brief' : 'detailed';
+
 const getPaperSummaryStoragePath = (request: z.infer<typeof readerRequestSchema>, pdfStoragePath?: string | null) =>
-  `paper-cache/${getPaperIdentitySlug(request)}/${pdfStoragePath ? 'uploaded' : 'sample'}.reader-summary.${getReadingMode(request)}.deep-v1.md`;
+  `paper-cache/${getPaperIdentitySlug(request)}/${pdfStoragePath ? 'uploaded' : 'sample'}.reader-summary.${getReadingMode(request)}.${getSummaryDetailMode(request)}.deep-v1.md`;
 
 const getPaperDialogHistoryPath = (userId: string, paperKey: string) => `user-paper-history/${userId}/${paperKey}.md`;
 

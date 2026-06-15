@@ -52,6 +52,7 @@ const HomePage = () => {
   const [tokenEstimate, setTokenEstimate] = useState<TokenEstimate | null>(null);
   const [tokenEstimateMessage, setTokenEstimateMessage] = useState('Upload a PDF to estimate input tokens.');
   const [readingMode, setReadingMode] = useState<PaperReadingMode>('reviewer');
+  const [detailedReport, setDetailedReport] = useState(true);
 
   const isLoggedIn = Boolean(authUser);
   const papers = [...uploadedPapers, ...mockPapers];
@@ -212,6 +213,7 @@ const HomePage = () => {
         journal: metadata.journal?.trim(),
         year: metadata.year?.trim(),
         readingMode,
+        detailedReport,
       };
 
       const saveResponse = await fetch('/api/auth/uploaded-papers', {
@@ -225,7 +227,7 @@ const HomePage = () => {
 
       void estimateTokenConsumption(uploadedPaper);
 
-      router.push(`/papers/${encodeURIComponent(paperId)}?pdfUrl=${encodeURIComponent(uploadedPaper.pdfUrl)}&filePath=${encodeURIComponent(uploadedPaper.filePath ?? '')}&title=${encodeURIComponent(uploadedPaper.title)}&authors=${encodeURIComponent(uploadedPaper.authors)}&journal=${encodeURIComponent(uploadedPaper.journal ?? '')}&year=${encodeURIComponent(uploadedPaper.year ?? '')}&readingMode=${readingMode}`);
+      router.push(`/papers/${encodeURIComponent(paperId)}?pdfUrl=${encodeURIComponent(uploadedPaper.pdfUrl)}&filePath=${encodeURIComponent(uploadedPaper.filePath ?? '')}&title=${encodeURIComponent(uploadedPaper.title)}&authors=${encodeURIComponent(uploadedPaper.authors)}&journal=${encodeURIComponent(uploadedPaper.journal ?? '')}&year=${encodeURIComponent(uploadedPaper.year ?? '')}&readingMode=${readingMode}&detailedReport=${detailedReport ? '1' : '0'}`);
     } catch (error) {
       setUploadMessage(error instanceof Error ? error.message : 'Upload failed.');
     } finally {
@@ -414,6 +416,14 @@ const HomePage = () => {
                   </button>
                 ))}
               </div>
+              <button
+                className={`rounded-xl border px-3 py-2 text-sm font-medium transition ${detailedReport ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
+                onClick={() => setDetailedReport((current) => !current)}
+                title={detailedReport ? '生成完整深度报告' : '只显示极简速览'}
+                type="button"
+              >
+                详细报告 {detailedReport ? '开' : '关'}
+              </button>
               {uploadMessage ? <p className="text-sm text-muted-foreground">{uploadMessage}</p> : null}
             </div>
             <div>
@@ -424,8 +434,8 @@ const HomePage = () => {
           <div className="mt-6 grid gap-4">
             {papers.map((paper) => {
               const paperHref = paper.filePath
-                ? `/papers/${encodeURIComponent(paper.id)}?pdfUrl=${encodeURIComponent(paper.pdfUrl)}&filePath=${encodeURIComponent(paper.filePath)}&title=${encodeURIComponent(paper.title)}&authors=${encodeURIComponent(paper.authors)}&journal=${encodeURIComponent(paper.journal ?? '')}&year=${encodeURIComponent(paper.year ?? '')}&readingMode=${readingMode}`
-                : `/papers/${paper.id}?readingMode=${readingMode}`;
+                ? `/papers/${encodeURIComponent(paper.id)}?pdfUrl=${encodeURIComponent(paper.pdfUrl)}&filePath=${encodeURIComponent(paper.filePath)}&title=${encodeURIComponent(paper.title)}&authors=${encodeURIComponent(paper.authors)}&journal=${encodeURIComponent(paper.journal ?? '')}&year=${encodeURIComponent(paper.year ?? '')}&readingMode=${readingMode}&detailedReport=${detailedReport ? '1' : '0'}`
+                : `/papers/${paper.id}?readingMode=${readingMode}&detailedReport=${detailedReport ? '1' : '0'}`;
               const content = (
                 <>
                   <div>
