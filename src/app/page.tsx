@@ -250,7 +250,7 @@ const HomePage = () => {
       if (!response.ok) throw new Error(result.message ?? result.error ?? 'Could not remove paper.');
 
       setUploadedPapers(result.papers);
-      setUploadMessage('Removed from your account. The PDF, summary, and chat history are still stored for reuse.');
+      setUploadMessage('Removed.');
     } catch (error) {
       setUploadMessage(error instanceof Error ? error.message : 'Could not remove paper.');
     } finally {
@@ -372,7 +372,7 @@ const HomePage = () => {
 
         <section className="rounded-3xl bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-4 md:flex-row md:items-center">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <input
                 accept="application/pdf"
                 className="hidden"
@@ -401,25 +401,23 @@ const HomePage = () => {
                 {isUploading ? <Loader2 className="size-4 animate-spin" /> : null}
                 {isUploading ? 'Uploading...' : isLoggedIn ? 'Upload paper' : 'Login to upload'}
               </button>
+              <div className="flex rounded-xl border p-1">
+                {readingModes.map((mode) => (
+                  <button
+                    className={`rounded-lg px-3 py-1.5 text-sm transition ${readingMode === mode.id ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
+                    key={mode.id}
+                    onClick={() => setReadingMode(mode.id)}
+                    title={mode.description}
+                    type="button"
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
               {uploadMessage ? <p className="text-sm text-muted-foreground">{uploadMessage}</p> : null}
             </div>
             <div>
               <h2 className="text-xl font-semibold">Your papers</h2>
-              <p className="text-sm text-muted-foreground">Choose a paper to read, or upload a new PDF.</p>
-            </div>
-            <div className="ml-auto flex rounded-xl border p-1">
-              {readingModes.map((mode) => (
-                <button
-                  className={`rounded-lg px-3 py-2 text-left text-sm transition ${readingMode === mode.id ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
-                  key={mode.id}
-                  onClick={() => setReadingMode(mode.id)}
-                  title={mode.description}
-                  type="button"
-                >
-                  <span className="block font-medium">{mode.label}</span>
-                  <span className={`block text-[11px] ${readingMode === mode.id ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>{mode.description}</span>
-                </button>
-              ))}
             </div>
           </div>
 
