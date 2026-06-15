@@ -26,6 +26,8 @@ interface PaperPageProps {
 
 type ViewerPreferences = {
   pdfZoom?: number;
+  readingMode?: PaperReadingMode;
+  detailedReport?: boolean;
 };
 
 const normalizePdfUrl = (pdfUrl: string) => {
@@ -43,8 +45,10 @@ const normalizeDetailedReport = (value?: string) => value !== '0' && value !== '
 
 const PaperPage = ({ params, searchParams }: PaperPageProps) => {
   const mockPaper = getMockPaper(params.paperId);
-  const readingMode = normalizeReadingMode(searchParams?.readingMode);
-  const detailedReport = normalizeDetailedReport(searchParams?.detailedReport);
+  const [selectedText, setSelectedText] = useState<PaperSelection | null>(null);
+  const [preferences, setPreferences] = useState<ViewerPreferences | null>(null);
+  const readingMode = searchParams?.readingMode ? normalizeReadingMode(searchParams.readingMode) : preferences?.readingMode ?? 'reviewer';
+  const detailedReport = searchParams?.detailedReport === undefined ? preferences?.detailedReport ?? true : normalizeDetailedReport(searchParams.detailedReport);
   const paper = useMemo(
     () =>
       searchParams?.pdfUrl
@@ -65,8 +69,6 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
         : { ...mockPaper, readingMode, detailedReport },
     [mockPaper, params.paperId, readingMode, detailedReport, searchParams?.authors, searchParams?.filePath, searchParams?.journal, searchParams?.pdfUrl, searchParams?.title, searchParams?.year],
   );
-  const [selectedText, setSelectedText] = useState<PaperSelection | null>(null);
-  const [preferences, setPreferences] = useState<ViewerPreferences | null>(null);
 
   useEffect(() => {
     const loadPreferences = async () => {
