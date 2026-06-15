@@ -332,7 +332,7 @@ const getPaperIdentitySlug = (request: Pick<z.infer<typeof readerRequestSchema>,
 
 const getReadingMode = (request: Pick<z.infer<typeof readerRequestSchema>, 'readingMode'>): PaperReadingMode => request.readingMode ?? 'reviewer';
 
-const getSummaryDetailMode = (request: Pick<z.infer<typeof readerRequestSchema>, 'detailedReport'>) => request.detailedReport === false ? 'brief' : 'detailed';
+const getSummaryDetailMode = (request: Pick<z.infer<typeof readerRequestSchema>, 'detailedReport'>) => request.detailedReport === true ? 'detailed' : 'brief';
 
 const getPaperSummaryStoragePath = (request: z.infer<typeof readerRequestSchema>, pdfStoragePath?: string | null) =>
   `paper-cache/${getPaperIdentitySlug(request)}/${pdfStoragePath ? 'uploaded' : 'sample'}.reader-summary.${getReadingMode(request)}.${getSummaryDetailMode(request)}.physics-v2.md`;
@@ -341,7 +341,7 @@ const getPaperDialogHistoryPath = (userId: string, paperKey: string) => `user-pa
 
 const getSharedPaperDialogHistoryPath = (paperKey: string) => `paper-cache/${paperKey}/reader-dialog.shared-v1.md`;
 
-type SummaryJobPhase = 'queued' | 'materializing-pdf' | 'extracting-text' | 'chunk' | 'chunk-retry' | 'final-synthesis' | 'final-synthesis-retry' | 'translating' | 'uploading' | 'finished' | 'failed';
+type SummaryJobPhase = 'queued' | 'materializing-pdf' | 'extracting-text' | 'brief-synthesis' | 'chunk' | 'chunk-retry' | 'final-synthesis' | 'final-synthesis-retry' | 'translating' | 'uploading' | 'finished' | 'failed';
 
 type SummaryJobEntry = {
   jobId: string;
@@ -1239,6 +1239,7 @@ const estimateTokensLocally = (text: string, prompt: string) => estimateTextToke
 const estimatePdfTokensFromBytes = (pdfBytes: number, prompt: string) => Math.ceil(pdfBytes / 5) + estimateTextTokensLocally(prompt);
 
 const SUMMARY_CHUNK_MAX_CHARS = 12_000;
+const SUMMARY_BRIEF_SINGLE_PASS_MAX_CHARS = 60_000;
 const SUMMARY_CHUNK_TIMEOUT_MS = 90_000;
 const SUMMARY_FINAL_TIMEOUT_MS = 120_000;
 
@@ -1440,6 +1441,65 @@ const generateChunkedEnglishSummary = async (
   try {
     setJobStatus({ phase: 'extracting-text', message: 'Extracting text from PDF pages.' });
     const extractedPdf = await extractPdfText(tempPdf.localPdfPath);
+    const wantsDetailedReport = request.detailedReport === true;
+
+    if (!wantsDetailedReport && extractedPdf.text.length <= SUMMARY_BRIEF_SINGLE_PASS_MAX_CHARS) {
+      setJobStatus({
+        phase: 'brief-synthesis',
+        currentChunk: undefined,
+        totalChunks: 1,
+        message: 'Generating a compact first-pass paper brief from the full extracted text.',
+      });
+
+      console.log('[reader-agent:summarize] brief single-pass started', {
+        jobId,
+        paperId: request.paperId,
+        extractedChars: extractedPdf.text.length,
+        pages: extractedPdf.pages.length,
+        estimatedTokens: estimateTextTokensLocally(extractedPdf.text),
+      });
+
+      const briefResult = await createExpensiveTextResponse(
+        `${getCompactSummaryInstruction(getReadingMode(request))}
+
+Respond in English. Create a compact first-pass evidence note, not a full report.
+Use exactly these five bullets, each under 35 words:
+- core physical mechanism
+- key structure/parameter
+- strongest reported numbers with units
+- evidence strength: simulation/measurement/baseline
+- main limitation or missing proof
+Do not write paragraphs. Do not include a literature review or follow-up questions.`,
+        `Paper title: ${request.title ?? request.paperId}
+Reading mode: ${getReadingMode(request)}
+
+Task:
+${request.prompt}
+
+Extracted paper text:
+${extractedPdf.text}`,
+        550,
+        { jobId, paperId: request.paperId, phase: 'brief-synthesis', pages: extractedPdf.pages.length },
+        SUMMARY_CHUNK_TIMEOUT_MS,
+      );
+
+      console.log('[reader-agent:summarize] brief single-pass finished', {
+        jobId,
+        paperId: request.paperId,
+        model: briefResult.model,
+        inputTokens: briefResult.inputTokens,
+        outputTokens: briefResult.outputTokens,
+        answerChars: briefResult.answer.length,
+      });
+
+      return {
+        answer: briefResult.answer,
+        inputTokens: briefResult.inputTokens,
+        outputTokens: briefResult.outputTokens,
+        model: briefResult.model,
+      };
+    }
+
     const chunks = chunkExtractedPdfPages(extractedPdf.pages);
     const chunkNotes: string[] = [];
     const compactInstruction = getCompactSummaryInstruction(getReadingMode(request));
@@ -1566,7 +1626,7 @@ ${chunk.text.slice(0, 5000)}`,
       });
     }
 
-    if (request.detailedReport === false) {
+    if (request.detailedReport !== true) {
       const combinedChunkNotes = chunkNotes.join('\n\n---\n\n');
 
       setJobStatus({
@@ -1740,7 +1800,7 @@ const startSummaryGenerationJob = (
     });
 
     const result = await generateChunkedEnglishSummary(request, jobId, setJobStatus);
-    const wantsDetailedReport = request.detailedReport !== false;
+    const wantsDetailedReport = request.detailedReport === true;
     setJobStatus({
       phase: 'translating',
       message: wantsDetailedReport

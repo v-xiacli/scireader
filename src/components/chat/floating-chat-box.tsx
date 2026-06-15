@@ -161,7 +161,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const paperTitle = paper?.title;
   const readingMode: PaperReadingMode = paper?.readingMode ?? 'reviewer';
   const readingModePrompt = paperReadingPrompts[readingMode];
-  const detailedReport = paper?.detailedReport ?? true;
+  const detailedReport = paper?.detailedReport ?? false;
   const readingModeLabel = `${readingMode === 'reviewer' ? '审稿人模式' : '读者模式'} · ${detailedReport ? '详细' : '极简'}`;
 
   useEffect(() => {

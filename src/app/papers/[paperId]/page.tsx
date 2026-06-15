@@ -48,7 +48,7 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
   const [selectedText, setSelectedText] = useState<PaperSelection | null>(null);
   const [preferences, setPreferences] = useState<ViewerPreferences | null>(null);
   const readingMode = searchParams?.readingMode ? normalizeReadingMode(searchParams.readingMode) : preferences?.readingMode ?? 'reviewer';
-  const detailedReport = searchParams?.detailedReport === undefined ? preferences?.detailedReport ?? true : normalizeDetailedReport(searchParams.detailedReport);
+  const detailedReport = searchParams?.detailedReport === undefined ? preferences?.detailedReport ?? false : normalizeDetailedReport(searchParams.detailedReport);
   const paper = useMemo(
     () =>
       searchParams?.pdfUrl

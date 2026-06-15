@@ -56,7 +56,7 @@ const HomePage = () => {
   const [tokenEstimate, setTokenEstimate] = useState<TokenEstimate | null>(null);
   const [tokenEstimateMessage, setTokenEstimateMessage] = useState('Upload a PDF to estimate input tokens.');
   const [readingMode, setReadingMode] = useState<PaperReadingMode>('reviewer');
-  const [detailedReport, setDetailedReport] = useState(true);
+  const [detailedReport, setDetailedReport] = useState(false);
 
   const isLoggedIn = Boolean(authUser);
   const papers = [...uploadedPapers, ...mockPapers];
@@ -459,7 +459,7 @@ const HomePage = () => {
                     return nextDetailedReport;
                   });
                 }}
-                title={detailedReport ? '生成完整深度报告' : '只显示极简速览'}
+                title={detailedReport ? '生成完整物理报告' : '先生成极简速览'}
                 type="button"
               >
                 详细报告 {detailedReport ? '开' : '关'}
