@@ -17,10 +17,10 @@ interface FloatingChatBoxProps {
 
 const defaultPosition = { x: 0, y: 96 };
 const defaultSize = { width: 560, height: 620 };
-const minSize = { width: 380, height: 420 };
+const minSize = { width: 320, height: 360 };
 const edgePadding = 8;
 
-type ResizeHandle = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+type ResizeHandle = 'top' | 'right' | 'bottom' | 'left' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 type ConversationTurn = Pick<ChatMessage, 'role' | 'content'>;
 type StoredHistoryTurn = ConversationTurn & {
   createdAt: string;
@@ -40,6 +40,18 @@ type SummaryResponse = {
   summary?: string;
   processing?: boolean;
   retryAfterSeconds?: number;
+  cached?: boolean;
+  jobStarted?: boolean;
+  jobId?: string;
+  job?: {
+    jobId: string;
+    startedAt: string;
+    updatedAt: string;
+    phase: string;
+    currentChunk?: number;
+    totalChunks?: number;
+    message?: string;
+  } | null;
 };
 
 const paperReadingPrompts: Record<PaperReadingMode, string> = {
@@ -269,6 +281,12 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     for (let attempt = 0; attempt < 80; attempt += 1) {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
+      console.info('[reader-agent:summarize] polling summary', {
+        paperId,
+        attempt: attempt + 1,
+        readingMode,
+      });
+
       const response = await fetch('/api/reader-agent/summarize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -289,6 +307,21 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
       const result = (await response.json()) as SummaryResponse & { message?: string; error?: string };
 
       if (!response.ok && response.status !== 202) throw new Error(result.message ?? result.error ?? 'Paper summary failed.');
+      console.info('[reader-agent:summarize] polling result', {
+        paperId,
+        attempt: attempt + 1,
+        status: response.status,
+        cached: result.cached,
+        processing: result.processing,
+        jobStarted: result.jobStarted,
+        jobId: result.jobId ?? result.job?.jobId,
+        phase: result.job?.phase,
+        currentChunk: result.job?.currentChunk,
+        totalChunks: result.job?.totalChunks,
+        message: result.job?.message,
+        hasSummary: Boolean(result.summary?.trim()),
+      });
+
       if (result.summary?.trim()) return result.summary;
 
       const retryAfterSeconds = typeof result.retryAfterSeconds === 'number' ? result.retryAfterSeconds : 5;
@@ -667,29 +700,30 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
           {isThinking ? (isImageMode ? 'Image agent is working...' : 'Reader agent is working...') : isImageMode ? 'Generate image' : 'Send to reader agent'}
         </button>
       </footer>
-      {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as ResizeHandle[]).map((handle) => {
-        const vertical = handle.startsWith('top') ? 'top-2' : 'bottom-2';
-        const horizontal = handle.endsWith('left') ? 'left-2' : 'right-2';
-        const cursor = handle === 'top-left' || handle === 'bottom-right' ? 'cursor-nwse-resize' : 'cursor-nesw-resize';
-        const borders = {
-          'top-left': 'rounded-tl-2xl border-l-2 border-t-2',
-          'top-right': 'rounded-tr-2xl border-r-2 border-t-2',
-          'bottom-left': 'rounded-bl-2xl border-b-2 border-l-2',
-          'bottom-right': 'rounded-br-2xl border-b-2 border-r-2',
-        }[handle];
-
-        return (
-          <div
-            aria-label={`Resize chat box from ${handle}`}
-            className={`absolute ${vertical} ${horizontal} size-5 ${cursor} ${borders} ${isResizing && resizeHandleRef.current === handle ? 'border-primary' : 'border-slate-400 hover:border-primary'}`}
-            key={handle}
-            onPointerDown={startResizing(handle)}
-            onPointerMove={resize}
-            onPointerUp={stopResizing}
-            role="separator"
-          />
-        );
-      })}
+      {(
+        [
+          ['top', 'left-6 right-6 top-0 h-3 cursor-ns-resize'],
+          ['right', 'bottom-6 right-0 top-6 w-3 cursor-ew-resize'],
+          ['bottom', 'bottom-0 left-6 right-6 h-3 cursor-ns-resize'],
+          ['left', 'bottom-6 left-0 top-6 w-3 cursor-ew-resize'],
+          ['top-left', 'left-0 top-0 size-8 cursor-nwse-resize rounded-tl-2xl border-l-2 border-t-2'],
+          ['top-right', 'right-0 top-0 size-8 cursor-nesw-resize rounded-tr-2xl border-r-2 border-t-2'],
+          ['bottom-left', 'bottom-0 left-0 size-8 cursor-nesw-resize rounded-bl-2xl border-b-2 border-l-2'],
+          ['bottom-right', 'bottom-0 right-0 size-10 cursor-nwse-resize rounded-br-2xl border-b-2 border-r-2'],
+        ] as Array<[ResizeHandle, string]>
+      ).map(([handle, placement]) => (
+        <div
+          aria-label={`Resize chat box from ${handle}`}
+          className={`absolute ${placement} ${isResizing && resizeHandleRef.current === handle ? 'border-primary bg-primary/10' : 'border-slate-400/80 hover:border-primary hover:bg-primary/5'}`}
+          key={handle}
+          onPointerDown={startResizing(handle)}
+          onPointerMove={resize}
+          onPointerUp={stopResizing}
+          role="separator"
+        >
+          {handle === 'bottom-right' ? <div className="absolute bottom-2 right-2 size-3 border-b-2 border-r-2 border-current text-slate-500" /> : null}
+        </div>
+      ))}
     </aside>
   );
 };
