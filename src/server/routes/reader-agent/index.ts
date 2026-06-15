@@ -56,6 +56,12 @@ type StoredDialogTurn = {
   routedBy?: 'cheap-context' | 'expensive-reader';
   inputTokens?: number;
   outputTokens?: number;
+  readingMode?: PaperReadingMode;
+  modePrompt?: string;
+  systemPrompt?: string;
+  userPromptEnglish?: string;
+  answerEnglish?: string;
+  answerChinese?: string;
 };
 
 type CheapTriageResult = {
@@ -329,6 +335,8 @@ const getPaperSummaryStoragePath = (request: z.infer<typeof readerRequestSchema>
 
 const getPaperDialogHistoryPath = (userId: string, paperKey: string) => `user-paper-history/${userId}/${paperKey}.md`;
 
+const getSharedPaperDialogHistoryPath = (paperKey: string) => `paper-cache/${paperKey}/reader-dialog.shared-v1.md`;
+
 const parseJsonBlock = (content: string) => {
   const match = content.match(/```json\n([\s\S]*?)\n```/);
 
@@ -378,6 +386,43 @@ const appendDialogTurns = async (userId: string, paperKey: string, turns: Stored
   const currentTurns = await loadDialogHistory(userId, paperKey);
 
   return saveDialogHistory(userId, paperKey, [...currentTurns, ...turns]);
+};
+
+const loadSharedPaperDialogHistory = async (paperKey: string): Promise<StoredDialogTurn[]> => {
+  try {
+    const parsed = parseJsonBlock(await downloadTextAsAdmin(getSharedPaperDialogHistoryPath(paperKey)));
+
+    return Array.isArray(parsed)
+      ? parsed
+          .filter((turn): turn is StoredDialogTurn =>
+            typeof turn === 'object' &&
+            turn !== null &&
+            (turn.role === 'user' || turn.role === 'assistant') &&
+            typeof turn.content === 'string' &&
+            typeof turn.createdAt === 'string',
+          )
+          .slice(-200)
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveSharedPaperDialogHistory = async (paperKey: string, turns: StoredDialogTurn[]) => {
+  const nextTurns = turns.slice(-200);
+
+  await uploadTextAsAdmin(
+    `# Shared paper dialog history\n\n\`\`\`json\n${JSON.stringify(nextTurns, null, 2)}\n\`\`\`\n`,
+    getSharedPaperDialogHistoryPath(paperKey),
+  );
+
+  return nextTurns;
+};
+
+const appendSharedPaperDialogTurns = async (paperKey: string, turns: StoredDialogTurn[]) => {
+  const currentTurns = await loadSharedPaperDialogHistory(paperKey);
+
+  return saveSharedPaperDialogHistory(paperKey, [...currentTurns, ...turns]);
 };
 
 const formatDialogHistory = (history: StoredDialogTurn[]) =>
@@ -668,6 +713,29 @@ const buildReaderSystemPrompt = (hasPdfContext: boolean, hasWebSearch: boolean, 
 const buildReaderUserPrompt = (request: z.infer<typeof readerRequestSchema>, extractedPdf?: ExtractedPdf, webSearchResults: TavilySearchResult[] = []) => {
   const webSearchText = webSearchResults.length ? `Tavily Web search results:\n${formatWebSearchResults(webSearchResults)}\n\n` : '';
   const pageText = request.pageNumber ? extractedPdf?.pages.find((page) => page.pageNumber === request.pageNumber)?.text : undefined;
+  const englishPaperContextSummary = request.paperContextSummary?.trim()
+    ? `\nKnown paper notes:\n${request.paperContextSummary.trim().slice(0, 12000)}\n`
+    : '';
+  const englishFigureCaptions = extractedPdf?.figureCaptions.length
+    ? `\nFigure/table caption candidates:\n${extractedPdf.figureCaptions.map((caption, index) => `${index + 1}. ${caption}`).join('\n')}`
+    : '';
+  const englishPdfText = extractedPdf?.text
+    ? `\nExtracted PDF text:\n${request.scope === 'current-page' && pageText ? `[Page ${request.pageNumber}]\n${pageText}` : extractedPdf.text}`
+    : request.selectedText || request.paperContextSummary
+      ? '\nExtracted PDF text: Full text is not available in this request. Use the provided notes or selected text; if evidence is missing, say the paper does not provide sufficient information.'
+      : '';
+
+  if (!englishPaperContextSummary && !englishFigureCaptions && !englishPdfText && !request.selectedText) {
+    return `${webSearchText}User request:\n${request.prompt}`;
+  }
+
+  return `Paper title: ${request.title ?? request.paperId}
+Request scope: ${request.scope}
+${englishPaperContextSummary}${request.selectedText ? `Selected text:\n${request.selectedText}\n` : ''}${englishFigureCaptions}${englishPdfText}
+
+${webSearchText}User request:
+${request.prompt}`;
+  /*
   const paperContextSummary = request.paperContextSummary?.trim()
     ? `\n已知论文速记：\n${request.paperContextSummary.trim().slice(0, 12000)}\n`
     : '';
@@ -689,6 +757,7 @@ const buildReaderUserPrompt = (request: z.infer<typeof readerRequestSchema>, ext
 ${paperContextSummary}${request.selectedText ? `选中文本：\n${request.selectedText}\n` : ''}${figureCaptions}${pdfText}
 
 ${webSearchText}用户请求：${request.prompt}`;
+  */
 };
 
 const askClaude = async (request: z.infer<typeof readerRequestSchema>, forcedModelSelection?: AnthropicModelSelection, responseLanguage: 'english' | 'chinese' = 'chinese') => {
@@ -712,9 +781,12 @@ const askClaude = async (request: z.infer<typeof readerRequestSchema>, forcedMod
 
     const modelSelection = forcedModelSelection ?? selectReaderModel(request);
     const client = createAnthropicClient(modelSelection.target);
-    const content: Anthropic.MessageParam['content'] = [{ type: 'text', text: buildReaderUserPrompt(request, extractedPdf, webSearchResults) }];
+    const content: Exclude<Anthropic.MessageParam['content'], string> = [{ type: 'text', text: buildReaderUserPrompt(request, extractedPdf, webSearchResults) }];
 
     for (const image of pageImages) {
+      if (true) {
+        content.push({ type: 'text', text: `Below is a rendered screenshot of PDF page ${image.pageNumber}. Use it to interpret figures, tables, equations, and layout when relevant.` });
+      } else
       content.push({ type: 'text', text: `下面是 PDF 第 ${image.pageNumber} 页截图，请结合其中的图表进行解释。` });
       content.push({
         type: 'image',
@@ -942,6 +1014,84 @@ const translateReaderAnswerToChinese = async (englishAnswer: string, request: z.
   };
 };
 
+const formatSharedPaperMemory = (history: StoredDialogTurn[]) =>
+  history
+    .slice(-80)
+    .map((turn, index) => {
+      const parts = [
+        `Record ${index + 1}`,
+        `role: ${turn.role}`,
+        `mode: ${turn.readingMode ?? 'unknown'}`,
+        `createdAt: ${turn.createdAt}`,
+        turn.modePrompt ? `modePrompt:\n${turn.modePrompt.slice(0, 3000)}` : null,
+        turn.systemPrompt ? `systemPrompt:\n${turn.systemPrompt.slice(0, 3000)}` : null,
+        turn.userPromptEnglish ? `userPromptEnglish:\n${turn.userPromptEnglish.slice(0, 4000)}` : null,
+        turn.answerEnglish ? `answerEnglish:\n${turn.answerEnglish.slice(0, 6000)}` : null,
+        turn.answerChinese ? `answerChinese:\n${turn.answerChinese.slice(0, 6000)}` : null,
+        `content:\n${turn.content.slice(0, 6000)}`,
+      ].filter(Boolean);
+
+      return parts.join('\n');
+    })
+    .join('\n\n---\n\n');
+
+const retrieveAnswerFromSharedPaperMemory = async (request: z.infer<typeof readerRequestSchema>, sharedHistory: StoredDialogTurn[], translatedPrompt: string) => {
+  if (sharedHistory.length === 0) {
+    return {
+      result: {
+        sufficient: false,
+        contextSummary: '',
+        expensivePrompt: translatedPrompt,
+      },
+      model: 'no-shared-paper-memory',
+      inputTokens: 0,
+      outputTokens: 0,
+    };
+  }
+
+  const modelSelection = selectCheapTriageModel();
+  const client = createAnthropicClient(modelSelection.target);
+  const response = await client.messages.create({
+    model: modelSelection.model,
+    max_tokens: 4000,
+    system:
+      'You are SCIReader memory retrieval. Search the shared Azure Blob paper dialog records for this exact paper. Decide whether the existing records are sufficient to answer the current Chinese user question without calling the expensive model. You may synthesize only from saved records. Do not invent new paper analysis. If sufficient, output a concise Chinese answerDraft. If not sufficient, output an English expensivePrompt for GPT-5.5. Output only JSON.',
+    messages: [
+      {
+        role: 'user',
+        content: `Paper title: ${request.title ?? request.paperId}
+Reading mode: ${getReadingMode(request)}
+
+Current user question in Chinese:
+${request.prompt}
+
+Current user question translated to English:
+${translatedPrompt}
+
+Shared paper memory records:
+${formatSharedPaperMemory(sharedHistory)}
+
+Return JSON exactly in this shape:
+{"sufficient": boolean, "contextSummary": string, "answerDraft": string, "expensivePrompt": string}
+
+Rules:
+- sufficient=true only when the saved records directly answer the current question for this paper and mode/context.
+- answerDraft must be Chinese and must mention when it is based on saved records if appropriate.
+- sufficient=false when the answer would require reading the PDF again, interpreting new figures/tables/equations, or making new claims not present in saved records.
+- expensivePrompt must be English and preserve the user's intent.`,
+      },
+    ],
+  });
+  const parsed = parseCheapTriageResult(textFromResponse(response).trim());
+
+  return {
+    result: parsed,
+    model: modelSelection.model,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+  };
+};
+
 const triageWithCheapModel = async (request: z.infer<typeof readerRequestSchema>, cachedSummary: string, storedHistory: StoredDialogTurn[]) => {
   if (!cachedSummary.trim() && storedHistory.length === 0) {
     return {
@@ -1142,24 +1292,85 @@ const app = new Hono()
       const summaryStoragePath = getPaperSummaryStoragePath(request, resolveUploadedPdfStoragePath(request.pdfUrl));
       const cachedSummary = (await downloadTextIfExists(summaryStoragePath)) ?? '';
       const storedHistory = await loadDialogHistory(user.id, paperKey);
+      const sharedHistory = await loadSharedPaperDialogHistory(paperKey);
       const translatedPrompt = await translateUserQuestionToEnglish(request);
       const nowForTranslatedPipeline = new Date().toISOString();
+      const memoryResult = await retrieveAnswerFromSharedPaperMemory(request, sharedHistory, translatedPrompt.text);
+      const memoryInputTokens = translatedPrompt.inputTokens + memoryResult.inputTokens;
+      const memoryOutputTokens = translatedPrompt.outputTokens + memoryResult.outputTokens;
+
+      if (memoryResult.result.sufficient && memoryResult.result.answerDraft?.trim()) {
+        await appendDialogTurns(user.id, paperKey, [
+          { role: 'user', content: request.prompt, createdAt: nowForTranslatedPipeline, readingMode: getReadingMode(request), userPromptEnglish: translatedPrompt.text },
+          {
+            role: 'assistant',
+            content: memoryResult.result.answerDraft,
+            createdAt: nowForTranslatedPipeline,
+            model: `${translatedPrompt.model} -> ${memoryResult.model}`,
+            routedBy: 'cheap-context',
+            inputTokens: memoryInputTokens,
+            outputTokens: memoryOutputTokens,
+            readingMode: getReadingMode(request),
+            answerChinese: memoryResult.result.answerDraft,
+          },
+        ]);
+        await appendSharedPaperDialogTurns(paperKey, [
+          {
+            role: 'user',
+            content: request.prompt,
+            createdAt: nowForTranslatedPipeline,
+            readingMode: getReadingMode(request),
+            modePrompt: request.modePrompt,
+            userPromptEnglish: translatedPrompt.text,
+          },
+          {
+            role: 'assistant',
+            content: memoryResult.result.answerDraft,
+            createdAt: nowForTranslatedPipeline,
+            model: `${translatedPrompt.model} -> ${memoryResult.model}`,
+            routedBy: 'cheap-context',
+            inputTokens: memoryInputTokens,
+            outputTokens: memoryOutputTokens,
+            readingMode: getReadingMode(request),
+            modePrompt: request.modePrompt,
+            userPromptEnglish: translatedPrompt.text,
+            answerChinese: memoryResult.result.answerDraft,
+          },
+        ]);
+
+        return c.json({
+          answer: memoryResult.result.answerDraft,
+          citations: [],
+          sources: [],
+          scope: request.scope,
+          paperId: request.paperId,
+          routedBy: 'cheap-context',
+          contextSummary: memoryResult.result.contextSummary,
+          translatedPrompt: translatedPrompt.text,
+          usage: {
+            inputTokens: memoryInputTokens,
+            outputTokens: memoryOutputTokens,
+          },
+        });
+      }
+
+      const expensiveSystemPrompt = buildReaderSystemPrompt(true, false, request.modePrompt, 'english');
       const expensiveTranslatedResult = await askClaude(
         {
           ...request,
-          prompt: translatedPrompt.text,
-          paperContextSummary: [cachedSummary, request.paperContextSummary].filter(Boolean).join('\n\n'),
-          conversationHistory: storedHistory.slice(-8).map((turn) => ({ role: turn.role, content: turn.content })),
+          prompt: memoryResult.result.expensivePrompt?.trim() || translatedPrompt.text,
+          paperContextSummary: '',
+          conversationHistory: [],
         },
         selectExpensiveReaderModel(),
         'english',
       );
       const translatedAnswer = await translateReaderAnswerToChinese(expensiveTranslatedResult.answer, request);
-      const translatedInputTokens = translatedPrompt.inputTokens + expensiveTranslatedResult.inputTokens + translatedAnswer.inputTokens;
-      const translatedOutputTokens = translatedPrompt.outputTokens + expensiveTranslatedResult.outputTokens + translatedAnswer.outputTokens;
+      const translatedInputTokens = memoryInputTokens + expensiveTranslatedResult.inputTokens + translatedAnswer.inputTokens;
+      const translatedOutputTokens = memoryOutputTokens + expensiveTranslatedResult.outputTokens + translatedAnswer.outputTokens;
 
       await appendDialogTurns(user.id, paperKey, [
-        { role: 'user', content: request.prompt, createdAt: nowForTranslatedPipeline },
+        { role: 'user', content: request.prompt, createdAt: nowForTranslatedPipeline, readingMode: getReadingMode(request), userPromptEnglish: translatedPrompt.text },
         {
           role: 'assistant',
           content: translatedAnswer.text,
@@ -1168,6 +1379,38 @@ const app = new Hono()
           routedBy: 'expensive-reader',
           inputTokens: translatedInputTokens,
           outputTokens: translatedOutputTokens,
+          readingMode: getReadingMode(request),
+          modePrompt: request.modePrompt,
+          systemPrompt: expensiveSystemPrompt,
+          userPromptEnglish: memoryResult.result.expensivePrompt?.trim() || translatedPrompt.text,
+          answerEnglish: expensiveTranslatedResult.answer,
+          answerChinese: translatedAnswer.text,
+        },
+      ]);
+      await appendSharedPaperDialogTurns(paperKey, [
+        {
+          role: 'user',
+          content: request.prompt,
+          createdAt: nowForTranslatedPipeline,
+          readingMode: getReadingMode(request),
+          modePrompt: request.modePrompt,
+          systemPrompt: expensiveSystemPrompt,
+          userPromptEnglish: memoryResult.result.expensivePrompt?.trim() || translatedPrompt.text,
+        },
+        {
+          role: 'assistant',
+          content: translatedAnswer.text,
+          createdAt: nowForTranslatedPipeline,
+          model: `${translatedPrompt.model} -> ${memoryResult.model} -> ${expensiveTranslatedResult.model} -> ${translatedAnswer.model}`,
+          routedBy: 'expensive-reader',
+          inputTokens: translatedInputTokens,
+          outputTokens: translatedOutputTokens,
+          readingMode: getReadingMode(request),
+          modePrompt: request.modePrompt,
+          systemPrompt: expensiveSystemPrompt,
+          userPromptEnglish: memoryResult.result.expensivePrompt?.trim() || translatedPrompt.text,
+          answerEnglish: expensiveTranslatedResult.answer,
+          answerChinese: translatedAnswer.text,
         },
       ]);
 
@@ -1372,9 +1615,12 @@ const app = new Hono()
         const result = await askClaude({
           ...request,
           scope: 'whole-paper',
-          prompt: freshness.result.improvementPrompt?.trim() || request.prompt,
-        }, selectExpensiveReaderModel());
-        const summary = result.answer;
+          prompt: request.prompt,
+          paperContextSummary: '',
+          conversationHistory: [],
+        }, selectExpensiveReaderModel(), 'english');
+        const translatedSummary = await translateReaderAnswerToChinese(result.answer, request);
+        const summary = translatedSummary.text;
 
         console.log('[reader-agent:summarize] expensive summary generation finished', {
           paperId: request.paperId,
@@ -1401,8 +1647,8 @@ const app = new Hono()
             outputTokens: freshness.outputTokens,
           },
           usage: {
-            inputTokens: freshness.inputTokens + result.inputTokens,
-            outputTokens: freshness.outputTokens + result.outputTokens,
+            inputTokens: freshness.inputTokens + result.inputTokens + translatedSummary.inputTokens,
+            outputTokens: freshness.outputTokens + result.outputTokens + translatedSummary.outputTokens,
           },
         });
       }
@@ -1413,8 +1659,11 @@ const app = new Hono()
         prompt:
           request.prompt ||
           `请用中文生成一份深度论文阅读笔记，不要短摘要。请展开分析背景、方法、实验、结果、局限；逐图说明每个 Figure/Table 的含义；逐公式或逐关键参数解释变量、指标和工程意义；保留关键数值证据；最后列出可追问索引。输出 Markdown。`,
-      }, selectExpensiveReaderModel());
-      const summary = result.answer;
+        paperContextSummary: '',
+        conversationHistory: [],
+      }, selectExpensiveReaderModel(), 'english');
+      const translatedSummary = await translateReaderAnswerToChinese(result.answer, request);
+      const summary = translatedSummary.text;
 
       console.log('[reader-agent:summarize] no cached summary; expensive summary generation finished', {
         paperId: request.paperId,
