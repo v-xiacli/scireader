@@ -78,6 +78,25 @@ type SummaryFreshnessResult = {
   improvementPrompt?: string;
 };
 
+type ReferenceEvaluationRecord = {
+  referenceKey: string;
+  referenceTitle?: string;
+  referenceAuthors?: string[];
+  referenceJournal?: string;
+  referenceYear?: string;
+  citedAs?: string;
+  sourcePaperKey: string;
+  sourceTitle?: string;
+  sourceAuthors?: string[];
+  sourceJournal?: string;
+  sourceYear?: string;
+  extractedFrom: 'introduction';
+  evaluation: string;
+  evidenceText?: string;
+  evaluationType?: string;
+  createdAt: string;
+};
+
 type PaperReadingMode = 'reviewer' | 'reader';
 
 const MAX_EXTRACTED_TEXT_CHARS = 140_000;
@@ -340,6 +359,10 @@ const getPaperSummaryStoragePath = (request: z.infer<typeof readerRequestSchema>
 const getPaperDialogHistoryPath = (userId: string, paperKey: string) => `user-paper-history/${userId}/${paperKey}.md`;
 
 const getSharedPaperDialogHistoryPath = (paperKey: string) => `paper-cache/${paperKey}/reader-dialog.shared-v1.md`;
+
+const getReferenceExternalEvaluationsPath = (referenceKey: string) => `paper-cache/${referenceKey}/external-reference-evaluations.v1.md`;
+
+const getSourcePaperReferenceEvaluationsPath = (sourcePaperKey: string) => `paper-cache/${sourcePaperKey}/reference-evaluations.introduction.v1.md`;
 
 type SummaryJobPhase = 'queued' | 'materializing-pdf' | 'extracting-text' | 'brief-synthesis' | 'chunk' | 'chunk-retry' | 'final-synthesis' | 'final-synthesis-retry' | 'translating' | 'uploading' | 'finished' | 'failed';
 
@@ -951,6 +974,44 @@ const extractJsonObject = (text: string) => {
   throw new Error('Cheap triage returned invalid JSON.');
 };
 
+const extractJsonArray = (text: string) => {
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { evaluations?: unknown[] }).evaluations)) return (parsed as { evaluations: unknown[] }).evaluations;
+  } catch {}
+
+  const fencedMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+
+  if (fencedMatch?.[1]) {
+    try {
+      const parsed = JSON.parse(fencedMatch[1]);
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { evaluations?: unknown[] }).evaluations)) return (parsed as { evaluations: unknown[] }).evaluations;
+    } catch {}
+  }
+
+  for (let start = text.indexOf('['); start >= 0; start = text.indexOf('[', start + 1)) {
+    let depth = 0;
+
+    for (let index = start; index < text.length; index += 1) {
+      if (text[index] === '[') depth += 1;
+      if (text[index] === ']') depth -= 1;
+
+      if (depth === 0) {
+        try {
+          const parsed = JSON.parse(text.slice(start, index + 1));
+          if (Array.isArray(parsed)) return parsed;
+        } catch {
+          break;
+        }
+      }
+    }
+  }
+
+  throw new Error('Reference evaluation extraction returned invalid JSON.');
+};
+
 const parseCheapTriageResult = (text: string): CheapTriageResult => {
   const parsed = extractJsonObject(text) as Partial<CheapTriageResult>;
   const contextSummary = typeof parsed.contextSummary === 'string' ? parsed.contextSummary : '';
@@ -981,6 +1042,221 @@ const parseSummaryFreshnessResult = (text: string): SummaryFreshnessResult => {
   }
 
   throw new Error('Cheap summary freshness check returned incomplete JSON.');
+};
+
+const extractIntroductionReferenceContext = (extractedPdf: ExtractedPdf) => {
+  const text = extractedPdf.text;
+  const lowerText = text.toLowerCase();
+  const introductionIndex = lowerText.search(/\b(?:1\.?\s*)?introduction\b/);
+  const introStart = introductionIndex >= 0 ? introductionIndex : 0;
+  const introSlice = text.slice(introStart, introStart + 24_000);
+  const sectionAfterIntro = introSlice.slice(800).search(/\b(?:2|ii)\.?\s+(?:related work|background|method|methods|design|proposed|principle|theory|system|model|analysis)\b/i);
+  const introductionText = sectionAfterIntro >= 0 ? introSlice.slice(0, 800 + sectionAfterIntro) : introSlice.slice(0, 18_000);
+  const referencesIndex = lowerText.lastIndexOf('references');
+  const referencesText = referencesIndex >= 0 ? text.slice(referencesIndex, referencesIndex + 30_000) : '';
+
+  return {
+    introductionText: introductionText.trim(),
+    referencesText: referencesText.trim(),
+  };
+};
+
+const normalizeReferenceEvaluationRecords = (rawRecords: unknown[], request: z.infer<typeof readerRequestSchema>): ReferenceEvaluationRecord[] => {
+  const sourcePaperKey = getPaperIdentitySlug(request);
+  const sourceAuthors = parseAuthors(request.authors);
+  const createdAt = new Date().toISOString();
+
+  const normalizedRecords = rawRecords.map((rawRecord): ReferenceEvaluationRecord | null => {
+      if (!rawRecord || typeof rawRecord !== 'object') return null;
+
+      const record = rawRecord as Record<string, unknown>;
+      const referenceTitle = typeof record.referenceTitle === 'string' ? record.referenceTitle.trim() : undefined;
+      const referenceAuthors = Array.isArray(record.referenceAuthors)
+        ? record.referenceAuthors.filter((author): author is string => typeof author === 'string' && Boolean(author.trim())).map((author) => author.trim()).slice(0, 4)
+        : parseAuthors(typeof record.referenceAuthors === 'string' ? record.referenceAuthors : undefined);
+      const referenceJournal = typeof record.referenceJournal === 'string' ? record.referenceJournal.trim() : undefined;
+      const referenceYear = typeof record.referenceYear === 'string' ? record.referenceYear.trim() : undefined;
+      const citedAs = typeof record.citedAs === 'string' ? record.citedAs.trim() : undefined;
+      const evaluation = typeof record.evaluation === 'string' ? record.evaluation.trim() : '';
+      const evidenceText = typeof record.evidenceText === 'string' ? record.evidenceText.trim() : undefined;
+      const evaluationType = typeof record.evaluationType === 'string' ? record.evaluationType.trim() : undefined;
+      const referenceKey = getPaperIdentityKey({
+        title: referenceTitle,
+        authors: referenceAuthors,
+        journal: referenceJournal,
+        year: referenceYear,
+        paperId: citedAs,
+      });
+
+      if (!evaluation || referenceKey === 'uploadedpaper') return null;
+
+      return {
+        referenceKey,
+        referenceTitle,
+        referenceAuthors,
+        referenceJournal,
+        referenceYear,
+        citedAs,
+        sourcePaperKey,
+        sourceTitle: request.title ?? request.paperId,
+        sourceAuthors,
+        sourceJournal: request.journal,
+        sourceYear: request.year,
+        extractedFrom: 'introduction' as const,
+        evaluation,
+        evidenceText,
+        evaluationType,
+        createdAt,
+      };
+    });
+
+  return normalizedRecords.filter((record): record is ReferenceEvaluationRecord => record !== null).slice(0, 30);
+};
+
+const loadReferenceEvaluationRecords = async (storagePath: string): Promise<ReferenceEvaluationRecord[]> => {
+  try {
+    const parsed = parseJsonBlock(await downloadTextAsAdmin(storagePath));
+
+    return Array.isArray(parsed)
+      ? parsed.filter((record): record is ReferenceEvaluationRecord =>
+          Boolean(record) &&
+          typeof record === 'object' &&
+          typeof (record as ReferenceEvaluationRecord).referenceKey === 'string' &&
+          typeof (record as ReferenceEvaluationRecord).sourcePaperKey === 'string' &&
+          typeof (record as ReferenceEvaluationRecord).evaluation === 'string',
+        )
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveReferenceEvaluationRecords = async (storagePath: string, records: ReferenceEvaluationRecord[], title: string) => {
+  const nextRecords = records.slice(-300);
+
+  await uploadTextAsAdmin(
+    `# ${title}\n\n\`\`\`json\n${JSON.stringify(nextRecords, null, 2)}\n\`\`\`\n`,
+    storagePath,
+  );
+
+  return nextRecords;
+};
+
+const appendReferenceEvaluationRecords = async (storagePath: string, records: ReferenceEvaluationRecord[], title: string) => {
+  const currentRecords = await loadReferenceEvaluationRecords(storagePath);
+  const recordMap = new Map<string, ReferenceEvaluationRecord>();
+
+  for (const record of [...currentRecords, ...records]) {
+    const key = [
+      record.referenceKey,
+      record.sourcePaperKey,
+      record.citedAs ?? '',
+      record.evidenceText ?? record.evaluation.slice(0, 160),
+    ].join('|');
+
+    recordMap.set(key, record);
+  }
+
+  return saveReferenceEvaluationRecords(storagePath, [...recordMap.values()], title);
+};
+
+const extractAndStoreIntroductionReferenceEvaluations = async (request: z.infer<typeof readerRequestSchema>, extractedPdf: ExtractedPdf, jobId?: string) => {
+  const { introductionText, referencesText } = extractIntroductionReferenceContext(extractedPdf);
+
+  if (introductionText.length < 800 || !/\[\d+\]|\(\d{4}\)|et al\.|previous|prior|reported|proposed|demonstrated|showed|introduced|limited|however/i.test(introductionText)) {
+    console.log('[reader-agent:references] skipped introduction evaluation extraction', {
+      jobId,
+      paperId: request.paperId,
+      introductionChars: introductionText.length,
+      referencesChars: referencesText.length,
+    });
+    return { records: [], model: 'skipped', inputTokens: 0, outputTokens: 0 };
+  }
+
+  const modelSelection = selectCheapTriageModel();
+  const client = createAnthropicClient(modelSelection.target);
+  const startedAt = Date.now();
+
+  console.log('[reader-agent:references] introduction evaluation extraction started', {
+    jobId,
+    paperId: request.paperId,
+    model: modelSelection.model,
+    introductionChars: introductionText.length,
+    referencesChars: referencesText.length,
+  });
+
+  const response = await client.messages.create({
+    model: modelSelection.model,
+    max_tokens: 2500,
+    system:
+      'You extract how one paper evaluates cited prior work. Use only the Introduction text and References list. Do not infer from outside knowledge. Output only JSON: {"evaluations":[...]}.',
+    messages: [
+      {
+        role: 'user',
+        content: `Source paper:
+Title: ${request.title ?? request.paperId}
+Authors: ${request.authors ?? 'unknown'}
+Journal: ${request.journal ?? 'unknown'}
+Year: ${request.year ?? 'unknown'}
+
+Task:
+Find cited papers that the Introduction explicitly evaluates, compares against, or uses to motivate a gap. For each cited paper, output:
+- citedAs: citation marker such as [1], Smith et al., or whatever appears
+- referenceTitle: title from References if available; otherwise omit
+- referenceAuthors: array of author names from References if available
+- referenceJournal: journal/conference from References if available
+- referenceYear: year if available
+- evaluationType: one of background, limitation, comparison, gap, method, benchmark, improvement
+- evaluation: one concise sentence describing how the source paper evaluates that cited work
+- evidenceText: the shortest exact Introduction phrase/sentence supporting the evaluation
+
+Rules:
+- Only include cited works explicitly discussed in the Introduction.
+- Do not include citations that are merely listed without evaluation.
+- Do not claim we have read the cited paper itself.
+- If metadata cannot be found in References, keep the evaluation with citedAs.
+- Return at most 20 records.
+
+Introduction text:
+${introductionText}
+
+References text:
+${referencesText || '[References section not found]'}`,
+      },
+    ],
+  });
+
+  const records = normalizeReferenceEvaluationRecords(extractJsonArray(textFromResponse(response).trim()), request);
+  const sourcePaperKey = getPaperIdentitySlug(request);
+
+  if (records.length) {
+    await appendReferenceEvaluationRecords(getSourcePaperReferenceEvaluationsPath(sourcePaperKey), records, 'Introduction reference evaluations made by this paper');
+
+    for (const record of records) {
+      await appendReferenceEvaluationRecords(
+        getReferenceExternalEvaluationsPath(record.referenceKey),
+        [record],
+        'External evaluations of this paper from other papers',
+      );
+    }
+  }
+
+  console.log('[reader-agent:references] introduction evaluation extraction finished', {
+    jobId,
+    paperId: request.paperId,
+    model: modelSelection.model,
+    durationMs: Date.now() - startedAt,
+    records: records.length,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+  });
+
+  return {
+    records,
+    model: modelSelection.model,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+  };
 };
 
 const checkSummaryFreshnessWithCheapModel = async (request: z.infer<typeof readerRequestSchema>, cachedSummary: string) => {
@@ -1126,8 +1402,38 @@ const formatSharedPaperMemory = (history: StoredDialogTurn[]) =>
     })
     .join('\n\n---\n\n');
 
-const retrieveAnswerFromSharedPaperMemory = async (request: z.infer<typeof readerRequestSchema>, sharedHistory: StoredDialogTurn[], translatedPrompt: string) => {
-  if (sharedHistory.length === 0) {
+const formatExternalReferenceEvaluations = (records: ReferenceEvaluationRecord[]) =>
+  records
+    .slice(-80)
+    .map((record, index) => {
+      const parts = [
+        `External evaluation ${index + 1}`,
+        `referenceKey: ${record.referenceKey}`,
+        record.referenceTitle ? `referenceTitle: ${record.referenceTitle}` : null,
+        record.referenceAuthors?.length ? `referenceAuthors: ${record.referenceAuthors.join(', ')}` : null,
+        record.referenceJournal ? `referenceJournal: ${record.referenceJournal}` : null,
+        record.referenceYear ? `referenceYear: ${record.referenceYear}` : null,
+        record.citedAs ? `citedAs: ${record.citedAs}` : null,
+        `sourcePaperKey: ${record.sourcePaperKey}`,
+        record.sourceTitle ? `sourceTitle: ${record.sourceTitle}` : null,
+        record.sourceJournal ? `sourceJournal: ${record.sourceJournal}` : null,
+        record.sourceYear ? `sourceYear: ${record.sourceYear}` : null,
+        record.evaluationType ? `evaluationType: ${record.evaluationType}` : null,
+        `evaluation: ${record.evaluation}`,
+        record.evidenceText ? `introductionEvidence: ${record.evidenceText}` : null,
+      ].filter(Boolean);
+
+      return parts.join('\n');
+    })
+    .join('\n\n---\n\n');
+
+const retrieveAnswerFromSharedPaperMemory = async (
+  request: z.infer<typeof readerRequestSchema>,
+  sharedHistory: StoredDialogTurn[],
+  externalEvaluations: ReferenceEvaluationRecord[],
+  translatedPrompt: string,
+) => {
+  if (sharedHistory.length === 0 && externalEvaluations.length === 0) {
     return {
       result: {
         sufficient: false,
@@ -1146,7 +1452,7 @@ const retrieveAnswerFromSharedPaperMemory = async (request: z.infer<typeof reade
     model: modelSelection.model,
     max_tokens: 4000,
     system:
-      'You are SCIReader memory retrieval. Search the shared Azure Blob paper dialog records for this exact paper. Decide whether the existing records are sufficient to answer the current Chinese user question without calling the expensive model. You may synthesize only from saved records. Do not invent new paper analysis. If sufficient, output a concise Chinese answerDraft. If not sufficient, output an English expensivePrompt for GPT-5.5. Output only JSON.',
+      'You are SCIReader memory retrieval. Search saved Azure Blob records for this exact paper key. Records may include shared dialog history for the paper and external evaluations made by other papers in their Introductions. Decide whether the saved records are sufficient to answer the current Chinese user question without calling the expensive model. You may synthesize only from saved records. Do not invent new paper analysis. If using external evaluations, clearly state in Chinese that they are other papers\' Introduction evaluations, not conclusions from reading the target paper itself. If sufficient, output a concise Chinese answerDraft. If not sufficient, output an English expensivePrompt for GPT-5.5. Output only JSON.',
     messages: [
       {
         role: 'user',
@@ -1162,13 +1468,17 @@ ${translatedPrompt}
 Shared paper memory records:
 ${formatSharedPaperMemory(sharedHistory)}
 
+External evaluations of this paper by other papers:
+${formatExternalReferenceEvaluations(externalEvaluations) || 'None'}
+
 Return JSON exactly in this shape:
 {"sufficient": boolean, "contextSummary": string, "answerDraft": string, "expensivePrompt": string}
 
 Rules:
-- sufficient=true only when the saved records directly answer the current question for this paper and mode/context.
+- sufficient=true only when the saved dialog records or external evaluations directly answer the current question for this paper and mode/context.
 - answerDraft must be Chinese and must mention when it is based on saved records if appropriate.
-- sufficient=false when the answer would require reading the PDF again, interpreting new figures/tables/equations, or making new claims not present in saved records.
+- If answerDraft uses external evaluations, explicitly say they come from other papers' Introduction sections and are not target-paper full-text evidence.
+- sufficient=false when the answer would require reading the PDF again, interpreting new figures/tables/equations, or making new claims not present in saved records or external evaluations.
 - expensivePrompt must be English and preserve the user's intent.`,
       },
     ],
@@ -1441,6 +1751,15 @@ const generateChunkedEnglishSummary = async (
   try {
     setJobStatus({ phase: 'extracting-text', message: 'Extracting text from PDF pages.' });
     const extractedPdf = await extractPdfText(tempPdf.localPdfPath);
+    await extractAndStoreIntroductionReferenceEvaluations(request, extractedPdf, jobId).catch((error) => {
+      console.error('[reader-agent:references] introduction evaluation extraction failed', {
+        jobId,
+        paperId: request.paperId,
+        message: error instanceof Error ? error.message : 'Unknown reference evaluation extraction error.',
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+    });
+
     const wantsDetailedReport = request.detailedReport === true;
 
     if (!wantsDetailedReport && extractedPdf.text.length <= SUMMARY_BRIEF_SINGLE_PASS_MAX_CHARS) {
@@ -1929,9 +2248,15 @@ const app = new Hono()
       const cachedSummary = (await downloadTextIfExists(summaryStoragePath)) ?? '';
       const storedHistory = await loadDialogHistory(user.id, paperKey);
       const sharedHistory = await loadSharedPaperDialogHistory(paperKey);
+      const externalEvaluations = await loadReferenceEvaluationRecords(getReferenceExternalEvaluationsPath(paperKey));
+      console.log('[reader-agent:references] external evaluations loaded for retrieval', {
+        paperId: request.paperId,
+        paperKey,
+        records: externalEvaluations.length,
+      });
       const translatedPrompt = await translateUserQuestionToEnglish(request);
       const nowForTranslatedPipeline = new Date().toISOString();
-      const memoryResult = await retrieveAnswerFromSharedPaperMemory(request, sharedHistory, translatedPrompt.text);
+      const memoryResult = await retrieveAnswerFromSharedPaperMemory(request, sharedHistory, externalEvaluations, translatedPrompt.text);
       const memoryInputTokens = translatedPrompt.inputTokens + memoryResult.inputTokens;
       const memoryOutputTokens = translatedPrompt.outputTokens + memoryResult.outputTokens;
 
