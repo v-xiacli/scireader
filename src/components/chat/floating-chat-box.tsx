@@ -485,31 +485,33 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
-  const resize = (event: PointerEvent<HTMLDivElement>) => {
-    if (!isResizing) return;
-
+  const resizeFromClient = (clientX: number, clientY: number) => {
     const handle = resizeHandleRef.current;
     const start = resizeStartRef.current;
-    const deltaX = event.clientX - start.x;
-    const deltaY = event.clientY - start.y;
+    const deltaX = clientX - start.x;
+    const deltaY = clientY - start.y;
     const right = start.left + start.width;
     const bottom = start.top + start.height;
     let nextLeft = start.left;
     let nextTop = start.top;
-    let nextWidth = handle.includes('left') ? start.width - deltaX : start.width + deltaX;
-    let nextHeight = handle.includes('top') ? start.height - deltaY : start.height + deltaY;
+    let nextWidth = start.width;
+    let nextHeight = start.height;
 
     if (handle.includes('left')) {
+      nextWidth = start.width - deltaX;
       nextWidth = Math.min(Math.max(minSize.width, nextWidth), right - edgePadding);
       nextLeft = Math.max(edgePadding, right - nextWidth);
-    } else {
+    } else if (handle.includes('right')) {
+      nextWidth = start.width + deltaX;
       nextWidth = Math.min(Math.max(minSize.width, nextWidth), window.innerWidth - start.left - edgePadding);
     }
 
     if (handle.includes('top')) {
+      nextHeight = start.height - deltaY;
       nextHeight = Math.min(Math.max(minSize.height, nextHeight), bottom - edgePadding);
       nextTop = Math.max(edgePadding, bottom - nextHeight);
-    } else {
+    } else if (handle.includes('bottom')) {
+      nextHeight = start.height + deltaY;
       nextHeight = Math.min(Math.max(minSize.height, nextHeight), window.innerHeight - start.top - edgePadding);
     }
 
@@ -517,10 +519,38 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     setSize({ width: nextWidth, height: nextHeight });
   };
 
+  const resize = (event: PointerEvent<HTMLDivElement>) => {
+    if (!isResizing) return;
+
+    resizeFromClient(event.clientX, event.clientY);
+  };
+
   const stopResizing = (event: PointerEvent<HTMLDivElement>) => {
     setIsResizing(false);
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   };
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handlePointerMove = (event: globalThis.PointerEvent) => {
+      event.preventDefault();
+      resizeFromClient(event.clientX, event.clientY);
+    };
+    const handlePointerUp = () => setIsResizing(false);
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+  }, [isResizing]);
 
   const sendMessage = async () => {
     const trimmed = input.trim();
@@ -714,7 +744,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
       ).map(([handle, placement]) => (
         <div
           aria-label={`Resize chat box from ${handle}`}
-          className={`absolute ${placement} ${isResizing && resizeHandleRef.current === handle ? 'border-primary bg-primary/10' : 'border-slate-400/80 hover:border-primary hover:bg-primary/5'}`}
+          className={`absolute z-20 touch-none ${placement} ${isResizing && resizeHandleRef.current === handle ? 'border-primary bg-primary/10' : 'border-slate-400/80 hover:border-primary hover:bg-primary/5'}`}
           key={handle}
           onPointerDown={startResizing(handle)}
           onPointerMove={resize}
