@@ -770,8 +770,9 @@ const askClaude = async (request: z.infer<typeof readerRequestSchema>, forcedMod
     const webSearchResults = await searchWebForPrompt(request.prompt);
     const hasWebSearch = webSearchResults.length > 0;
     let pageImages: PdfPageImage[] = [];
+    const shouldRenderPageImages = request.scope === 'current-page' || request.scope === 'figure' || (request.scope === 'selected-text' && Boolean(request.pageNumber));
 
-    if (localPdfPath) {
+    if (localPdfPath && shouldRenderPageImages) {
       try {
         pageImages = await renderPdfPageImages(localPdfPath, request.scope === 'current-page' && request.pageNumber ? [request.pageNumber] : undefined);
       } catch (error) {
