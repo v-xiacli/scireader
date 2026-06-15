@@ -44,6 +44,7 @@ const uploadedPaperSchema = z.object({
   journal: z.string().optional(),
   year: z.string().optional(),
   readingMode: z.enum(['reviewer', 'reader']).optional(),
+  detailedReport: z.boolean().optional(),
 });
 
 const uploadedPapersSchema = z.array(uploadedPaperSchema);

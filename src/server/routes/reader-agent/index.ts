@@ -1062,6 +1062,49 @@ const translateReaderAnswerToChinese = async (englishAnswer: string, request: z.
   };
 };
 
+const summarizeReaderAnswerBrieflyInChinese = async (fullAnswer: string, request: z.infer<typeof readerRequestSchema>, jobId?: string) => {
+  const modelSelection = selectCheapTriageModel();
+  const client = createAnthropicClient(modelSelection.target);
+  const startedAt = Date.now();
+
+  console.log('[reader-agent:llm] cheap brief summary started', {
+    jobId,
+    paperId: request.paperId,
+    model: modelSelection.model,
+    fullAnswerChars: fullAnswer.length,
+  });
+
+  const response = await client.messages.create({
+    model: modelSelection.model,
+    max_tokens: 800,
+    system: briefSummaryPrompt,
+    messages: [
+      {
+        role: 'user',
+        content: `论文标题：${request.title ?? request.paperId}\n\n完整深度阅读笔记：\n${fullAnswer}`,
+      },
+    ],
+  });
+  const answer = textFromResponse(response).trim() || fullAnswer;
+
+  console.log('[reader-agent:llm] cheap brief summary finished', {
+    jobId,
+    paperId: request.paperId,
+    model: modelSelection.model,
+    durationMs: Date.now() - startedAt,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+    answerChars: answer.length,
+  });
+
+  return {
+    text: answer,
+    model: modelSelection.model,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+  };
+};
+
 const formatSharedPaperMemory = (history: StoredDialogTurn[]) =>
   history
     .slice(-80)
@@ -1203,6 +1246,25 @@ const getCompactSummaryInstruction = (mode: PaperReadingMode) =>
   mode === 'reviewer'
     ? 'You are preparing notes for a critical paper review. Focus on the real contribution, novelty, assumptions, evidence, quantitative results, credibility concerns, limitations, and questions for follow-up.'
     : 'You are preparing notes for a research reader. Focus on the core idea, reusable design patterns, literature positioning, key evidence, comparison metrics, limitations, and future opportunities.';
+
+const briefSummaryPrompt = `你将收到一份针对某篇论文生成的"深度阅读笔记"（完整版，可能来自"审稿模式"或"写稿模式"两种模板之一）。
+
+请基于这份笔记，只提炼以下五点，使用中文输出，每点严格控制在1-2句话内：
+
+## 速览
+
+* **核心卖点**：去掉包装后，这篇论文真正的新东西/最大优势是什么（即论文最想让审稿人/读者记住的一点）。
+* **核心数据**：列出笔记中最关键的1-3个量化结果（保留具体数值、单位，如增益/dB、精度/mAP、带宽/GHz、良率等——以笔记中实际出现的指标为准，不要编造）。
+* **主要缺陷**：方法、实验或证据层面最大的弱点（如笔记中明确未提及缺陷，写"未发现明显缺陷"）。
+* **是否有价值**：值得细读 / 可选 / 不必细读，附极简理由（不超过8字）。
+* **数据造假嫌疑**：有 / 未见明显异常 / 信息不足无法判断（严格沿用笔记"证据强度核查"部分的结论，不得自行加重或减轻判断）。
+
+硬性要求：
+* 只能基于完整笔记中已有内容提炼，禁止引入笔记之外的新判断、新信息或推测。
+* "核心数据"必须是笔记中出现过的真实数值，不得四舍五入到面目全非或编造。
+* 禁止展开论述、禁止给出建议、禁止追问索引、禁止输出除上述五点之外的任何内容。
+* 总输出不超过180字。
+* 不要输出"完整笔记见附件"等附加说明。`;
 
 const estimateTokenConsumption = async (request: z.infer<typeof tokenEstimateRequestSchema>) => {
   const startedAt = Date.now();
@@ -1638,16 +1700,25 @@ const startSummaryGenerationJob = (
     });
 
     const result = await generateChunkedEnglishSummary(request, jobId, setJobStatus);
-    setJobStatus({ phase: 'translating', message: 'Translating final English summary into Chinese with cheap model.' });
-    const translatedSummary = await translateReaderAnswerToChinese(result.answer, request);
-    const summary = translatedSummary.text;
+    const wantsDetailedReport = request.detailedReport !== false;
+    setJobStatus({
+      phase: 'translating',
+      message: wantsDetailedReport
+        ? 'Translating final English summary into Chinese with cheap model.'
+        : 'Compressing final report into a brief Chinese overview with cheap model.',
+    });
+    const finalChineseResult = wantsDetailedReport
+      ? await translateReaderAnswerToChinese(result.answer, request)
+      : await summarizeReaderAnswerBrieflyInChinese(result.answer, request, jobId);
+    const summary = finalChineseResult.text;
 
     console.log('[reader-agent:summarize] background summary generation finished', {
       jobId,
       paperId: request.paperId,
       model: result.model,
-      inputTokens: (freshness?.inputTokens ?? 0) + result.inputTokens + translatedSummary.inputTokens,
-      outputTokens: (freshness?.outputTokens ?? 0) + result.outputTokens + translatedSummary.outputTokens,
+      detailedReport: wantsDetailedReport,
+      inputTokens: (freshness?.inputTokens ?? 0) + result.inputTokens + finalChineseResult.inputTokens,
+      outputTokens: (freshness?.outputTokens ?? 0) + result.outputTokens + finalChineseResult.outputTokens,
       saved: Boolean(summary.trim()),
     });
 
