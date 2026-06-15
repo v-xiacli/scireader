@@ -1429,11 +1429,12 @@ const formatExternalReferenceEvaluations = (records: ReferenceEvaluationRecord[]
 
 const retrieveAnswerFromSharedPaperMemory = async (
   request: z.infer<typeof readerRequestSchema>,
+  cachedSummary: string,
   sharedHistory: StoredDialogTurn[],
   externalEvaluations: ReferenceEvaluationRecord[],
   translatedPrompt: string,
 ) => {
-  if (sharedHistory.length === 0 && externalEvaluations.length === 0) {
+  if (!cachedSummary.trim() && sharedHistory.length === 0 && externalEvaluations.length === 0) {
     return {
       result: {
         sufficient: false,
@@ -1452,7 +1453,7 @@ const retrieveAnswerFromSharedPaperMemory = async (
     model: modelSelection.model,
     max_tokens: 4000,
     system:
-      'You are SCIReader memory retrieval. Search saved Azure Blob records for this exact paper key. Records may include shared dialog history for the paper and external evaluations made by other papers in their Introductions. Decide whether the saved records are sufficient to answer the current Chinese user question without calling the expensive model. You may synthesize only from saved records. Do not invent new paper analysis. If using external evaluations, clearly state in Chinese that they are other papers\' Introduction evaluations, not conclusions from reading the target paper itself. If sufficient, output a concise Chinese answerDraft. If not sufficient, output an English expensivePrompt for GPT-5.5. Output only JSON.',
+      'You are SCIReader memory retrieval and routing. Search saved Azure Blob records for this exact paper key. Records may include the cached paper brief, shared dialog history, and external evaluations made by other papers in their Introductions. Your primary job is to decide whether the saved records are enough, or whether GPT-5.5 must read the PDF again. Be conservative. You may answer directly only when the saved records contain explicit evidence that directly answers the user question. Route to GPT-5.5 when the user asks for new expert judgment, critique, novelty assessment, credibility assessment, causal explanation, comparison, methodology interpretation, or anything that requires checking original PDF evidence beyond the saved records. Do not invent new paper analysis. If using external evaluations, clearly state in Chinese that they are other papers\' Introduction evaluations, not conclusions from reading the target paper itself. Output only JSON.',
     messages: [
       {
         role: 'user',
@@ -1465,6 +1466,9 @@ ${request.prompt}
 Current user question translated to English:
 ${translatedPrompt}
 
+Cached paper brief:
+${cachedSummary.slice(0, 12000) || 'None'}
+
 Shared paper memory records:
 ${formatSharedPaperMemory(sharedHistory)}
 
@@ -1475,11 +1479,14 @@ Return JSON exactly in this shape:
 {"sufficient": boolean, "contextSummary": string, "answerDraft": string, "expensivePrompt": string}
 
 Rules:
-- sufficient=true only when the saved dialog records or external evaluations directly answer the current question for this paper and mode/context.
+- Think step by step internally before producing JSON: What exact claim is the user asking for? Is that claim already explicitly supported by saved records? Would a careful reviewer need to inspect the PDF text, figures, equations, methods, or tables?
+- sufficient=true only for direct factual recall or simple restatement when saved records explicitly contain the needed answer.
+- sufficient=false for new judgments, critique, novelty assessment, credibility assessment, "why" explanations, interpretation of method/model design, comparison, or when the saved records are only partially relevant.
 - answerDraft must be Chinese and must mention when it is based on saved records if appropriate.
 - If answerDraft uses external evaluations, explicitly say they come from other papers' Introduction sections and are not target-paper full-text evidence.
 - sufficient=false when the answer would require reading the PDF again, interpreting new figures/tables/equations, or making new claims not present in saved records or external evaluations.
-- expensivePrompt must be English and preserve the user's intent.`,
+- When sufficient=false, contextSummary should briefly summarize relevant saved context for GPT-5.5.
+- expensivePrompt must be English, preserve the user's intent, and explicitly ask GPT-5.5 to answer from PDF evidence and mention uncertainty when the paper does not provide enough evidence.`,
       },
     ],
   });
@@ -2256,9 +2263,42 @@ const app = new Hono()
       });
       const translatedPrompt = await translateUserQuestionToEnglish(request);
       const nowForTranslatedPipeline = new Date().toISOString();
-      const memoryResult = await retrieveAnswerFromSharedPaperMemory(request, sharedHistory, externalEvaluations, translatedPrompt.text);
+      let memoryResult;
+
+      try {
+        memoryResult = await retrieveAnswerFromSharedPaperMemory(request, cachedSummary, sharedHistory, externalEvaluations, translatedPrompt.text);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown memory retrieval error.';
+
+        console.warn('[reader-agent:ask] memory routing failed; escalating to expensive reader', {
+          paperId: request.paperId,
+          paperKey,
+          message,
+        });
+
+        memoryResult = {
+          result: {
+            sufficient: false,
+            contextSummary: '',
+            expensivePrompt: `${translatedPrompt.text}\n\nThe cheap memory router failed (${message}). Please answer by reading the PDF evidence directly.`,
+          },
+          model: 'cheap-memory-routing-failed',
+          inputTokens: 0,
+          outputTokens: 0,
+        };
+      }
       const memoryInputTokens = translatedPrompt.inputTokens + memoryResult.inputTokens;
       const memoryOutputTokens = translatedPrompt.outputTokens + memoryResult.outputTokens;
+
+      console.log('[reader-agent:ask] memory routing result', {
+        paperId: request.paperId,
+        paperKey,
+        sufficient: memoryResult.result.sufficient,
+        model: memoryResult.model,
+        hasCachedSummary: Boolean(cachedSummary.trim()),
+        sharedHistoryTurns: sharedHistory.length,
+        externalEvaluationRecords: externalEvaluations.length,
+      });
 
       if (memoryResult.result.sufficient && memoryResult.result.answerDraft?.trim()) {
         await appendDialogTurns(user.id, paperKey, [
@@ -2316,11 +2356,18 @@ const app = new Hono()
       }
 
       const expensiveSystemPrompt = buildReaderSystemPrompt(true, false, request.modePrompt, 'english');
+      const expensiveContext = [
+        cachedSummary ? `Cached paper brief:\n${cachedSummary.slice(0, 12000)}` : null,
+        memoryResult.result.contextSummary ? `Cheap retrieval context:\n${memoryResult.result.contextSummary}` : null,
+        externalEvaluations.length ? `External evaluations by other papers:\n${formatExternalReferenceEvaluations(externalEvaluations).slice(0, 12000)}` : null,
+      ]
+        .filter(Boolean)
+        .join('\n\n');
       const expensiveTranslatedResult = await askClaude(
         {
           ...request,
           prompt: memoryResult.result.expensivePrompt?.trim() || translatedPrompt.text,
-          paperContextSummary: '',
+          paperContextSummary: expensiveContext,
           conversationHistory: [],
         },
         selectExpensiveReaderModel(),
