@@ -83,7 +83,7 @@ Rules: no section-by-section narration; no broad literature essay; explain equat
 
 const buildConversationHistory = (messages: ChatMessage[]): ConversationTurn[] =>
   messages
-    .filter((message) => message.content && message.contextLabel !== 'Paper brief' && message.contextLabel !== 'Deep brief' && !message.imageBase64 && !message.imageUrl && message.content !== 'Analyzing...' && message.content !== 'Generating image...')
+    .filter((message) => message.content && message.contextLabel !== 'Paper brief' && message.contextLabel !== 'Paper report' && !message.imageBase64 && !message.imageUrl && message.content !== 'Analyzing...' && message.content !== 'Generating image...')
     .slice(-8)
     .map((message) => ({
       role: message.role,
@@ -93,8 +93,8 @@ const buildConversationHistory = (messages: ChatMessage[]): ConversationTurn[] =
 const getSummaryProgress = (elapsedSeconds: number): SummaryProgress => {
   if (elapsedSeconds < 3) return { percent: 12, label: 'No saved summary found yet. Starting summary generation...', elapsedSeconds };
   if (elapsedSeconds < 10) return { percent: 28, label: 'Reading the uploaded PDF...', elapsedSeconds };
-  if (elapsedSeconds < 25) return { percent: 52, label: 'Generating the first deep summary...', elapsedSeconds };
-  if (elapsedSeconds < 60) return { percent: 76, label: 'Still summarizing this long paper...', elapsedSeconds };
+  if (elapsedSeconds < 25) return { percent: 52, label: 'Generating the first compact paper report...', elapsedSeconds };
+  if (elapsedSeconds < 60) return { percent: 76, label: 'Still preparing the compact paper report...', elapsedSeconds };
 
   return { percent: 90, label: 'Still working. First-time summaries can take a few minutes...', elapsedSeconds };
 };
@@ -394,7 +394,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
         id: loadingId,
         role: 'assistant',
         content: formatSummaryProgressMessage(initialProgress),
-        contextLabel: 'Deep brief',
+        contextLabel: 'Paper report',
       },
     ]);
 
@@ -414,7 +414,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
             id: loadingId,
             role: 'assistant',
             content: summary,
-            contextLabel: 'Deep brief',
+            contextLabel: 'Paper report',
           },
           ...history.map((turn, index): ChatMessage => ({
             id: `history-${turn.createdAt}-${index}`,
@@ -438,7 +438,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
             id: loadingId,
             role: 'assistant',
             content: error instanceof Error ? error.message : '论文要点生成失败，可以直接提问，我会读取论文回答。',
-            contextLabel: 'Deep brief',
+            contextLabel: 'Paper report',
           },
         ]);
       });
