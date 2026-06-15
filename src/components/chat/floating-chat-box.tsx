@@ -101,7 +101,23 @@ const getSummaryProgress = (elapsedSeconds: number): SummaryProgress => {
 const formatSummaryProgressMessage = (progress: SummaryProgress) =>
   `${progress.label}\n\n${progress.percent}% complete · ${progress.elapsedSeconds}s elapsed\n\nI will show the summary here automatically when it is ready. After that, future opens should load the saved summary instead of regenerating.`;
 
-const wait = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+const wait = (milliseconds: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'));
+      return;
+    }
+
+    const timeout = window.setTimeout(resolve, milliseconds);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        window.clearTimeout(timeout);
+        reject(new DOMException('Aborted', 'AbortError'));
+      },
+      { once: true },
+    );
+  });
 
 const clampLayout = (position: { x: number; y: number }, size: { width: number; height: number }) => {
   if (typeof window === 'undefined') return { position, size };
@@ -247,13 +263,16 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     return Array.isArray(result.history) ? (result.history as StoredHistoryTurn[]) : [];
   }, [paperId, paperPdfUrl, paperTitle, paper?.authors, paper?.journal, paper?.year]);
 
-  const summarizePaper = useCallback(async () => {
+  const summarizePaper = useCallback(async (signal?: AbortSignal) => {
     if (!paperId || !paperPdfUrl) return '';
 
     for (let attempt = 0; attempt < 80; attempt += 1) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+
       const response = await fetch('/api/reader-agent/summarize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal,
         body: JSON.stringify({
           paperId,
           pdfUrl: paperPdfUrl,
@@ -273,7 +292,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
       if (result.summary?.trim()) return result.summary;
 
       const retryAfterSeconds = typeof result.retryAfterSeconds === 'number' ? result.retryAfterSeconds : 5;
-      await wait(Math.max(2, retryAfterSeconds) * 1000);
+      await wait(Math.max(2, retryAfterSeconds) * 1000, signal);
     }
 
     throw new Error('Paper summary is still processing. Please reopen this paper in a moment.');
@@ -310,6 +329,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     }
 
     let isActive = true;
+    const abortController = new AbortController();
     const loadingId = crypto.randomUUID();
     const startedAt = Date.now();
     const initialProgress = getSummaryProgress(0);
@@ -334,7 +354,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
       },
     ]);
 
-    summarizePaper()
+    summarizePaper(abortController.signal)
       .then(async (summary) => {
         if (!isActive) return;
 
@@ -364,6 +384,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
       })
       .catch((error) => {
         if (!isActive) return;
+        if (error instanceof DOMException && error.name === 'AbortError') return;
 
         window.clearInterval(progressTimer);
         setSummaryProgress(null);
@@ -380,6 +401,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
 
     return () => {
       isActive = false;
+      abortController.abort();
       window.clearInterval(progressTimer);
       setIsSummarizing(false);
     };

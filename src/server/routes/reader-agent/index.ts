@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -337,7 +338,7 @@ const getPaperDialogHistoryPath = (userId: string, paperKey: string) => `user-pa
 
 const getSharedPaperDialogHistoryPath = (paperKey: string) => `paper-cache/${paperKey}/reader-dialog.shared-v1.md`;
 
-const summaryJobs = new Map<string, { startedAt: string; promise: Promise<void> }>();
+const summaryJobs = new Map<string, { jobId: string; startedAt: string; promise: Promise<void> }>();
 
 const parseJsonBlock = (content: string) => {
   const match = content.match(/```json\n([\s\S]*?)\n```/);
@@ -1242,25 +1243,45 @@ const chunkExtractedPdfPages = (pages: ExtractedPdfPage[]) => {
   return chunks.length ? chunks : [{ pageNumbers: [], text: 'No extractable PDF text was found.' }];
 };
 
-const createExpensiveTextResponse = async (system: string, userContent: string, maxTokens = 6000) => {
+const createExpensiveTextResponse = async (system: string, userContent: string, maxTokens = 6000, logContext?: Record<string, unknown>) => {
   const modelSelection = selectExpensiveReaderModel();
   const client = createAnthropicClient(modelSelection.target);
+  const startedAt = Date.now();
+
+  console.log('[reader-agent:llm] expensive text request started', {
+    ...logContext,
+    model: modelSelection.model,
+    maxTokens,
+    userChars: userContent.length,
+    systemChars: system.length,
+  });
+
   const response = await client.messages.create({
     model: modelSelection.model,
     max_tokens: maxTokens,
     system,
     messages: [{ role: 'user', content: userContent }],
   });
+  const answer = textFromResponse(response);
+
+  console.log('[reader-agent:llm] expensive text request finished', {
+    ...logContext,
+    model: modelSelection.model,
+    durationMs: Date.now() - startedAt,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+    answerChars: answer.length,
+  });
 
   return {
-    answer: textFromResponse(response),
+    answer,
     model: modelSelection.model,
     inputTokens: response.usage.input_tokens,
     outputTokens: response.usage.output_tokens,
   };
 };
 
-const generateChunkedEnglishSummary = async (request: z.infer<typeof readerRequestSchema>) => {
+const generateChunkedEnglishSummary = async (request: z.infer<typeof readerRequestSchema>, jobId: string) => {
   const storagePath = resolveUploadedPdfStoragePath(request.pdfUrl);
 
   if (!storagePath) {
@@ -1268,6 +1289,7 @@ const generateChunkedEnglishSummary = async (request: z.infer<typeof readerReque
       buildReaderSystemPrompt(Boolean(request.paperContextSummary), false, request.modePrompt, 'english'),
       `Paper title: ${request.title ?? request.paperId}\n\nTask:\n${request.prompt}`,
       12000,
+      { jobId, paperId: request.paperId, phase: 'fallback-no-pdf' },
     );
 
     return { answer: result.answer, inputTokens: result.inputTokens, outputTokens: result.outputTokens, model: result.model };
@@ -1284,6 +1306,7 @@ const generateChunkedEnglishSummary = async (request: z.infer<typeof readerReque
     let model = '';
 
     console.log('[reader-agent:summarize] chunked summary extraction ready', {
+      jobId,
       paperId: request.paperId,
       chunks: chunks.length,
       extractedChars: extractedPdf.text.length,
@@ -1291,6 +1314,7 @@ const generateChunkedEnglishSummary = async (request: z.infer<typeof readerReque
 
     for (const [index, chunk] of chunks.entries()) {
       console.log('[reader-agent:summarize] chunk summary started', {
+        jobId,
         paperId: request.paperId,
         chunk: index + 1,
         chunks: chunks.length,
@@ -1312,6 +1336,7 @@ ${request.prompt}
 Extracted text for this batch:
 ${chunk.text}`,
         3000,
+        { jobId, paperId: request.paperId, phase: 'chunk', chunk: index + 1, chunks: chunks.length, pages: chunk.pageNumbers.join(',') },
       );
 
       model = chunkResult.model;
@@ -1320,6 +1345,7 @@ ${chunk.text}`,
       chunkNotes.push(`## Batch ${index + 1}/${chunks.length} - Pages ${chunk.pageNumbers.join(', ') || 'unknown'}\n\n${chunkResult.answer}`);
 
       console.log('[reader-agent:summarize] chunk summary finished', {
+        jobId,
         paperId: request.paperId,
         chunk: index + 1,
         chunks: chunks.length,
@@ -1330,6 +1356,7 @@ ${chunk.text}`,
     }
 
     console.log('[reader-agent:summarize] final synthesis started', {
+      jobId,
       paperId: request.paperId,
       chunks: chunks.length,
       noteChars: chunkNotes.join('\n\n').length,
@@ -1348,6 +1375,7 @@ ${request.prompt}
 Batch notes:
 ${chunkNotes.join('\n\n---\n\n')}`,
       7000,
+      { jobId, paperId: request.paperId, phase: 'final-synthesis', chunks: chunks.length },
     );
 
     inputTokens += finalResult.inputTokens;
@@ -1355,6 +1383,7 @@ ${chunkNotes.join('\n\n---\n\n')}`,
     model = finalResult.model || model;
 
     console.log('[reader-agent:summarize] final synthesis finished', {
+      jobId,
       paperId: request.paperId,
       chunks: chunks.length,
       model,
@@ -1380,22 +1409,37 @@ const startSummaryGenerationJob = (
 ) => {
   const existingJob = summaryJobs.get(summaryStoragePath);
 
-  if (existingJob) return { started: false, startedAt: existingJob.startedAt };
+  if (existingJob) {
+    console.log('[reader-agent:summarize] existing background job reused', {
+      jobId: existingJob.jobId,
+      paperId: request.paperId,
+      summaryStoragePath,
+      startedAt: existingJob.startedAt,
+    });
 
+    return { started: false, startedAt: existingJob.startedAt, jobId: existingJob.jobId };
+  }
+
+  const jobId = randomUUID();
   const startedAt = new Date().toISOString();
-  const promise = (async () => {
+  const jobEntry = { jobId, startedAt, promise: Promise.resolve() };
+  summaryJobs.set(summaryStoragePath, jobEntry);
+
+  const runJob = async () => {
     console.log('[reader-agent:summarize] background summary generation started', {
+      jobId,
       paperId: request.paperId,
       title: request.title,
       summaryStoragePath,
       readingMode: getReadingMode(request),
     });
 
-    const result = await generateChunkedEnglishSummary(request);
+    const result = await generateChunkedEnglishSummary(request, jobId);
     const translatedSummary = await translateReaderAnswerToChinese(result.answer, request);
     const summary = translatedSummary.text;
 
     console.log('[reader-agent:summarize] background summary generation finished', {
+      jobId,
       paperId: request.paperId,
       model: result.model,
       inputTokens: (freshness?.inputTokens ?? 0) + result.inputTokens + translatedSummary.inputTokens,
@@ -1406,22 +1450,26 @@ const startSummaryGenerationJob = (
     if (summary.trim()) {
       await uploadTextAsAdmin(summary, summaryStoragePath);
     }
-  })()
+  };
+
+  const promise = runJob()
     .catch((error) => {
       console.error('[reader-agent:summarize] background summary generation failed', {
+        jobId,
         paperId: request.paperId,
         summaryStoragePath,
         message: error instanceof Error ? error.message : 'Unknown background summary error.',
       });
     })
     .finally(() => {
-      summaryJobs.delete(summaryStoragePath);
+      const currentJob = summaryJobs.get(summaryStoragePath);
+      if (currentJob?.jobId === jobId) summaryJobs.delete(summaryStoragePath);
     });
 
-  summaryJobs.set(summaryStoragePath, { startedAt, promise });
+  jobEntry.promise = promise;
   void promise;
 
-  return { started: true, startedAt };
+  return { started: true, startedAt, jobId };
 };
 
 const app = new Hono()
@@ -1837,6 +1885,7 @@ const app = new Hono()
           refreshing: true,
           processing: true,
           jobStarted: job.started,
+          jobId: job.jobId,
           retryAfterSeconds: 10,
           scope: request.scope,
           paperId: request.paperId,
@@ -1896,6 +1945,7 @@ const app = new Hono()
         cached: false,
         processing: true,
         jobStarted: job.started,
+        jobId: job.jobId,
         retryAfterSeconds: 10,
         scope: request.scope,
         paperId: request.paperId,
