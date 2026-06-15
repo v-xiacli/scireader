@@ -1150,7 +1150,7 @@ const estimateTokensLocally = (text: string, prompt: string) => estimateTextToke
 
 const estimatePdfTokensFromBytes = (pdfBytes: number, prompt: string) => Math.ceil(pdfBytes / 5) + estimateTextTokensLocally(prompt);
 
-const SUMMARY_CHUNK_MAX_CHARS = 18_000;
+const SUMMARY_CHUNK_MAX_CHARS = 8_000;
 
 const estimateTokenConsumption = async (request: z.infer<typeof tokenEstimateRequestSchema>) => {
   const startedAt = Date.now();
@@ -1290,10 +1290,18 @@ const generateChunkedEnglishSummary = async (request: z.infer<typeof readerReque
     });
 
     for (const [index, chunk] of chunks.entries()) {
+      console.log('[reader-agent:summarize] chunk summary started', {
+        paperId: request.paperId,
+        chunk: index + 1,
+        chunks: chunks.length,
+        pages: chunk.pageNumbers,
+        chars: chunk.text.length,
+      });
+
       const chunkResult = await createExpensiveTextResponse(
         `${request.modePrompt?.trim() || 'You are SCIReader, a careful academic paper reading assistant.'}
 
-Respond in English. This is batch ${index + 1} of ${chunks.length}. Write dense notes only for the provided pages. Preserve concrete numbers, equations, figure/table labels, methods, evidence, limitations, and open questions. Do not pretend to have read pages outside this batch.`,
+Respond in English. This is batch ${index + 1} of ${chunks.length}. Write compact but dense notes only for the provided pages. Preserve concrete numbers, equations, figure/table labels, methods, evidence, limitations, and open questions. Do not pretend to have read pages outside this batch.`,
         `Paper title: ${request.title ?? request.paperId}
 Reading mode: ${getReadingMode(request)}
 Pages in this batch: ${chunk.pageNumbers.join(', ') || 'unknown'}
@@ -1303,14 +1311,29 @@ ${request.prompt}
 
 Extracted text for this batch:
 ${chunk.text}`,
-        6000,
+        3000,
       );
 
       model = chunkResult.model;
       inputTokens += chunkResult.inputTokens;
       outputTokens += chunkResult.outputTokens;
       chunkNotes.push(`## Batch ${index + 1}/${chunks.length} - Pages ${chunk.pageNumbers.join(', ') || 'unknown'}\n\n${chunkResult.answer}`);
+
+      console.log('[reader-agent:summarize] chunk summary finished', {
+        paperId: request.paperId,
+        chunk: index + 1,
+        chunks: chunks.length,
+        model: chunkResult.model,
+        inputTokens: chunkResult.inputTokens,
+        outputTokens: chunkResult.outputTokens,
+      });
     }
+
+    console.log('[reader-agent:summarize] final synthesis started', {
+      paperId: request.paperId,
+      chunks: chunks.length,
+      noteChars: chunkNotes.join('\n\n').length,
+    });
 
     const finalResult = await createExpensiveTextResponse(
       `${request.modePrompt?.trim() || 'You are SCIReader, a careful academic paper reading assistant.'}
@@ -1324,12 +1347,20 @@ ${request.prompt}
 
 Batch notes:
 ${chunkNotes.join('\n\n---\n\n')}`,
-      12000,
+      7000,
     );
 
     inputTokens += finalResult.inputTokens;
     outputTokens += finalResult.outputTokens;
     model = finalResult.model || model;
+
+    console.log('[reader-agent:summarize] final synthesis finished', {
+      paperId: request.paperId,
+      chunks: chunks.length,
+      model,
+      inputTokens: finalResult.inputTokens,
+      outputTokens: finalResult.outputTokens,
+    });
 
     return {
       answer: finalResult.answer,
@@ -1806,7 +1837,7 @@ const app = new Hono()
           refreshing: true,
           processing: true,
           jobStarted: job.started,
-          retryAfterSeconds: 5,
+          retryAfterSeconds: 10,
           scope: request.scope,
           paperId: request.paperId,
           summaryFreshness: {
@@ -1865,7 +1896,7 @@ const app = new Hono()
         cached: false,
         processing: true,
         jobStarted: job.started,
-        retryAfterSeconds: 5,
+        retryAfterSeconds: 10,
         scope: request.scope,
         paperId: request.paperId,
       }, 202);
