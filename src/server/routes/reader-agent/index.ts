@@ -65,6 +65,12 @@ type CheapTriageResult = {
   expensivePrompt?: string;
 };
 
+type SummaryFreshnessResult = {
+  fresh: boolean;
+  reason: string;
+  improvementPrompt?: string;
+};
+
 const MAX_EXTRACTED_TEXT_CHARS = 140_000;
 const MAX_FIGURE_CAPTIONS = 40;
 const MAX_PAGE_IMAGES = 6;
@@ -784,6 +790,47 @@ const parseCheapTriageResult = (text: string): CheapTriageResult => {
   throw new Error('Cheap triage returned incomplete JSON.');
 };
 
+const parseSummaryFreshnessResult = (text: string): SummaryFreshnessResult => {
+  const parsed = extractJsonObject(text) as Partial<SummaryFreshnessResult>;
+  const reason = typeof parsed.reason === 'string' && parsed.reason.trim() ? parsed.reason : 'No reason provided.';
+
+  if (parsed.fresh === true) return { fresh: true, reason };
+
+  if (parsed.fresh === false) {
+    return {
+      fresh: false,
+      reason,
+      improvementPrompt: typeof parsed.improvementPrompt === 'string' ? parsed.improvementPrompt : undefined,
+    };
+  }
+
+  throw new Error('Cheap summary freshness check returned incomplete JSON.');
+};
+
+const checkSummaryFreshnessWithCheapModel = async (request: z.infer<typeof readerRequestSchema>, cachedSummary: string) => {
+  const modelSelection = selectCheapTriageModel();
+  const client = createAnthropicClient(modelSelection.target);
+  const response = await client.messages.create({
+    model: modelSelection.model,
+    max_tokens: 1200,
+    system:
+      '你是 SCIReader 的低成本总结质检助手。你只能检查已保存论文总结是否已经足够完整、结构化，并适合继续复用。不要重新总结论文，不要做深度论文理解。只输出 JSON。',
+    messages: [
+      {
+        role: 'user',
+        content: `论文标题: ${request.title ?? request.paperId}\n期刊: ${request.journal ?? '未知'}\n年份: ${request.year ?? '未知'}\n\n用户期望的总结任务:\n${request.prompt}\n\n已保存总结:\n${cachedSummary.slice(0, 20000)}\n\n请判断已保存总结是否需要用高成本模型重新读取 PDF 更新。只有当总结明显为空泛、缺少方法/实验/结果/局限/图表公式说明、与用户期望不匹配，或看起来被截断时，fresh=false。输出 JSON，格式为 {"fresh": boolean, "reason": string, "improvementPrompt": string }。fresh=false 时 improvementPrompt 给高成本模型明确说明需要补强什么；fresh=true 时不要输出 improvementPrompt。`,
+      },
+    ],
+  });
+
+  return {
+    result: parseSummaryFreshnessResult(textFromResponse(response).trim()),
+    model: modelSelection.model,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+  };
+};
+
 const triageWithCheapModel = async (request: z.infer<typeof readerRequestSchema>, cachedSummary: string, storedHistory: StoredDialogTurn[]) => {
   if (!cachedSummary.trim() && storedHistory.length === 0) {
     return {
@@ -1047,11 +1094,70 @@ const app = new Hono()
       const cachedSummary = await downloadTextIfExists(summaryStoragePath);
 
       if (cachedSummary?.trim()) {
+        let freshness;
+
+        try {
+          freshness = await checkSummaryFreshnessWithCheapModel(request, cachedSummary);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Cheap summary freshness check failed.';
+
+          return c.json({
+            summary: cachedSummary,
+            cached: true,
+            scope: request.scope,
+            paperId: request.paperId,
+            summaryFreshness: {
+              fresh: true,
+              reason: `Freshness check failed, reused saved summary: ${message}`,
+              model: 'cheap-freshness-failed',
+              inputTokens: 0,
+              outputTokens: 0,
+            },
+          });
+        }
+
+        if (freshness.result.fresh) {
+          return c.json({
+            summary: cachedSummary,
+            cached: true,
+            scope: request.scope,
+            paperId: request.paperId,
+            summaryFreshness: {
+              ...freshness.result,
+              model: freshness.model,
+              inputTokens: freshness.inputTokens,
+              outputTokens: freshness.outputTokens,
+            },
+          });
+        }
+
+        const result = await askClaude({
+          ...request,
+          scope: 'whole-paper',
+          prompt: freshness.result.improvementPrompt?.trim() || request.prompt,
+        }, selectExpensiveReaderModel());
+        const summary = result.answer;
+
+        if (summary.trim()) {
+          await uploadTextAsAdmin(summary, summaryStoragePath);
+        }
+
         return c.json({
-          summary: cachedSummary,
-          cached: true,
+          summary,
+          cached: false,
+          refreshed: true,
           scope: request.scope,
           paperId: request.paperId,
+          summaryFreshness: {
+            ...freshness.result,
+            model: freshness.model,
+            inputTokens: freshness.inputTokens,
+            outputTokens: freshness.outputTokens,
+          },
+          usage: {
+            inputTokens: freshness.inputTokens + result.inputTokens,
+            outputTokens: freshness.outputTokens + result.outputTokens,
+          },
         });
       }
 
