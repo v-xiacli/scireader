@@ -338,7 +338,48 @@ const getPaperDialogHistoryPath = (userId: string, paperKey: string) => `user-pa
 
 const getSharedPaperDialogHistoryPath = (paperKey: string) => `paper-cache/${paperKey}/reader-dialog.shared-v1.md`;
 
-const summaryJobs = new Map<string, { jobId: string; startedAt: string; promise: Promise<void> }>();
+type SummaryJobPhase = 'queued' | 'materializing-pdf' | 'extracting-text' | 'chunk' | 'chunk-retry' | 'final-synthesis' | 'final-synthesis-retry' | 'translating' | 'uploading' | 'finished' | 'failed';
+
+type SummaryJobEntry = {
+  jobId: string;
+  startedAt: string;
+  updatedAt: string;
+  phase: SummaryJobPhase;
+  currentChunk?: number;
+  totalChunks?: number;
+  message?: string;
+  promise: Promise<void>;
+};
+
+const summaryJobs = new Map<string, SummaryJobEntry>();
+
+const getSummaryJobSnapshot = (job?: SummaryJobEntry) =>
+  job
+    ? {
+        jobId: job.jobId,
+        startedAt: job.startedAt,
+        updatedAt: job.updatedAt,
+        phase: job.phase,
+        currentChunk: job.currentChunk,
+        totalChunks: job.totalChunks,
+        message: job.message,
+      }
+    : null;
+
+const updateSummaryJobStatus = (summaryStoragePath: string, patch: Partial<Omit<SummaryJobEntry, 'jobId' | 'startedAt' | 'promise'>>) => {
+  const job = summaryJobs.get(summaryStoragePath);
+  if (!job) return;
+
+  Object.assign(job, {
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  });
+
+  console.log('[reader-agent:summarize] job status', {
+    summaryStoragePath,
+    ...getSummaryJobSnapshot(job),
+  });
+};
 
 const parseJsonBlock = (content: string) => {
   const match = content.match(/```json\n([\s\S]*?)\n```/);
@@ -1152,6 +1193,13 @@ const estimateTokensLocally = (text: string, prompt: string) => estimateTextToke
 const estimatePdfTokensFromBytes = (pdfBytes: number, prompt: string) => Math.ceil(pdfBytes / 5) + estimateTextTokensLocally(prompt);
 
 const SUMMARY_CHUNK_MAX_CHARS = 8_000;
+const SUMMARY_CHUNK_TIMEOUT_MS = 90_000;
+const SUMMARY_FINAL_TIMEOUT_MS = 120_000;
+
+const getCompactSummaryInstruction = (mode: PaperReadingMode) =>
+  mode === 'reviewer'
+    ? 'You are preparing notes for a critical paper review. Focus on the real contribution, novelty, assumptions, evidence, quantitative results, credibility concerns, limitations, and questions for follow-up.'
+    : 'You are preparing notes for a research reader. Focus on the core idea, reusable design patterns, literature positioning, key evidence, comparison metrics, limitations, and future opportunities.';
 
 const estimateTokenConsumption = async (request: z.infer<typeof tokenEstimateRequestSchema>) => {
   const startedAt = Date.now();
@@ -1243,7 +1291,7 @@ const chunkExtractedPdfPages = (pages: ExtractedPdfPage[]) => {
   return chunks.length ? chunks : [{ pageNumbers: [], text: 'No extractable PDF text was found.' }];
 };
 
-const createExpensiveTextResponse = async (system: string, userContent: string, maxTokens = 6000, logContext?: Record<string, unknown>) => {
+const createExpensiveTextResponse = async (system: string, userContent: string, maxTokens = 6000, logContext?: Record<string, unknown>, timeoutMs = SUMMARY_CHUNK_TIMEOUT_MS) => {
   const modelSelection = selectExpensiveReaderModel();
   const client = createAnthropicClient(modelSelection.target);
   const startedAt = Date.now();
@@ -1252,16 +1300,37 @@ const createExpensiveTextResponse = async (system: string, userContent: string, 
     ...logContext,
     model: modelSelection.model,
     maxTokens,
+    timeoutMs,
+    maxRetries: 0,
     userChars: userContent.length,
     systemChars: system.length,
   });
 
-  const response = await client.messages.create({
-    model: modelSelection.model,
-    max_tokens: maxTokens,
-    system,
-    messages: [{ role: 'user', content: userContent }],
-  });
+  let response;
+
+  try {
+    response = await client.messages.create(
+      {
+        model: modelSelection.model,
+        max_tokens: maxTokens,
+        system,
+        messages: [{ role: 'user', content: userContent }],
+      },
+      { timeout: timeoutMs, maxRetries: 0 },
+    );
+  } catch (error) {
+    console.error('[reader-agent:llm] expensive text request failed', {
+      ...logContext,
+      model: modelSelection.model,
+      durationMs: Date.now() - startedAt,
+      timeoutMs,
+      errorName: error instanceof Error ? error.name : undefined,
+      errorStack: error instanceof Error ? error.stack?.slice(0, 1200) : undefined,
+      message: error instanceof Error ? error.message : 'Unknown expensive text request error.',
+    });
+
+    throw error;
+  }
   const answer = textFromResponse(response);
 
   console.log('[reader-agent:llm] expensive text request finished', {
@@ -1281,10 +1350,15 @@ const createExpensiveTextResponse = async (system: string, userContent: string, 
   };
 };
 
-const generateChunkedEnglishSummary = async (request: z.infer<typeof readerRequestSchema>, jobId: string) => {
+const generateChunkedEnglishSummary = async (
+  request: z.infer<typeof readerRequestSchema>,
+  jobId: string,
+  setJobStatus: (patch: Partial<Omit<SummaryJobEntry, 'jobId' | 'startedAt' | 'promise'>>) => void,
+) => {
   const storagePath = resolveUploadedPdfStoragePath(request.pdfUrl);
 
   if (!storagePath) {
+    setJobStatus({ phase: 'final-synthesis', message: 'No uploaded PDF path; generating from prompt/context only.' });
     const result = await createExpensiveTextResponse(
       buildReaderSystemPrompt(Boolean(request.paperContextSummary), false, request.modePrompt, 'english'),
       `Paper title: ${request.title ?? request.paperId}\n\nTask:\n${request.prompt}`,
@@ -1295,12 +1369,15 @@ const generateChunkedEnglishSummary = async (request: z.infer<typeof readerReque
     return { answer: result.answer, inputTokens: result.inputTokens, outputTokens: result.outputTokens, model: result.model };
   }
 
+  setJobStatus({ phase: 'materializing-pdf', message: 'Downloading PDF from storage into a temporary file.' });
   const tempPdf = await materializePdfToTempFile(storagePath);
 
   try {
+    setJobStatus({ phase: 'extracting-text', message: 'Extracting text from PDF pages.' });
     const extractedPdf = await extractPdfText(tempPdf.localPdfPath);
     const chunks = chunkExtractedPdfPages(extractedPdf.pages);
     const chunkNotes: string[] = [];
+    const compactInstruction = getCompactSummaryInstruction(getReadingMode(request));
     let inputTokens = 0;
     let outputTokens = 0;
     let model = '';
@@ -1310,9 +1387,22 @@ const generateChunkedEnglishSummary = async (request: z.infer<typeof readerReque
       paperId: request.paperId,
       chunks: chunks.length,
       extractedChars: extractedPdf.text.length,
+      chunkPlan: chunks.map((chunk, index) => ({
+        chunk: index + 1,
+        pages: chunk.pageNumbers,
+        chars: chunk.text.length,
+        estimatedTokens: estimateTextTokensLocally(chunk.text),
+      })),
     });
 
     for (const [index, chunk] of chunks.entries()) {
+      setJobStatus({
+        phase: 'chunk',
+        currentChunk: index + 1,
+        totalChunks: chunks.length,
+        message: `Generating chunk ${index + 1}/${chunks.length} for pages ${chunk.pageNumbers.join(', ') || 'unknown'}.`,
+      });
+
       console.log('[reader-agent:summarize] chunk summary started', {
         jobId,
         paperId: request.paperId,
@@ -1322,11 +1412,14 @@ const generateChunkedEnglishSummary = async (request: z.infer<typeof readerReque
         chars: chunk.text.length,
       });
 
-      const chunkResult = await createExpensiveTextResponse(
-        `${request.modePrompt?.trim() || 'You are SCIReader, a careful academic paper reading assistant.'}
+      let chunkResult;
 
-Respond in English. This is batch ${index + 1} of ${chunks.length}. Write compact but dense notes only for the provided pages. Preserve concrete numbers, equations, figure/table labels, methods, evidence, limitations, and open questions. Do not pretend to have read pages outside this batch.`,
-        `Paper title: ${request.title ?? request.paperId}
+      try {
+        chunkResult = await createExpensiveTextResponse(
+          `${compactInstruction}
+
+Respond in English. This is batch ${index + 1} of ${chunks.length}. Write compact notes only for the provided pages. Keep the output under 900 words. Preserve concrete numbers, equations, figure/table labels, methods, evidence, limitations, and open questions. Do not write a full report yet. Do not pretend to have read pages outside this batch.`,
+          `Paper title: ${request.title ?? request.paperId}
 Reading mode: ${getReadingMode(request)}
 Pages in this batch: ${chunk.pageNumbers.join(', ') || 'unknown'}
 
@@ -1335,9 +1428,56 @@ ${request.prompt}
 
 Extracted text for this batch:
 ${chunk.text}`,
-        3000,
-        { jobId, paperId: request.paperId, phase: 'chunk', chunk: index + 1, chunks: chunks.length, pages: chunk.pageNumbers.join(',') },
-      );
+          1400,
+          { jobId, paperId: request.paperId, phase: 'chunk', chunk: index + 1, chunks: chunks.length, pages: chunk.pageNumbers.join(',') },
+          SUMMARY_CHUNK_TIMEOUT_MS,
+        );
+      } catch {
+        setJobStatus({
+          phase: 'chunk-retry',
+          currentChunk: index + 1,
+          totalChunks: chunks.length,
+          message: `Retrying chunk ${index + 1}/${chunks.length} with a shorter prompt.`,
+        });
+
+        console.warn('[reader-agent:summarize] chunk summary retrying with shorter request', {
+          jobId,
+          paperId: request.paperId,
+          chunk: index + 1,
+          chunks: chunks.length,
+        });
+
+        chunkResult = await createExpensiveTextResponse(
+          `${compactInstruction}
+
+Respond in English. This is a retry for batch ${index + 1} of ${chunks.length}. Write very short notes under 350 words. Extract only the most important contribution, method/evidence, numbers, limitations, and figure/table references from the provided text.`,
+          `Paper title: ${request.title ?? request.paperId}
+Pages in this batch: ${chunk.pageNumbers.join(', ') || 'unknown'}
+
+Extracted text for this batch:
+${chunk.text.slice(0, 5000)}`,
+          700,
+          { jobId, paperId: request.paperId, phase: 'chunk-retry', chunk: index + 1, chunks: chunks.length, pages: chunk.pageNumbers.join(',') },
+          60_000,
+        ).catch((error) => {
+          const message = error instanceof Error ? error.message : 'Unknown chunk retry error.';
+
+          console.error('[reader-agent:summarize] chunk summary skipped after retry failure', {
+            jobId,
+            paperId: request.paperId,
+            chunk: index + 1,
+            chunks: chunks.length,
+            message,
+          });
+
+          return {
+            answer: `Batch ${index + 1} pages ${chunk.pageNumbers.join(', ') || 'unknown'} could not be summarized because the model request timed out or failed. The final report should explicitly mark evidence from these pages as incomplete.`,
+            model: 'chunk-summary-failed',
+            inputTokens: 0,
+            outputTokens: 0,
+          };
+        });
+      }
 
       model = chunkResult.model;
       inputTokens += chunkResult.inputTokens;
@@ -1362,21 +1502,73 @@ ${chunk.text}`,
       noteChars: chunkNotes.join('\n\n').length,
     });
 
-    const finalResult = await createExpensiveTextResponse(
-      `${request.modePrompt?.trim() || 'You are SCIReader, a careful academic paper reading assistant.'}
-
-Respond in English. Synthesize the batch notes into one coherent final paper-reading report. Do not add claims that are not supported by the notes. Preserve important numerical evidence and explicitly mention when evidence is insufficient.`,
-      `Paper title: ${request.title ?? request.paperId}
+    const finalInput = `Paper title: ${request.title ?? request.paperId}
 Reading mode: ${getReadingMode(request)}
 
 Final report task:
 ${request.prompt}
 
 Batch notes:
-${chunkNotes.join('\n\n---\n\n')}`,
-      7000,
-      { jobId, paperId: request.paperId, phase: 'final-synthesis', chunks: chunks.length },
-    );
+${chunkNotes.join('\n\n---\n\n')}`;
+    let finalResult;
+
+    try {
+      setJobStatus({
+        phase: 'final-synthesis',
+        currentChunk: undefined,
+        totalChunks: chunks.length,
+        message: 'Synthesizing final English report from chunk notes.',
+      });
+
+      finalResult = await createExpensiveTextResponse(
+        `${compactInstruction}
+
+Respond in English. Synthesize the batch notes into one coherent final paper-reading report. Do not add claims that are not supported by the notes. Preserve important numerical evidence and explicitly mention when evidence is insufficient. Keep it concise but useful; avoid repeating the same point across sections.`,
+        finalInput,
+        4500,
+        { jobId, paperId: request.paperId, phase: 'final-synthesis', chunks: chunks.length },
+        SUMMARY_FINAL_TIMEOUT_MS,
+      );
+    } catch {
+      setJobStatus({
+        phase: 'final-synthesis-retry',
+        currentChunk: undefined,
+        totalChunks: chunks.length,
+        message: 'Retrying final synthesis with shorter notes.',
+      });
+
+      console.warn('[reader-agent:summarize] final synthesis retrying with shorter request', {
+        jobId,
+        paperId: request.paperId,
+        chunks: chunks.length,
+      });
+
+      finalResult = await createExpensiveTextResponse(
+        `${compactInstruction}
+
+Respond in English. Create a short final report under 1800 words from these batch notes. Preserve only the strongest evidence and mark missing/failed batches as incomplete evidence.`,
+        finalInput.slice(0, 35_000),
+        2500,
+        { jobId, paperId: request.paperId, phase: 'final-synthesis-retry', chunks: chunks.length },
+        75_000,
+      ).catch((error) => {
+        const message = error instanceof Error ? error.message : 'Unknown final synthesis retry error.';
+
+        console.error('[reader-agent:summarize] final synthesis skipped after retry failure', {
+          jobId,
+          paperId: request.paperId,
+          chunks: chunks.length,
+          message,
+        });
+
+        return {
+          answer: `The final synthesis step failed, so these are the available batch notes.\n\n${chunkNotes.join('\n\n---\n\n')}`,
+          model: 'final-synthesis-failed',
+          inputTokens: 0,
+          outputTokens: 0,
+        };
+      });
+    }
 
     inputTokens += finalResult.inputTokens;
     outputTokens += finalResult.outputTokens;
@@ -1417,13 +1609,21 @@ const startSummaryGenerationJob = (
       startedAt: existingJob.startedAt,
     });
 
-    return { started: false, startedAt: existingJob.startedAt, jobId: existingJob.jobId };
+    return { started: false, startedAt: existingJob.startedAt, jobId: existingJob.jobId, job: getSummaryJobSnapshot(existingJob) };
   }
 
   const jobId = randomUUID();
   const startedAt = new Date().toISOString();
-  const jobEntry = { jobId, startedAt, promise: Promise.resolve() };
+  const jobEntry: SummaryJobEntry = {
+    jobId,
+    startedAt,
+    updatedAt: startedAt,
+    phase: 'queued',
+    message: 'Summary job queued.',
+    promise: Promise.resolve(),
+  };
   summaryJobs.set(summaryStoragePath, jobEntry);
+  const setJobStatus = (patch: Partial<Omit<SummaryJobEntry, 'jobId' | 'startedAt' | 'promise'>>) => updateSummaryJobStatus(summaryStoragePath, patch);
 
   const runJob = async () => {
     console.log('[reader-agent:summarize] background summary generation started', {
@@ -1434,7 +1634,8 @@ const startSummaryGenerationJob = (
       readingMode: getReadingMode(request),
     });
 
-    const result = await generateChunkedEnglishSummary(request, jobId);
+    const result = await generateChunkedEnglishSummary(request, jobId, setJobStatus);
+    setJobStatus({ phase: 'translating', message: 'Translating final English summary into Chinese with cheap model.' });
     const translatedSummary = await translateReaderAnswerToChinese(result.answer, request);
     const summary = translatedSummary.text;
 
@@ -1448,12 +1649,16 @@ const startSummaryGenerationJob = (
     });
 
     if (summary.trim()) {
+      setJobStatus({ phase: 'uploading', message: 'Uploading Chinese summary to Azure Blob cache.' });
       await uploadTextAsAdmin(summary, summaryStoragePath);
     }
+
+    setJobStatus({ phase: 'finished', message: summary.trim() ? 'Summary saved to Azure Blob cache.' : 'Summary finished but empty; nothing was uploaded.' });
   };
 
   const promise = runJob()
     .catch((error) => {
+      setJobStatus({ phase: 'failed', message: error instanceof Error ? error.message : 'Unknown background summary error.' });
       console.error('[reader-agent:summarize] background summary generation failed', {
         jobId,
         paperId: request.paperId,
@@ -1469,7 +1674,7 @@ const startSummaryGenerationJob = (
   jobEntry.promise = promise;
   void promise;
 
-  return { started: true, startedAt, jobId };
+  return { started: true, startedAt, jobId, job: getSummaryJobSnapshot(jobEntry) };
 };
 
 const app = new Hono()
@@ -1808,6 +2013,7 @@ const app = new Hono()
         title: request.title,
         hasCachedSummary: Boolean(cachedSummary?.trim()),
         summaryStoragePath,
+        activeJob: getSummaryJobSnapshot(summaryJobs.get(summaryStoragePath)),
       });
 
       if (cachedSummary?.trim()) {
@@ -1878,6 +2084,12 @@ const app = new Hono()
           { inputTokens: freshness.inputTokens, outputTokens: freshness.outputTokens },
         );
 
+        console.log('[reader-agent:summarize] returning processing response for refresh', {
+          paperId: request.paperId,
+          summaryStoragePath,
+          job,
+        });
+
         return c.json({
           summary: cachedSummary,
           cached: true,
@@ -1886,6 +2098,7 @@ const app = new Hono()
           processing: true,
           jobStarted: job.started,
           jobId: job.jobId,
+          job: job.job,
           retryAfterSeconds: 10,
           scope: request.scope,
           paperId: request.paperId,
@@ -1940,12 +2153,19 @@ const app = new Hono()
 
       const job = startSummaryGenerationJob(request, summaryStoragePath);
 
+      console.log('[reader-agent:summarize] returning processing response for new summary', {
+        paperId: request.paperId,
+        summaryStoragePath,
+        job,
+      });
+
       return c.json({
         summary: '',
         cached: false,
         processing: true,
         jobStarted: job.started,
         jobId: job.jobId,
+        job: job.job,
         retryAfterSeconds: 10,
         scope: request.scope,
         paperId: request.paperId,
