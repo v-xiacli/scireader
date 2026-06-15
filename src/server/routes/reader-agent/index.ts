@@ -2290,7 +2290,7 @@ const app = new Hono()
         scope: 'whole-paper',
         prompt:
           request.prompt ||
-          `请用中文生成一份深度论文阅读笔记，不要短摘要。请展开分析背景、方法、实验、结果、局限；逐图说明每个 Figure/Table 的含义；逐公式或逐关键参数解释变量、指标和工程意义；保留关键数值证据；最后列出可追问索引。输出 Markdown。`,
+          `请用中文生成一份精简的物理论文阅读报告。只包含：核心物理机制、关键结构/参数、3-6个最重要数值、证据强度、主要局限。不要逐段复述，不要逐图逐公式展开，不要列可追问索引。输出 Markdown，尽量控制在1000字以内。`,
         paperContextSummary: '',
         conversationHistory: [],
       }, selectExpensiveReaderModel(), 'english');
