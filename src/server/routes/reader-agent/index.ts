@@ -355,7 +355,7 @@ const getReadingMode = (request: Pick<z.infer<typeof readerRequestSchema>, 'read
 const getSummaryDetailMode = (request: Pick<z.infer<typeof readerRequestSchema>, 'detailedReport'>) => request.detailedReport === true ? 'detailed' : 'brief';
 
 const getPaperSummaryStoragePath = (request: z.infer<typeof readerRequestSchema>, pdfStoragePath?: string | null) =>
-  `paper-cache/${getPaperIdentitySlug(request)}/${pdfStoragePath ? 'uploaded' : 'sample'}.reader-summary.${getReadingMode(request)}.${getSummaryDetailMode(request)}.physics-v2.md`;
+  `paper-cache/${getPaperIdentitySlug(request)}/${pdfStoragePath ? 'uploaded' : 'sample'}.reader-summary.${getReadingMode(request)}.${getSummaryDetailMode(request)}.physics-v3.md`;
 
 const getPaperDialogHistoryPath = (userId: string, paperKey: string) => `user-paper-history/${userId}/${paperKey}.md`;
 
@@ -1050,11 +1050,11 @@ const extractIntroductionReferenceContext = (extractedPdf: ExtractedPdf) => {
   const lowerText = text.toLowerCase();
   const introductionIndex = lowerText.search(/\b(?:1\.?\s*)?introduction\b/);
   const introStart = introductionIndex >= 0 ? introductionIndex : 0;
-  const introSlice = text.slice(introStart, introStart + 24_000);
+  const introSlice = text.slice(introStart, introStart + 36_000);
   const sectionAfterIntro = introSlice.slice(800).search(/\b(?:2|ii)\.?\s+(?:related work|background|method|methods|design|proposed|principle|theory|system|model|analysis)\b/i);
-  const introductionText = sectionAfterIntro >= 0 ? introSlice.slice(0, 800 + sectionAfterIntro) : introSlice.slice(0, 18_000);
+  const introductionText = sectionAfterIntro >= 0 ? introSlice.slice(0, 800 + sectionAfterIntro) : introSlice.slice(0, 28_000);
   const referencesIndex = lowerText.lastIndexOf('references');
-  const referencesText = referencesIndex >= 0 ? text.slice(referencesIndex, referencesIndex + 30_000) : '';
+  const referencesText = referencesIndex >= 0 ? text.slice(referencesIndex, referencesIndex + 60_000) : '';
 
   return {
     introductionText: introductionText.trim(),
@@ -1111,7 +1111,7 @@ const normalizeReferenceEvaluationRecords = (rawRecords: unknown[], request: z.i
     };
     });
 
-  return normalizedRecords.filter((record): record is ReferenceEvaluationRecord => record !== null).slice(0, 30);
+  return normalizedRecords.filter((record): record is ReferenceEvaluationRecord => record !== null).slice(0, 80);
 };
 
 const loadReferenceEvaluationRecords = async (storagePath: string): Promise<ReferenceEvaluationRecord[]> => {
@@ -1341,60 +1341,58 @@ const extractAndStoreIntroductionReferenceEvaluations = async (request: z.infer<
     return { records: [], model: 'skipped', inputTokens: 0, outputTokens: 0 };
   }
 
-  const modelSelection = selectCheapTriageModel();
-  const client = createAnthropicClient(modelSelection.target);
   const startedAt = Date.now();
 
   console.log('[reader-agent:references] introduction evaluation extraction started', {
     jobId,
     paperId: request.paperId,
-    model: modelSelection.model,
+    model: selectExpensiveReaderModel().model,
     introductionChars: introductionText.length,
     referencesChars: referencesText.length,
   });
 
-  const response = await client.messages.create({
-    model: modelSelection.model,
-    max_tokens: 2500,
-    system:
-      'You extract how one paper evaluates cited prior work. Use only the Introduction text and References list. Do not infer from outside knowledge. Output only JSON: {"evaluations":[...]}.',
-    messages: [
-      {
-        role: 'user',
-        content: `Source paper:
+  const extractionResult = await createExpensiveTextResponse(
+    'You extract citation-context records from a paper Introduction. Use only the Introduction text and References list. Do not infer from outside knowledge. Output only JSON: {"evaluations":[...]}.',
+    `Source paper:
 Title: ${request.title ?? request.paperId}
 Authors: ${request.authors ?? 'unknown'}
 Journal: ${request.journal ?? 'unknown'}
 Year: ${request.year ?? 'unknown'}
 
 Task:
-Find cited papers that the Introduction explicitly evaluates, compares against, or uses to motivate a gap. For each cited paper, output:
+Find as many cited papers as possible that appear in the Introduction with any meaningful role: background, prior route, method, comparison, benchmark, limitation, gap, motivation, application precedent, or claimed improvement.
+
+For each cited paper, output:
 - citedAs: citation marker such as [1], Smith et al., or whatever appears
 - referenceTitle: title from References if available; otherwise omit
 - referenceAuthors: array of author names from References if available
 - referenceJournal: journal/conference from References if available
 - referenceYear: year if available
-- evaluationType: one of background, limitation, comparison, gap, method, benchmark, improvement
-- evaluation: one concise sentence describing how the source paper evaluates that cited work
-- evidenceText: the shortest exact Introduction phrase/sentence supporting the evaluation
+- evaluationType: one of background, prior-work-route, limitation, comparison, gap, method, benchmark, application, improvement, motivation
+- evaluation: one concise sentence describing how the source paper positions, uses, compares, or evaluates that cited work
+- evidenceText: the shortest exact Introduction phrase/sentence supporting the record
 
 Rules:
-- Only include cited works explicitly discussed in the Introduction.
-- Do not include citations that are merely listed without evaluation.
+- Include grouped citations separately when the References metadata lets you resolve each citation marker.
+- Include background citations if they establish prior work or a research route; mark evaluationType as background or prior-work-route.
+- Do not include citations that are merely listed with no interpretable role.
 - Do not claim we have read the cited paper itself.
 - If metadata cannot be found in References, keep the evaluation with citedAs.
-- Return at most 20 records.
+- Return up to 60 records.
+- Prefer recall over excessive filtering; downstream deduplication will clean repeated records.
 
 Introduction text:
 ${introductionText}
 
 References text:
 ${referencesText || '[References section not found]'}`,
-      },
-    ],
-  });
+    6000,
+    { jobId, paperId: request.paperId, phase: 'reference-extraction' },
+    SUMMARY_CHUNK_TIMEOUT_MS,
+  );
 
-  const records = normalizeReferenceEvaluationRecords(extractJsonArray(textFromResponse(response).trim()), request);
+  const rawReferenceRecords = extractJsonArray(extractionResult.answer.trim());
+  const records = normalizeReferenceEvaluationRecords(rawReferenceRecords, request);
   const sourcePaperKey = getPaperIdentitySlug(request);
 
   if (records.length) {
@@ -1414,18 +1412,19 @@ ${referencesText || '[References section not found]'}`,
   console.log('[reader-agent:references] introduction evaluation extraction finished', {
     jobId,
     paperId: request.paperId,
-    model: modelSelection.model,
+    model: extractionResult.model,
     durationMs: Date.now() - startedAt,
+    rawRecords: rawReferenceRecords.length,
     records: records.length,
-    inputTokens: response.usage.input_tokens,
-    outputTokens: response.usage.output_tokens,
+    inputTokens: extractionResult.inputTokens,
+    outputTokens: extractionResult.outputTokens,
   });
 
   return {
     records,
-    model: modelSelection.model,
-    inputTokens: response.usage.input_tokens,
-    outputTokens: response.usage.output_tokens,
+    model: extractionResult.model,
+    inputTokens: extractionResult.inputTokens,
+    outputTokens: extractionResult.outputTokens,
   };
 };
 
@@ -2036,8 +2035,21 @@ ${extractedPdf.text}`,
       let chunkResult;
 
       try {
-        chunkResult = await createExpensiveTextResponse(
-          `${compactInstruction}
+        const chunkSystem = wantsDetailedReport
+          ? `${compactInstruction}
+
+Respond in English. This is batch ${index + 1} of ${chunks.length}. Write compact but useful notes for a detailed review.
+Use 7-10 bullets, each under 45 words. Capture only evidence present in this batch:
+- venue/journal/conference or publication clues if visible
+- physical mechanism and assumptions
+- method/model/processing pipeline
+- experimental setup, validation source, or baseline
+- strongest numerical results with units
+- figures/tables/equations only if central
+- uncertainty, error source, limitation, or credibility concern
+- innovation type if this batch supports it
+Do not write a full report. Do not mention pages outside this batch.`
+          : `${compactInstruction}
 
 Respond in English. This is batch ${index + 1} of ${chunks.length}. Write exactly 5 bullets, each under 28 words:
 - mechanism/design trick
@@ -2045,7 +2057,10 @@ Respond in English. This is batch ${index + 1} of ${chunks.length}. Write exactl
 - strongest 1-3 numbers with units
 - evidence type: simulation/measurement/baseline
 - main weakness or missing proof
-Do not write paragraphs. Do not write a full report. Do not mention pages outside this batch.`,
+Do not write paragraphs. Do not write a full report. Do not mention pages outside this batch.`;
+
+        chunkResult = await createExpensiveTextResponse(
+          chunkSystem,
           `Paper title: ${request.title ?? request.paperId}
 Reading mode: ${getReadingMode(request)}
 Pages in this batch: ${chunk.pageNumbers.join(', ') || 'unknown'}
@@ -2055,7 +2070,7 @@ ${request.prompt}
 
 Extracted text for this batch:
 ${chunk.text}`,
-          450,
+          wantsDetailedReport ? 900 : 450,
           { jobId, paperId: request.paperId, phase: 'chunk', chunk: index + 1, chunks: chunks.length, pages: chunk.pageNumbers.join(',') },
           SUMMARY_CHUNK_TIMEOUT_MS,
         );
@@ -2157,6 +2172,9 @@ ${chunk.text.slice(0, 5000)}`,
     });
 
     const finalInput = `Paper title: ${request.title ?? request.paperId}
+Authors: ${request.authors ?? 'unknown'}
+Venue/journal/conference: ${request.journal ?? 'unknown'}
+Year: ${request.year ?? 'unknown'}
 Reading mode: ${getReadingMode(request)}
 
 Final report task:
@@ -2177,16 +2195,29 @@ ${chunkNotes.join('\n\n---\n\n')}`;
       finalResult = await createExpensiveTextResponse(
         `${compactInstruction}
 
-Respond in English. Synthesize the batch notes into a compact physics reading report under 900 words.
+Respond in English. Synthesize the batch notes into a structured detailed physics review report under 1400 words.
 Use exactly these sections:
-1. Verdict
-2. Physical mechanism
-3. Key numbers
-4. Evidence and credibility
-5. Main limitations
+1. Venue / partition assessment
+2. Verdict
+3. Physical mechanism
+4. Key numbers
+5. Evidence and credibility
+6. Innovation assessment
+7. Main limitations
+8. Who should read it
+
+Venue / partition assessment requirements:
+- Classify the publication venue into one of: CAS Q1, CAS Q2, CAS Q3, CAS Q4, Chinese Core, Open Access journal, Conference, Unknown/needs lookup.
+- Use paper metadata and your scholarly knowledge. If you are not certain, say "uncertain" and explain what should be checked.
+- Mention whether the venue is journal/conference/OA when inferable.
+
+Innovation assessment requirements:
+- Judge whether the novelty is mainly physical mechanism, engineering system, algorithm/modeling, experimental demonstration, application scenario, or data/product.
+- Say whether the contribution is strong, moderate, or incremental, with evidence.
+
 Do not add unsupported claims. Do not repeat points. Do not include a follow-up question index.`,
         finalInput,
-        1800,
+        2600,
         { jobId, paperId: request.paperId, phase: 'final-synthesis', chunks: chunks.length },
         SUMMARY_FINAL_TIMEOUT_MS,
       );
