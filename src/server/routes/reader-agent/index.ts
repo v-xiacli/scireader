@@ -1797,6 +1797,8 @@ const estimateTokenConsumption = async (request: z.infer<typeof tokenEstimateReq
 
     return {
       inputTokens,
+      billableTokens: getBillableTokens(inputTokens, 0, modelSelection.model),
+      tokenWeight: getModelTokenWeight(modelSelection.model),
       model: modelSelection.model,
       prompt,
       estimated: true,
@@ -1818,6 +1820,8 @@ const estimateTokenConsumption = async (request: z.infer<typeof tokenEstimateReq
 
     return {
       inputTokens,
+      billableTokens: getBillableTokens(inputTokens, 0, modelSelection.model),
+      tokenWeight: getModelTokenWeight(modelSelection.model),
       model: modelSelection.model,
       prompt,
       estimated: true,
@@ -2301,6 +2305,7 @@ Respond in English. Create a short final report under 600 words from these batch
 const startSummaryGenerationJob = (
   request: z.infer<typeof readerRequestSchema>,
   summaryStoragePath: string,
+  userId?: string,
   freshness?: { inputTokens: number; outputTokens: number },
 ) => {
   const existingJob = summaryJobs.get(summaryStoragePath);
@@ -2350,16 +2355,41 @@ const startSummaryGenerationJob = (
       ? await translateReaderAnswerToChinese(result.answer, request)
       : await summarizeReaderAnswerBrieflyInChinese(result.answer, request, jobId);
     const summary = finalChineseResult.text;
+    const inputTokens = (freshness?.inputTokens ?? 0) + result.inputTokens + finalChineseResult.inputTokens;
+    const outputTokens = (freshness?.outputTokens ?? 0) + result.outputTokens + finalChineseResult.outputTokens;
+    const billableTokens =
+      (freshness ? getBillableTokens(freshness.inputTokens, freshness.outputTokens, selectCheapTriageModel().model) : 0) +
+      getBillableTokens(result.inputTokens, result.outputTokens, result.model) +
+      getBillableTokens(finalChineseResult.inputTokens, finalChineseResult.outputTokens, finalChineseResult.model);
 
     console.log('[reader-agent:summarize] background summary generation finished', {
       jobId,
       paperId: request.paperId,
       model: result.model,
       detailedReport: wantsDetailedReport,
-      inputTokens: (freshness?.inputTokens ?? 0) + result.inputTokens + finalChineseResult.inputTokens,
-      outputTokens: (freshness?.outputTokens ?? 0) + result.outputTokens + finalChineseResult.outputTokens,
+      inputTokens,
+      outputTokens,
+      billableTokens,
       saved: Boolean(summary.trim()),
     });
+
+    if (userId) {
+      await recordUserTokenUsage({
+        userId,
+        paperId: request.paperId,
+        action: wantsDetailedReport ? 'summary:detailed' : 'summary:brief',
+        model: `${result.model} -> ${finalChineseResult.model}`,
+        inputTokens,
+        outputTokens,
+        billableTokens,
+        metadata: {
+          detailedReport: wantsDetailedReport,
+          readingMode: getReadingMode(request),
+          summaryStoragePath,
+          jobId,
+        },
+      });
+    }
 
     if (summary.trim()) {
       setJobStatus({ phase: 'uploading', message: 'Uploading Chinese summary to Azure Blob cache.' });
@@ -2456,7 +2486,7 @@ const app = new Hono()
     const request = c.req.valid('json');
 
     try {
-      await requirePaperAccess(c, request.pdfUrl);
+      const { user } = await requirePaperAccess(c, request.pdfUrl);
       return c.json(await estimateTokenConsumption(request));
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Token estimate failed.';
@@ -2533,6 +2563,21 @@ const app = new Hono()
       });
 
       if (memoryResult.result.sufficient && memoryResult.result.answerDraft?.trim()) {
+        const billableTokens = getBillableTokens(memoryInputTokens, memoryOutputTokens, memoryResult.model);
+        const tokenAccount = await recordUserTokenUsage({
+          userId: user.id,
+          paperId: request.paperId,
+          action: 'ask:cheap-context',
+          model: `${translatedPrompt.model} -> ${memoryResult.model}`,
+          inputTokens: memoryInputTokens,
+          outputTokens: memoryOutputTokens,
+          billableTokens,
+          metadata: {
+            routedBy: 'cheap-context',
+            readingMode: getReadingMode(request),
+          },
+        });
+
         await appendDialogTurns(user.id, paperKey, [
           { role: 'user', content: request.prompt, createdAt: nowForTranslatedPipeline, readingMode: getReadingMode(request), userPromptEnglish: translatedPrompt.text },
           {
@@ -2583,7 +2628,9 @@ const app = new Hono()
           usage: {
             inputTokens: memoryInputTokens,
             outputTokens: memoryOutputTokens,
+            billableTokens,
           },
+          tokenAccount,
         });
       }
 
@@ -2608,6 +2655,24 @@ const app = new Hono()
       const translatedAnswer = await translateReaderAnswerToChinese(expensiveTranslatedResult.answer, request);
       const translatedInputTokens = memoryInputTokens + expensiveTranslatedResult.inputTokens + translatedAnswer.inputTokens;
       const translatedOutputTokens = memoryOutputTokens + expensiveTranslatedResult.outputTokens + translatedAnswer.outputTokens;
+      const translatedBillableTokens =
+        getBillableTokens(memoryInputTokens, memoryOutputTokens, memoryResult.model) +
+        getBillableTokens(expensiveTranslatedResult.inputTokens, expensiveTranslatedResult.outputTokens, expensiveTranslatedResult.model) +
+        getBillableTokens(translatedAnswer.inputTokens, translatedAnswer.outputTokens, translatedAnswer.model);
+      const translatedTokenAccount = await recordUserTokenUsage({
+        userId: user.id,
+        paperId: request.paperId,
+        action: 'ask:expensive-reader',
+        model: `${translatedPrompt.model} -> ${memoryResult.model} -> ${expensiveTranslatedResult.model} -> ${translatedAnswer.model}`,
+        inputTokens: translatedInputTokens,
+        outputTokens: translatedOutputTokens,
+        billableTokens: translatedBillableTokens,
+        metadata: {
+          routedBy: 'expensive-reader',
+          readingMode: getReadingMode(request),
+          expensiveModel: expensiveTranslatedResult.model,
+        },
+      });
 
       await appendDialogTurns(user.id, paperKey, [
         { role: 'user', content: request.prompt, createdAt: nowForTranslatedPipeline, readingMode: getReadingMode(request), userPromptEnglish: translatedPrompt.text },
@@ -2669,7 +2734,9 @@ const app = new Hono()
         usage: {
           inputTokens: translatedInputTokens,
           outputTokens: translatedOutputTokens,
+          billableTokens: translatedBillableTokens,
         },
+        tokenAccount: translatedTokenAccount,
       });
       let triage;
 
@@ -2781,7 +2848,7 @@ const app = new Hono()
     const request = c.req.valid('json');
 
     try {
-      await requirePaperAccess(c, request.pdfUrl);
+      const { user } = await requirePaperAccess(c, request.pdfUrl);
       const storagePath = resolveUploadedPdfStoragePath(request.pdfUrl);
       const summaryStoragePath = getPaperSummaryStoragePath(request, storagePath);
       const cachedSummary = await downloadTextIfExists(summaryStoragePath);
@@ -2859,6 +2926,7 @@ const app = new Hono()
             prompt: freshness.result.improvementPrompt?.trim() || request.prompt,
           },
           summaryStoragePath,
+          user.id,
           { inputTokens: freshness.inputTokens, outputTokens: freshness.outputTokens },
         );
 
@@ -2929,7 +2997,7 @@ const app = new Hono()
         });
       }
 
-      const job = startSummaryGenerationJob(request, summaryStoragePath);
+      const job = startSummaryGenerationJob(request, summaryStoragePath, user.id);
 
       console.log('[reader-agent:summarize] returning processing response for new summary', {
         paperId: request.paperId,

@@ -5,12 +5,13 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
-import { mockPapers, mockUserAccount } from '@/features/papers/mock-data';
+import { mockPapers } from '@/features/papers/mock-data';
 import type { PaperReadingMode, PaperSummary } from '@/types/paper';
 
 type AuthMode = 'login' | 'signup';
 type AuthUser = { id: string; email: string };
-type TokenEstimate = { inputTokens: number; model: string };
+type TokenEstimate = { inputTokens: number; billableTokens?: number; tokenWeight?: number; model: string };
+type TokenAccount = { tokenBalance: number; tokenUsed: number; tokenAvailable: number };
 type ViewerPreferences = {
   readingMode?: PaperReadingMode;
   detailedReport?: boolean;
@@ -55,6 +56,7 @@ const HomePage = () => {
   const [deletingFilePath, setDeletingFilePath] = useState<string | null>(null);
   const [tokenEstimate, setTokenEstimate] = useState<TokenEstimate | null>(null);
   const [tokenEstimateMessage, setTokenEstimateMessage] = useState('Upload a PDF to estimate input tokens.');
+  const [tokenAccount, setTokenAccount] = useState<TokenAccount | null>(null);
   const [readingMode, setReadingMode] = useState<PaperReadingMode>('reviewer');
   const [detailedReport, setDetailedReport] = useState(false);
 
@@ -95,6 +97,15 @@ const HomePage = () => {
     }
   };
 
+  const loadTokenAccount = async () => {
+    try {
+      const response = await fetch('/api/auth/token-account');
+      const result = await response.json();
+
+      if (response.ok) setTokenAccount(result.tokenAccount);
+    } catch {}
+  };
+
   useEffect(() => {
     const loadSession = async () => {
       try {
@@ -103,6 +114,7 @@ const HomePage = () => {
 
         if (response.ok && result.user) {
           setAuthUser(result.user);
+          if (result.tokenAccount) setTokenAccount(result.tokenAccount);
           await loadViewerPreferences();
           await loadUploadedPapers();
         }
@@ -131,6 +143,8 @@ const HomePage = () => {
       if (!response.ok) throw new Error(result.error ?? result.message ?? 'Authentication failed.');
 
       setAuthUser(result.user);
+      if (result.tokenAccount) setTokenAccount(result.tokenAccount);
+      else await loadTokenAccount();
       await loadViewerPreferences();
       await loadUploadedPapers();
       setAuthMessage(`${authMode === 'signup' ? 'Account created' : 'Logged in'} as ${result.user.email}.`);
@@ -150,6 +164,7 @@ const HomePage = () => {
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
     setAuthUser(null);
+    setTokenAccount(null);
     setUploadedPapers([]);
     setAuthMessage('Logged out.');
   };
@@ -177,7 +192,7 @@ const HomePage = () => {
 
       if (!response.ok) throw new Error(result.message ?? result.error ?? 'Token estimate failed.');
 
-      setTokenEstimate({ inputTokens: result.inputTokens, model: result.model });
+      setTokenEstimate({ inputTokens: result.inputTokens, billableTokens: result.billableTokens, tokenWeight: result.tokenWeight, model: result.model });
       setTokenEstimateMessage('Estimated before AI analysis.');
     } catch (error) {
       setTokenEstimateMessage(error instanceof Error ? error.message : 'Token estimate failed.');
@@ -307,17 +322,22 @@ const HomePage = () => {
                 <WalletCards className="size-4" /> Token estimate
               </div>
               <p className="mt-2 text-2xl font-semibold">
-                {tokenEstimate ? tokenEstimate.inputTokens.toLocaleString() : '--'}
+                {tokenEstimate ? (tokenEstimate.billableTokens ?? tokenEstimate.inputTokens).toLocaleString() : '--'}
               </p>
               <p className="mt-1 max-w-44 text-xs text-muted-foreground">
-                {tokenEstimate ? `${tokenEstimate.model} input tokens` : tokenEstimateMessage}
+                {tokenEstimate
+                  ? `${tokenEstimate.inputTokens.toLocaleString()} raw · ${tokenEstimate.model}${tokenEstimate.tokenWeight ? ` x${tokenEstimate.tokenWeight}` : ''}`
+                  : tokenEstimateMessage}
               </p>
             </div>
             <div className="rounded-2xl border bg-slate-50 p-4 text-right">
               <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-                <WalletCards className="size-4" /> Manual balance
+                <WalletCards className="size-4" /> Token balance
               </div>
-              <p className="mt-2 text-2xl font-semibold">{mockUserAccount.balance}</p>
+              <p className="mt-2 text-2xl font-semibold">{tokenAccount ? tokenAccount.tokenAvailable.toLocaleString() : '1,000,000'}</p>
+              <p className="mt-1 max-w-44 text-xs text-muted-foreground">
+                {tokenAccount ? `${tokenAccount.tokenUsed.toLocaleString()} used / ${tokenAccount.tokenBalance.toLocaleString()} total` : 'Default account quota'}
+              </p>
             </div>
           </div>
         </header>
