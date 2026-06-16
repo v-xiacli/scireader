@@ -355,7 +355,7 @@ const getReadingMode = (request: Pick<z.infer<typeof readerRequestSchema>, 'read
 const getSummaryDetailMode = (request: Pick<z.infer<typeof readerRequestSchema>, 'detailedReport'>) => request.detailedReport === true ? 'detailed' : 'brief';
 
 const getPaperSummaryStoragePath = (request: z.infer<typeof readerRequestSchema>, pdfStoragePath?: string | null) =>
-  `paper-cache/${getPaperIdentitySlug(request)}/${pdfStoragePath ? 'uploaded' : 'sample'}.reader-summary.${getReadingMode(request)}.${getSummaryDetailMode(request)}.physics-v3.md`;
+  `paper-cache/${getPaperIdentitySlug(request)}/${pdfStoragePath ? 'uploaded' : 'sample'}.reader-summary.${getReadingMode(request)}.${getSummaryDetailMode(request)}.review-v4.md`;
 
 const getPaperDialogHistoryPath = (userId: string, paperKey: string) => `user-paper-history/${userId}/${paperKey}.md`;
 
@@ -1435,11 +1435,11 @@ const checkSummaryFreshnessWithCheapModel = async (request: z.infer<typeof reade
     model: modelSelection.model,
     max_tokens: 1200,
     system:
-      '你是 SCIReader 的低成本总结质检助手。你只能检查已保存论文报告是否已经足够简洁、结构化，并包含物理机制、关键数值、证据强度和主要局限。不要重新总结论文，不要做深度论文理解。只输出 JSON。',
+      '你是 SCIReader 的低成本总结质检助手。你只能检查已保存论文报告是否已经足够简洁、结构化，并包含核心技术机制、关键数值、证据强度和主要局限。不要重新总结论文，不要做深度论文理解。只输出 JSON。',
     messages: [
       {
         role: 'user',
-        content: `论文标题: ${request.title ?? request.paperId}\n期刊: ${request.journal ?? '未知'}\n年份: ${request.year ?? '未知'}\n\n用户期望的总结任务:\n${request.prompt}\n\n已保存总结:\n${cachedSummary.slice(0, 20000)}\n\n请判断已保存总结是否需要用高成本模型重新读取 PDF 更新。只有当总结明显为空泛、过长失控、缺少物理机制/关键数值/证据强度/主要局限、与用户期望不匹配，或看起来被截断时，fresh=false。输出 JSON，格式为 {"fresh": boolean, "reason": string, "improvementPrompt": string }。fresh=false 时 improvementPrompt 给高成本模型明确说明需要补强什么；fresh=true 时不要输出 improvementPrompt。`,
+        content: `论文标题: ${request.title ?? request.paperId}\n期刊: ${request.journal ?? '未知'}\n年份: ${request.year ?? '未知'}\n\n用户期望的总结任务:\n${request.prompt}\n\n已保存总结:\n${cachedSummary.slice(0, 20000)}\n\n请判断已保存总结是否需要用高成本模型重新读取 PDF 更新。只有当总结明显为空泛、过长失控、缺少核心技术机制/关键数值/证据强度/主要局限、与用户期望不匹配，或看起来被截断时，fresh=false。输出 JSON，格式为 {"fresh": boolean, "reason": string, "improvementPrompt": string }。fresh=false 时 improvementPrompt 给高成本模型明确说明需要补强什么；fresh=true 时不要输出 improvementPrompt。`,
       },
     ],
   });
@@ -1731,8 +1731,8 @@ const SUMMARY_FINAL_TIMEOUT_MS = 120_000;
 
 const getCompactSummaryInstruction = (mode: PaperReadingMode) =>
   mode === 'reviewer'
-    ? 'You are a physics/electromagnetics reviewer. Extract only the real physical mechanism, novelty, key numbers with units, evidence strength, and the largest credibility risk. Be terse.'
-    : 'You are a physics/electromagnetics research reader. Extract only the core physical idea, mechanism, key numbers with units, reusable design insight, and limits. Be terse.';
+    ? 'You are a cross-disciplinary engineering and applied-science reviewer. Extract only the real technical mechanism, novelty, key numbers with units, evidence strength, paper tier clues, and the largest credibility risk. Be terse.'
+    : 'You are a cross-disciplinary engineering and applied-science research reader. Extract only the core technical idea, mechanism, key numbers with units, reusable design insight, paper tier clues, and limits. Be terse.';
 
 const briefSummaryPrompt = `你将收到一份针对某篇论文生成的"深度阅读笔记"（完整版，可能来自"审稿模式"或"写稿模式"两种模板之一）。
 
@@ -1959,7 +1959,7 @@ const generateChunkedEnglishSummary = async (
 
 Respond in English. Create a compact first-pass evidence note, not a full report.
 Use exactly these five bullets, each under 35 words:
-- core physical mechanism
+- core technical mechanism
 - key structure/parameter
 - strongest reported numbers with units
 - evidence strength: simulation/measurement/baseline
@@ -2041,7 +2041,7 @@ ${extractedPdf.text}`,
 Respond in English. This is batch ${index + 1} of ${chunks.length}. Write compact but useful notes for a detailed review.
 Use 7-10 bullets, each under 45 words. Capture only evidence present in this batch:
 - venue/journal/conference or publication clues if visible
-- physical mechanism and assumptions
+- technical mechanism and assumptions
 - method/model/processing pipeline
 - experimental setup, validation source, or baseline
 - strongest numerical results with units
@@ -2195,24 +2195,26 @@ ${chunkNotes.join('\n\n---\n\n')}`;
       finalResult = await createExpensiveTextResponse(
         `${compactInstruction}
 
-Respond in English. Synthesize the batch notes into a structured detailed physics review report under 1400 words.
+Respond in English. Synthesize the batch notes into a structured detailed cross-disciplinary paper review under 1500 words.
 Use exactly these sections:
-1. Venue / partition assessment
+1. Paper tier / publication-level assessment
 2. Verdict
-3. Physical mechanism
+3. Core technical mechanism
 4. Key numbers
 5. Evidence and credibility
 6. Innovation assessment
 7. Main limitations
 8. Who should read it
 
-Venue / partition assessment requirements:
-- Classify the publication venue into one of: CAS Q1, CAS Q2, CAS Q3, CAS Q4, Chinese Core, Open Access journal, Conference, Unknown/needs lookup.
-- Use paper metadata and your scholarly knowledge. If you are not certain, say "uncertain" and explain what should be checked.
-- Mention whether the venue is journal/conference/OA when inferable.
+Paper tier / publication-level assessment requirements:
+- First identify the paper's technical field from the content. Do not force physics/electromagnetics if the paper is computer science, civil engineering, geoscience, medicine, management, etc.
+- Evaluate the paper itself, not just the journal. Estimate the likely publication level from the quality of contribution, evidence, novelty, validation, venue metadata, and writing.
+- Classify into one of: CAS Q1-level paper, CAS Q2-level paper, CAS Q3-level paper, CAS Q4-level paper, Chinese Core-level paper, ordinary Open Access paper, conference paper, preprint/unpublished work, possible opportunistic/weak publication, unknown/needs lookup.
+- If the venue is known, mention it as context only. A good venue does not automatically make the paper high-level; a low/ordinary venue does not automatically make the paper bad.
+- Be strict but evidence-based. If the paper looks like a weak or opportunistic publication, say so and explain the evidence. If uncertain, say uncertain and list what must be checked.
 
 Innovation assessment requirements:
-- Judge whether the novelty is mainly physical mechanism, engineering system, algorithm/modeling, experimental demonstration, application scenario, or data/product.
+- Judge whether the novelty is mainly scientific mechanism, engineering system, algorithm/modeling, dataset/product, experimental demonstration, application scenario, or integration.
 - Say whether the contribution is strong, moderate, or incremental, with evidence.
 
 Do not add unsupported claims. Do not repeat points. Do not include a follow-up question index.`,
@@ -2942,7 +2944,7 @@ const app = new Hono()
         scope: 'whole-paper',
         prompt:
           request.prompt ||
-          `请用中文生成一份精简的物理论文阅读报告。只包含：核心物理机制、关键结构/参数、3-6个最重要数值、证据强度、主要局限。不要逐段复述，不要逐图逐公式展开，不要列可追问索引。输出 Markdown，尽量控制在1000字以内。`,
+          `请用中文生成一份精简的跨学科论文阅读报告。只包含：核心技术机制、关键结构/参数/方法、3-6个最重要数值、证据强度、主要局限。不要逐段复述，不要逐图逐公式展开，不要列可追问索引。输出 Markdown，尽量控制在1000字以内。`,
         paperContextSummary: '',
         conversationHistory: [],
       }, selectExpensiveReaderModel(), 'english');
