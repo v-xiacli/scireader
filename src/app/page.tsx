@@ -56,7 +56,7 @@ const HomePage = () => {
   const [uploadedPapers, setUploadedPapers] = useState<PaperSummary[]>([]);
   const [deletingFilePath, setDeletingFilePath] = useState<string | null>(null);
   const [tokenEstimate, setTokenEstimate] = useState<TokenEstimate | null>(null);
-  const [tokenEstimateMessage, setTokenEstimateMessage] = useState('Upload a PDF to estimate input tokens.');
+  const [tokenEstimateMessage, setTokenEstimateMessage] = useState('Upload a PDF to estimate tokens.');
   const [tokenAccount, setTokenAccount] = useState<TokenAccount | null>(null);
   const [readingMode, setReadingMode] = useState<PaperReadingMode>('reviewer');
   const [detailedReport, setDetailedReport] = useState(false);
@@ -92,9 +92,12 @@ const HomePage = () => {
     try {
       const response = await fetch('/api/auth/uploaded-papers');
       const result = await response.json();
-      setUploadedPapers(response.ok ? result.papers : []);
+      const papers = response.ok ? result.papers : [];
+      setUploadedPapers(papers);
+      if (!papers.some((paper: PaperSummary) => paper.filePath)) setTokenEstimateMessage('Upload a PDF to estimate tokens.');
     } catch {
       setUploadedPapers([]);
+      setTokenEstimateMessage('Upload a PDF to estimate tokens.');
     }
   };
 
@@ -104,7 +107,10 @@ const HomePage = () => {
       const result = await response.json();
 
       if (response.ok) setTokenAccount(result.tokenAccount);
-    } catch {}
+      else setTokenAccount(null);
+    } catch {
+      setTokenAccount(null);
+    }
   };
 
   useEffect(() => {
@@ -132,9 +138,16 @@ const HomePage = () => {
   useEffect(() => {
     const newestUploadedPaper = uploadedPapers.find((paper) => paper.filePath);
 
-    if (!newestUploadedPaper || estimatedPaperIdRef.current === newestUploadedPaper.id) return;
+    if (!newestUploadedPaper) {
+      setTokenEstimate(null);
+      setTokenEstimateMessage('Upload a PDF to estimate tokens.');
+      return;
+    }
+
+    if (estimatedPaperIdRef.current === newestUploadedPaper.id) return;
 
     estimatedPaperIdRef.current = newestUploadedPaper.id;
+    setTokenEstimateMessage('Estimating latest uploaded PDF...');
     void estimateTokenConsumption(newestUploadedPaper);
   }, [uploadedPapers]);
 

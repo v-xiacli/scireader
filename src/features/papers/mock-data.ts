@@ -1,10 +1,4 @@
-import type { ChatMessage, PaperSummary, UserAccountSummary } from '@/types/paper';
-
-export const mockUserAccount: UserAccountSummary = {
-  id: 'user_demo',
-  name: 'Researcher',
-  balance: '$128.40',
-};
+import type { ChatMessage, PaperSummary } from '@/types/paper';
 
 export const mockPapers: PaperSummary[] = [
   {

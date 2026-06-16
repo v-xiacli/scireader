@@ -356,7 +356,7 @@ const getReadingMode = (request: Pick<z.infer<typeof readerRequestSchema>, 'read
 const getSummaryDetailMode = (request: Pick<z.infer<typeof readerRequestSchema>, 'detailedReport'>) => request.detailedReport === true ? 'detailed' : 'brief';
 
 const getPaperSummaryStoragePath = (request: z.infer<typeof readerRequestSchema>, pdfStoragePath?: string | null) =>
-  `paper-cache/${getPaperIdentitySlug(request)}/${pdfStoragePath ? 'uploaded' : 'sample'}.reader-summary.${getReadingMode(request)}.${getSummaryDetailMode(request)}.review-v4.md`;
+  `paper-cache/${getPaperIdentitySlug(request)}/${pdfStoragePath ? 'uploaded' : 'sample'}.reader-summary.${getReadingMode(request)}.${getSummaryDetailMode(request)}.review-v5.md`;
 
 const getPaperDialogHistoryPath = (userId: string, paperKey: string) => `user-paper-history/${userId}/${paperKey}.md`;
 
@@ -2218,7 +2218,6 @@ Use exactly these sections:
 5. Evidence and credibility
 6. Innovation assessment
 7. Main limitations
-8. Who should read it
 
 Paper tier / publication-level assessment requirements:
 - First identify the paper's technical field from the content. Do not force physics/electromagnetics if the paper is computer science, civil engineering, geoscience, medicine, management, etc.
