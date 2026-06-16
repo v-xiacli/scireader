@@ -2890,11 +2890,28 @@ const app = new Hono()
         }
 
         if (freshness.result.fresh) {
+          const billableTokens = getBillableTokens(freshness.inputTokens, freshness.outputTokens, freshness.model);
+          const tokenAccount = await recordUserTokenUsage({
+            userId: user.id,
+            paperId: request.paperId,
+            action: 'summary:freshness-check',
+            model: freshness.model,
+            inputTokens: freshness.inputTokens,
+            outputTokens: freshness.outputTokens,
+            billableTokens,
+            metadata: {
+              reusedCachedSummary: true,
+              summaryStoragePath,
+              reason: freshness.result.reason,
+            },
+          });
+
           console.log('[reader-agent:summarize] cheap freshness check passed; reusing cached summary', {
             paperId: request.paperId,
             model: freshness.model,
             inputTokens: freshness.inputTokens,
             outputTokens: freshness.outputTokens,
+            billableTokens,
             reason: freshness.result.reason,
           });
 
@@ -2908,7 +2925,9 @@ const app = new Hono()
               model: freshness.model,
               inputTokens: freshness.inputTokens,
               outputTokens: freshness.outputTokens,
+              billableTokens,
             },
+            tokenAccount,
           });
         }
 

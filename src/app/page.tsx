@@ -43,6 +43,7 @@ const fallbackPaperKey = (fileName: string) => fileName.replace(/\.pdf$/i, '').t
 const HomePage = () => {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const estimatedPaperIdRef = useRef<string | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -127,6 +128,15 @@ const HomePage = () => {
 
     void loadSession();
   }, []);
+
+  useEffect(() => {
+    const newestUploadedPaper = uploadedPapers.find((paper) => paper.filePath);
+
+    if (!newestUploadedPaper || estimatedPaperIdRef.current === newestUploadedPaper.id) return;
+
+    estimatedPaperIdRef.current = newestUploadedPaper.id;
+    void estimateTokenConsumption(newestUploadedPaper);
+  }, [uploadedPapers]);
 
   const handleAuth = async () => {
     setIsAuthLoading(true);
