@@ -2,7 +2,9 @@
 
 import { Bot, CornerDownLeft, FileSearch, ImageIcon, Loader2, Quote } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
+import rehypeKatex from 'rehype-katex';
 import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
 
 import { mockMessages } from '@/features/papers/mock-data';
 import type { ChatMessage, PaperReadingMode, PaperSelection, PaperSummary } from '@/types/paper';
@@ -119,6 +121,11 @@ const wait = (milliseconds: number, signal?: AbortSignal) =>
       { once: true },
     );
   });
+
+const normalizeMathMarkdown = (content: string) =>
+  content
+    .replace(/\\\[((?:.|\n)*?)\\\]/g, (_match, expression: string) => `\n$$\n${expression.trim()}\n$$\n`)
+    .replace(/\\\(((?:.|\n)*?)\\\)/g, (_match, expression: string) => `$${expression.trim()}$`);
 
 const clampLayout = (position: { x: number; y: number }, size: { width: number; height: number }) => {
   if (typeof window === 'undefined') return { position, size };
@@ -702,6 +709,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
             ) : null}
             <div className="max-w-none break-words text-xs leading-5">
               <ReactMarkdown
+                remarkPlugins={[remarkMath]}
+                rehypePlugins={[rehypeKatex]}
                 components={{
                   p: ({ children }) => <p className="my-1 whitespace-pre-wrap">{children}</p>,
                   li: ({ children }) => <li className="my-0.5 pl-0">{children}</li>,
@@ -711,9 +720,10 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
                   h2: ({ children }) => <h2 className="my-1 text-sm font-semibold">{children}</h2>,
                   h3: ({ children }) => <h3 className="my-1 text-xs font-semibold">{children}</h3>,
                   strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                  div: ({ children, className }) => <div className={className?.includes('math-display') ? `${className} overflow-x-auto py-1` : className}>{children}</div>,
                 }}
               >
-                {message.content}
+                {normalizeMathMarkdown(message.content)}
               </ReactMarkdown>
             </div>
           </div>

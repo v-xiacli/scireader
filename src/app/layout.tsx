@@ -1,6 +1,7 @@
 import type { PropsWithChildren } from 'react';
 
 import { Providers } from '@/components/providers';
+import 'katex/dist/katex.min.css';
 import './globals.css';
 
 export const metadata = {

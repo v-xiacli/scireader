@@ -772,8 +772,8 @@ ${webSearchText}用户请求：${request.prompt}`;
 
 const buildReaderSystemPrompt = (hasPdfContext: boolean, hasWebSearch: boolean, modePrompt?: string, responseLanguage: 'english' | 'chinese' = 'chinese') => {
   const languageInstruction = responseLanguage === 'english'
-    ? 'Respond in English. The answer will be translated to Chinese by a separate low-cost model, so keep terminology precise and preserve all numbers, equations, figure/table labels, citations, and Markdown structure.'
-    : 'Respond entirely in Chinese. Preserve all important numbers, equations, figure/table labels, citations, and Markdown structure.';
+    ? 'Respond in English. The answer will be translated to Chinese by a separate low-cost model, so keep terminology precise and preserve all numbers, equations, figure/table labels, citations, and Markdown structure. Format inline math as \\(...\\) and display math as $$...$$ so the UI can render it with KaTeX.'
+    : 'Respond entirely in Chinese. Preserve all important numbers, equations, figure/table labels, citations, and Markdown structure. 公式请使用 KaTeX 可渲染格式：行内公式用 \\(...\\)，独立公式用 $$...$$。';
   const nextBasePrompt = hasPdfContext
     ? `${modePrompt?.trim() || 'You are SCIReader, a careful academic paper reading assistant. Prioritize the provided paper content, saved paper notes, selected text, and page images. If the paper does not provide clear evidence, explicitly say that the paper does not provide sufficient information to determine.'}\n\n${languageInstruction}\n\nUse only the provided paper evidence unless the user asks for outside context. Do not fabricate details.`
     : `You are SCIReader's general AI assistant. Answer the user's question directly.\n\n${languageInstruction}`;
