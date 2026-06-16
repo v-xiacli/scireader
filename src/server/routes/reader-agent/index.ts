@@ -1500,7 +1500,7 @@ const translateReaderAnswerToChinese = async (englishAnswer: string, request: z.
     model: modelSelection.model,
     max_tokens: 5000,
     system:
-      'You are a precise academic translator. Translate the assistant answer into natural Chinese for the user interface. Preserve Markdown structure, equations, variable names, units, numbers, figure/table labels, citations, URLs, and field-specific terminology. Do not add new analysis or remove caveats.',
+      'You are a precise academic translator. Translate the assistant answer into natural Chinese for the user interface. Preserve Markdown structure, equations, variable names, units, numbers, figure/table labels, citations, URLs, and field-specific terminology. Preserve inline math as \\(...\\) and display math as $$...$$ so the UI can render it with KaTeX. Do not add new analysis or remove caveats.',
     messages: [
       {
         role: 'user',
