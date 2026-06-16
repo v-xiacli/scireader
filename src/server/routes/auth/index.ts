@@ -7,7 +7,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { z } from 'zod';
 
-import { ensureAuthTables, getSql } from '@/server/db';
+import { ensureAuthTables, getSql, getUserTokenAccount } from '@/server/db';
 import { downloadTextAsAdmin, uploadTextAsAdmin } from '@/lib/firebase/server/storage-admin';
 
 const scrypt = promisify(scryptCallback);
@@ -209,11 +209,17 @@ const app = new Hono()
   .get('/me', async (c) => {
     try {
       const user = await getCurrentUser(getCookie(c, sessionCookieName));
-      return c.json({ user });
+      return c.json({ user, tokenAccount: user ? await getUserTokenAccount(user.id) : null });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not load session.';
       return c.json({ error: 'Could not load session.', message }, 500);
     }
+  })
+  .get('/token-account', async (c) => {
+    const user = await getCurrentUser(getCookie(c, sessionCookieName));
+    if (!user) return c.json({ error: 'Not authenticated.' }, 401);
+
+    return c.json({ tokenAccount: await getUserTokenAccount(user.id) });
   })
   .get('/viewer-preferences', async (c) => {
     const user = await getCurrentUser(getCookie(c, sessionCookieName));

@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { downloadFileAsAdmin, downloadTextAsAdmin, uploadFileAsAdmin, uploadTextAsAdmin } from '@/lib/firebase/server/storage-admin';
 import { readNeo4j, verifyNeo4jConnection, writeNeo4j } from '@/lib/neo4j';
 import { getUserStoragePrefix } from '@/lib/storage-paths';
+import { recordUserTokenUsage } from '@/server/db';
 import { getCurrentUser, loadUploadedPapers, sessionCookieName } from '@/server/routes/auth';
 
 type ExtractedPdfPage = {
@@ -649,6 +650,15 @@ const selectExpensiveReaderModel = (): AnthropicModelSelection => {
 
   return { model: expertModel || defaultModel, target: expertModel ? 'expensive' : 'default' };
 };
+
+const getModelTokenWeight = (model?: string) => {
+  const normalizedModel = model?.toLowerCase() ?? '';
+
+  return normalizedModel.includes('gpt-5.5') ? 2 : 1;
+};
+
+const getBillableTokens = (inputTokens: number, outputTokens: number, model?: string) =>
+  Math.ceil((Math.max(0, inputTokens) + Math.max(0, outputTokens)) * getModelTokenWeight(model));
 
 const getAnthropicCredential = (target: AnthropicModelTarget) => {
   if (target === 'cheap') {
