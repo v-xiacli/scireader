@@ -9,7 +9,7 @@ type ViewerPreferences = {
   pdfZoom?: number;
   chatPosition?: { x: number; y: number };
   chatSize?: { width: number; height: number };
-  chatFontSize?: 'small' | 'medium' | 'large';
+  chatFontSize?: 'xs' | 'small' | 'medium' | 'large' | 'xl';
 };
 
 export const GlobalFloatingChat = () => {
@@ -43,7 +43,7 @@ export const GlobalFloatingChat = () => {
   }, []);
 
   const saveLayout = useCallback(
-    (layout: { position: { x: number; y: number }; size: { width: number; height: number }; fontSize?: 'small' | 'medium' | 'large' }) => {
+    (layout: { position: { x: number; y: number }; size: { width: number; height: number }; fontSize?: 'xs' | 'small' | 'medium' | 'large' | 'xl' }) => {
       if (!isAuthenticated) return;
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
 

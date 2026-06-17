@@ -24,7 +24,7 @@ const minSize = { width: 320, height: 360 };
 const edgePadding = 8;
 
 type ResizeHandle = 'top' | 'right' | 'bottom' | 'left' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
-type ChatFontSize = 'small' | 'medium' | 'large';
+type ChatFontSize = 'xs' | 'small' | 'medium' | 'large' | 'xl';
 type ConversationTurn = Pick<ChatMessage, 'role' | 'content'>;
 type StoredHistoryTurn = ConversationTurn & {
   createdAt: string;
@@ -85,10 +85,18 @@ For a whole-paper summary, produce a compact reading note with these five short 
 Rules: no section-by-section narration; no broad literature essay; explain equations and figures only when they change the technical interpretation; keep the whole report short, practical, and anchored to paper text.`,
 };
 
-const chatFontSizeOrder: ChatFontSize[] = ['small', 'medium', 'large'];
+const chatFontSizeOrder: ChatFontSize[] = ['xs', 'small', 'medium', 'large', 'xl'];
 const chatFontSizeStyles: Record<ChatFontSize, { label: string; body: string; h1: string; h2: string; h3: string; textarea: string }> = {
+  xs: {
+    label: '1',
+    body: 'text-[11px] leading-4',
+    h1: 'text-xs',
+    h2: 'text-xs',
+    h3: 'text-[11px]',
+    textarea: 'text-xs',
+  },
   small: {
-    label: '小',
+    label: '2',
     body: 'text-xs leading-5',
     h1: 'text-sm',
     h2: 'text-sm',
@@ -96,7 +104,7 @@ const chatFontSizeStyles: Record<ChatFontSize, { label: string; body: string; h1
     textarea: 'text-sm',
   },
   medium: {
-    label: '中',
+    label: '3',
     body: 'text-sm leading-6',
     h1: 'text-base',
     h2: 'text-base',
@@ -104,12 +112,20 @@ const chatFontSizeStyles: Record<ChatFontSize, { label: string; body: string; h1
     textarea: 'text-sm',
   },
   large: {
-    label: '大',
+    label: '4',
     body: 'text-base leading-7',
     h1: 'text-lg',
     h2: 'text-lg',
     h3: 'text-base',
     textarea: 'text-base',
+  },
+  xl: {
+    label: '5',
+    body: 'text-lg leading-8',
+    h1: 'text-xl',
+    h2: 'text-xl',
+    h3: 'text-lg',
+    textarea: 'text-lg',
   },
 };
 
@@ -201,7 +217,10 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const readingModePrompt = paperReadingPrompts[readingMode];
   const detailedReport = paper?.detailedReport ?? false;
   const readingModeLabel = `${readingMode === 'reviewer' ? '审稿人模式' : '读者模式'} · ${detailedReport ? '详细' : '极简'}`;
+  const fontSizeIndex = chatFontSizeOrder.indexOf(chatFontSize);
   const fontSizeStyle = chatFontSizeStyles[chatFontSize];
+  const canDecreaseFontSize = fontSizeIndex > 0;
+  const canIncreaseFontSize = fontSizeIndex < chatFontSizeOrder.length - 1;
 
   useEffect(() => {
     sizeRef.current = size;
@@ -658,17 +677,35 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-1">
             <button
-              className="inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              className="inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+              disabled={!canDecreaseFontSize}
               onClick={(event) => {
                 event.stopPropagation();
-                setChatFontSize((current) => chatFontSizeOrder[(chatFontSizeOrder.indexOf(current) + 1) % chatFontSizeOrder.length]);
+                setChatFontSize((current) => chatFontSizeOrder[Math.max(0, chatFontSizeOrder.indexOf(current) - 1)]);
               }}
               onPointerDown={(event) => event.stopPropagation()}
-              title="调整聊天字体大小"
+              title="减小聊天字体"
               type="button"
             >
               <Type className="size-4" />
+              -
+            </button>
+            <span className="min-w-5 text-center text-[11px] font-medium text-slate-500" title="当前字体档位">
               {fontSizeStyle.label}
+            </span>
+            <button
+              className="inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+              disabled={!canIncreaseFontSize}
+              onClick={(event) => {
+                event.stopPropagation();
+                setChatFontSize((current) => chatFontSizeOrder[Math.min(chatFontSizeOrder.length - 1, chatFontSizeOrder.indexOf(current) + 1)]);
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+              title="增大聊天字体"
+              type="button"
+            >
+              <Type className="size-4" />
+              +
             </button>
           </div>
         </div>
