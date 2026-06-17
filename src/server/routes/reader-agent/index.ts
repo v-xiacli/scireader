@@ -527,7 +527,7 @@ const inferMetadataFromText = (text: string, fallbackTitle?: string): PaperMetad
     .filter((line): line is string => Boolean(line));
   const title = lines.find((line) => line.length >= 12 && !/^abstract\b/i.test(line)) ?? normalizeMetadataText(fallbackTitle);
   const titleIndex = title ? lines.indexOf(title) : -1;
-  const authorLine = titleIndex >= 0 ? lines.slice(titleIndex + 1, titleIndex + 5).find((line) => /,|;|\band\b|&|，|�?i.test(line)) : undefined;
+  const authorLine = titleIndex >= 0 ? lines.slice(titleIndex + 1, titleIndex + 5).find((line) => /,|;|\band\b|&/i.test(line)) : undefined;
   const journalLine = lines.find((line) => /\b(journal|transactions|proceedings|conference|letters|review|nature|science|ieee|acm)\b/i.test(line));
   const year = extractYear(lines.slice(0, 20).join(' '));
 
@@ -567,17 +567,17 @@ const extractPaperMetadata = async (localPdfPath: string, fallbackTitle?: string
 
 const buildSystemPrompt = (hasPdfContext: boolean, hasWebSearch: boolean) => {
   const basePrompt = hasPdfContext
-    ? `你是 SCIReader 的论文阅读助手，当别人为你是谁或者谁制造了你时或者其他企图探索你来源的问题时，请你回复我来自一名热爱科研的AI工程师。请用中文回答用户问题�?重点能力：翻译论文标题、摘要、结论；提取公式并给�?LaTeX；解释图表；总结论文的主要创新点、论文工作中存在的缺点和不足（特别是非创新、伪创新、不可实现的假创新）、相关前人工作�?你会收到服务端从 PDF 中提取出的正文文本、图题候选，以及 PDF 页面截图。请结合页面截图解释图表内容。若某项无法从已提取内容判断，请明确说明“未在论文中明确找到”，不要编造。`
-    : `你是 SCIReader 内置的通用 AI 聊天助手，类�?ChatGPT。请直接回答用户的一般问题；如果用户要求写作、代码、解释概念、翻译、总结或头脑风暴，请正常完成，不要假设必须有论文上下文。`;
+    ? 'You are SCIReader paper reading assistant. Answer in Chinese. Use provided PDF text, selected text, page screenshots, saved notes, and figure/table captions. Explain methods, equations, figures, contributions, weaknesses, and related work. If the provided paper evidence is insufficient, say so clearly and do not fabricate.'
+    : 'You are SCIReader general AI assistant. Answer the user directly in Chinese unless another language is requested. Do not assume paper context is required.';
 
   return hasWebSearch
-    ? `${basePrompt}\n用户问题涉及新闻、实时信息或近期事件。你会收�?Tavily Web search results，请优先基于这些结果回答，并在答案中引用相关来源 URL；如果搜索结果不足或互相矛盾，请明确说明。`
+    ? `${basePrompt}\nThe user question may involve recent or real-time information. Use provided Tavily web search results first, cite relevant source URLs, and say when results are insufficient or conflicting.`
     : basePrompt;
 };
 
-const identityAnswerChinese = '我是论文阅读小助�?;
+const identityAnswerChinese = '我是论文阅读小助手';
 const isIdentityQuestion = (prompt: string) =>
-  /(?:你是(?:谁|什么|哪[个款种]?|chatgpt|gpt|claude)|你叫(?:什么|�?|�??:做|创造|制造|训练|开发|发明)了你|谁是你的?(?:爸爸|父亲|爹|创造者|制造者|开发者|作�?|who\s+(?:are|r)\s+you|what\s+are\s+you|who\s+(?:made|created|built|trained|developed)\s+you|who\s+is\s+your\s+(?:father|creator|maker|developer)|which\s+(?:model|version)\s+are\s+you|what\s+(?:model|version)\s+are\s+you|are\s+you\s+(?:chatgpt|gpt|claude))/i.test(prompt);
+  /(?:你是(?:谁|什么|哪个|哪种|chatgpt|gpt|claude)|你叫(?:什么|啥)|谁(?:做|创造|制造|训练|开发|发明)了你|谁是你的?(?:爸爸|父亲|爹|创造者|制造者|开发者|作者)|who\s+(?:are|r)\s+you|what\s+are\s+you|who\s+(?:made|created|built|trained|developed)\s+you|who\s+is\s+your\s+(?:father|creator|maker|developer)|which\s+(?:model|version)\s+are\s+you|what\s+(?:model|version)\s+are\s+you|are\s+you\s+(?:chatgpt|gpt|claude))/i.test(prompt);
 
 const textFromResponse = (response: { content?: unknown }) => {
   if (!Array.isArray(response.content)) return '';
@@ -930,7 +930,7 @@ const askGeneralChat = async (request: z.infer<typeof readerRequestSchema>) => {
     model: modelSelection.model,
     max_tokens: 4000,
     system:
-      'You are SCIReader general chat assistant. Identity rule: if the user asks whether you are ChatGPT, which model/version you are, who made you, or asks similar identity/provider questions, answer in Chinese: "我是论文阅读小助手，不是你说的其他大模型�? You may add that you can help read papers and answer general questions inside SCIReader, but do not claim to be ChatGPT, GPT-4, GPT-5, Claude, Anthropic, OpenAI, or any specific model/provider. For other questions, answer directly in Chinese unless the user asks for another language. The user may be on the home page or may ask a question unrelated to the current paper. Do not refuse just because there is no PDF context. If the user asks about the current paper but no paper context is provided, say you need a paper/PDF to answer paper-specific questions.',
+      'You are SCIReader general chat assistant. For identity, source, creator, father, provider, model, or version questions, answer exactly in Chinese: 我是论文阅读小助手. Do not claim to be ChatGPT, GPT, Claude, Anthropic, OpenAI, or any specific model/provider. For other questions, answer directly in Chinese unless another language is requested. Do not refuse just because there is no PDF context.',
     messages: [
       ...(request.conversationHistory ?? [])
         .slice(-8)
@@ -1661,7 +1661,7 @@ const retrieveAnswerFromSharedPaperMemory = async (
     model: modelSelection.model,
     max_tokens: 4000,
     system:
-      'You are SCIReader memory retrieval and routing. Search saved Azure Blob records for this exact paper key. Records may include the cached paper brief, shared dialog history, and external evaluations made by other papers in their Introductions. Your primary job is to decide whether the saved records are enough, whether GPT-5.5 must read the PDF again, or whether the user is simply asking a general question unrelated to the paper. Identity rule: if the user asks whether the assistant is ChatGPT, which model/version it is, who made it, or asks similar identity/provider questions, set sufficient=true and answerDraft exactly in Chinese: "我是论文阅读小助手，不是你说的其他大模型�? Do not route identity questions to GPT-5.5. Be conservative for paper analysis. You may answer directly when the saved records contain explicit evidence that directly answers the paper question. If the question is clearly unrelated to the paper, answer it as a normal general chat assistant in Chinese and set sufficient=true; do not refuse and do not say the paper lacks evidence. Route to GPT-5.5 when the user asks for new paper-specific expert judgment, critique, novelty assessment, credibility assessment, causal explanation, comparison, methodology interpretation, or anything that requires checking original PDF evidence beyond the saved records. Do not invent new paper analysis. If using external evaluations, clearly state in Chinese that they are other papers\' Introduction evaluations, not conclusions from reading the target paper itself. Output only JSON.',
+      'You are SCIReader memory retrieval and routing. Search saved Azure Blob records for this exact paper key. Identity rule: if the user asks identity, source, creator, father, provider, model, or version questions, set sufficient=true and answerDraft exactly: 我是论文阅读小助手. Do not route identity questions to GPT-5.5. For paper analysis, decide whether saved records are enough or GPT-5.5 must read the PDF again. If the question is clearly unrelated to the paper, answer as normal general chat in Chinese and set sufficient=true. Do not refuse just because paper evidence is absent for a non-paper question. Output only JSON.',
     messages: [
       {
         role: 'user',
@@ -1688,7 +1688,7 @@ Return JSON exactly in this shape:
 
 Rules:
 - Think step by step internally before producing JSON: What exact claim is the user asking for? Is that claim already explicitly supported by saved records? Would a careful reviewer need to inspect the PDF text, figures, equations, methods, or tables?
-- For identity/provider/model-version questions, sufficient=true and answerDraft must be exactly: 我是论文阅读小助手，不是你说的其他大模型�?- If the user is asking a general non-paper question, such as coding, writing, translation, brainstorming, general knowledge, or app usage, set sufficient=true and answer normally in Chinese. Do not mention lack of paper evidence.
+- For identity/provider/model-version/source/creator/father questions, sufficient=true and answerDraft must be exactly: 我是论文阅读小助手。
 - sufficient=true only for direct factual recall or simple restatement when saved records explicitly contain the needed answer.
 - sufficient=false for new judgments, critique, novelty assessment, credibility assessment, "why" explanations, interpretation of method/model design, comparison, or when the saved records are only partially relevant.
 - answerDraft must be Chinese and must mention when it is based on saved records if appropriate.
