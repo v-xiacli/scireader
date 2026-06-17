@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { CornerDownLeft, Loader2, Type } from 'lucide-react';
+import { CornerDownLeft, Loader2, Maximize2, Minimize2, Type } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
 import rehypeKatex from 'rehype-katex';
 import ReactMarkdown from 'react-markdown';
@@ -22,6 +22,8 @@ const defaultPosition = { x: 0, y: 96 };
 const defaultSize = { width: 560, height: 620 };
 const minSize = { width: 320, height: 360 };
 const edgePadding = 8;
+const mobileBreakpoint = 768;
+const mobileCollapsedHeight = 58;
 
 type ResizeHandle = 'top' | 'right' | 'bottom' | 'left' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 type ChatFontSize = 'xs' | 'small' | 'medium' | 'large' | 'xl';
@@ -205,6 +207,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [isMobileChatExpanded, setIsMobileChatExpanded] = useState(false);
   const [chatFontSize, setChatFontSize] = useState<ChatFontSize>(initialFontSize);
   const [paperContextSummary, setPaperContextSummary] = useState('');
   const [summaryProgress, setSummaryProgress] = useState<SummaryProgress | null>(null);
@@ -221,10 +225,31 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const fontSizeStyle = chatFontSizeStyles[chatFontSize];
   const canDecreaseFontSize = fontSizeIndex > 0;
   const canIncreaseFontSize = fontSizeIndex < chatFontSizeOrder.length - 1;
+  const viewportWidth = typeof window === 'undefined' ? 390 : window.innerWidth;
+  const viewportHeight = typeof window === 'undefined' ? 720 : window.innerHeight;
+  const mobileLayout = isMobileViewport
+    ? {
+        x: edgePadding,
+        y: isMobileChatExpanded ? edgePadding : Math.max(edgePadding, viewportHeight - mobileCollapsedHeight - edgePadding),
+        width: Math.max(minSize.width, viewportWidth - edgePadding * 2),
+        height: isMobileChatExpanded ? Math.max(minSize.height, viewportHeight - edgePadding * 2) : mobileCollapsedHeight,
+      }
+    : null;
 
   useEffect(() => {
     sizeRef.current = size;
   }, [size]);
+
+  useEffect(() => {
+    const updateViewportMode = () => {
+      setIsMobileViewport(window.innerWidth < mobileBreakpoint);
+    };
+
+    updateViewportMode();
+    window.addEventListener('resize', updateViewportMode);
+
+    return () => window.removeEventListener('resize', updateViewportMode);
+  }, []);
 
   useEffect(() => {
     console.info('Floating chat mounted/rendered.', {
@@ -497,6 +522,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   }, [paperId, paperPdfUrl, readingMode, summarizePaper, loadPaperHistory]);
 
   const startDragging = (event: PointerEvent<HTMLElement>) => {
+    if (isMobileViewport) return;
     const target = event.target as HTMLElement;
     if (target.closest('button')) return;
 
@@ -509,6 +535,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   };
 
   const drag = (event: PointerEvent<HTMLElement>) => {
+    if (isMobileViewport) return;
     if (!isDragging) return;
 
     const maxX = Math.max(0, window.innerWidth - size.width);
@@ -526,6 +553,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   };
 
   const startResizing = (handle: ResizeHandle) => (event: PointerEvent<HTMLDivElement>) => {
+    if (isMobileViewport) return;
     event.preventDefault();
     event.stopPropagation();
     resizeHandleRef.current = handle;
@@ -659,10 +687,15 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   return (
     <aside
       className="fixed z-50 flex max-w-[calc(100vw-1rem)] flex-col rounded-2xl border bg-white/95 shadow-2xl backdrop-blur"
-      style={{ left: position.x, top: position.y, width: size.width, height: size.height }}
+      style={{
+        left: mobileLayout?.x ?? position.x,
+        top: mobileLayout?.y ?? position.y,
+        width: mobileLayout?.width ?? size.width,
+        height: mobileLayout?.height ?? size.height,
+      }}
     >
       <header
-        className={isDragging ? 'cursor-grabbing border-b px-3 py-2' : 'cursor-grab border-b px-3 py-2'}
+        className={`${isMobileViewport ? 'cursor-default' : isDragging ? 'cursor-grabbing' : 'cursor-grab'} border-b px-3 py-2`}
         onPointerDown={startDragging}
         onPointerMove={drag}
         onPointerUp={stopDragging}
@@ -676,6 +709,21 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
             <p className="truncate text-[11px] text-muted-foreground">{paper?.title ?? 'Ask without opening a paper'}</p>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-1">
+            {isMobileViewport ? (
+              <button
+                className="inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIsMobileChatExpanded((current) => !current);
+                }}
+                onPointerDown={(event) => event.stopPropagation()}
+                title={isMobileChatExpanded ? '最小化聊天框' : '展开聊天框'}
+                type="button"
+              >
+                {isMobileChatExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+                {isMobileChatExpanded ? 'PDF' : 'Chat'}
+              </button>
+            ) : null}
             <button
               className="inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
               disabled={!canDecreaseFontSize}
@@ -711,7 +759,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
         </div>
       </header>
 
-      {summaryProgress ? (
+      {isMobileViewport && !isMobileChatExpanded ? null : summaryProgress ? (
         <div className="border-b bg-amber-50 px-3 py-2 text-xs text-amber-900">
           <div className="flex items-center justify-between gap-3">
             <span className="font-medium">{summaryProgress.label}</span>
@@ -724,14 +772,14 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
         </div>
       ) : null}
 
-      {selectedText ? (
+      {isMobileViewport && !isMobileChatExpanded ? null : selectedText ? (
         <div className="border-b bg-blue-50 p-3 text-xs">
           <p className="font-medium text-blue-900">Selected text context</p>
           <p className="mt-1 line-clamp-3 text-blue-800">{selectedText.text}</p>
         </div>
       ) : null}
 
-      <div className="min-h-0 flex-1 space-y-2 overflow-auto p-3">
+      <div className={isMobileViewport && !isMobileChatExpanded ? 'hidden' : 'min-h-0 flex-1 space-y-2 overflow-auto p-3'}>
         {messages.map((message) => (
           <div className={message.role === 'user' ? 'ml-auto max-w-[92%] rounded-xl bg-primary p-2.5 text-primary-foreground' : 'mr-auto max-w-[96%] rounded-xl bg-slate-100 p-2.5'} key={message.id}>
             {message.contextLabel ? <p className="mb-1 text-[11px] opacity-70">{message.contextLabel}</p> : null}
@@ -761,7 +809,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
         ))}
       </div>
 
-      <footer className="border-t p-3">
+      <footer className={isMobileViewport && !isMobileChatExpanded ? 'hidden' : 'border-t p-3'}>
         <textarea
           className={`max-h-48 min-h-20 w-full resize-y rounded-xl border bg-slate-50 p-2.5 outline-none focus:border-primary ${fontSizeStyle.textarea}`}
           disabled={isThinking}
@@ -782,7 +830,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
           {isThinking ? 'Reader agent is working...' : 'Send to reader agent'}
         </button>
       </footer>
-      {(
+      {!isMobileViewport && (
         [
           ['top', 'left-6 right-6 top-0 h-3 cursor-ns-resize'],
           ['right', 'bottom-6 right-0 top-6 w-3 cursor-ew-resize'],
