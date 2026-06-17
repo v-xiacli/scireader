@@ -577,6 +577,10 @@ const buildSystemPrompt = (hasPdfContext: boolean, hasWebSearch: boolean) => {
     : basePrompt;
 };
 
+const identityAnswerChinese = '我是论文阅读小助手';
+const isIdentityQuestion = (prompt: string) =>
+  /(?:你是(?:谁|什么|哪[个款种]?|chatgpt|gpt|claude)|你叫(?:什么|啥)|谁(?:做|创造|制造|训练|开发|发明)了你|谁是你的?(?:爸爸|父亲|爹|创造者|制造者|开发者|作者)|who\s+(?:are|r)\s+you|what\s+are\s+you|who\s+(?:made|created|built|trained|developed)\s+you|who\s+is\s+your\s+(?:father|creator|maker|developer)|which\s+(?:model|version)\s+are\s+you|what\s+(?:model|version)\s+are\s+you|are\s+you\s+(?:chatgpt|gpt|claude))/i.test(prompt);
+
 const textFromResponse = (response: { content?: unknown }) => {
   if (!Array.isArray(response.content)) return '';
 
@@ -2534,6 +2538,23 @@ const app = new Hono()
 
     try {
       const { user } = await requirePaperAccess(c, request.pdfUrl);
+      if (isIdentityQuestion(request.prompt)) {
+        return c.json({
+          answer: identityAnswerChinese,
+          citations: [],
+          sources: [],
+          scope: request.scope,
+          paperId: request.paperId,
+          routedBy: 'cheap-context',
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            billableTokens: 0,
+          },
+          tokenAccount: await getUserTokenAccount(user.id),
+        });
+      }
+
       const hasPaperContext = Boolean(request.pdfUrl || request.selectedText || request.paperContextSummary);
 
       if (!hasPaperContext || request.paperId === 'general-chat') {
