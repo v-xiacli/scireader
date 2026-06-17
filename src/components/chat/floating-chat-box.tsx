@@ -89,43 +89,43 @@ const chatFontSizeOrder: ChatFontSize[] = ['xs', 'small', 'medium', 'large', 'xl
 const chatFontSizeStyles: Record<ChatFontSize, { label: string; body: string; h1: string; h2: string; h3: string; textarea: string }> = {
   xs: {
     label: '1',
-    body: 'text-[11px] leading-4',
-    h1: 'text-xs',
-    h2: 'text-xs',
-    h3: 'text-[11px]',
-    textarea: 'text-xs',
-  },
-  small: {
-    label: '2',
-    body: 'text-xs leading-5',
-    h1: 'text-sm',
-    h2: 'text-sm',
-    h3: 'text-xs',
-    textarea: 'text-sm',
-  },
-  medium: {
-    label: '3',
     body: 'text-sm leading-6',
     h1: 'text-base',
     h2: 'text-base',
     h3: 'text-sm',
     textarea: 'text-sm',
   },
-  large: {
-    label: '4',
+  small: {
+    label: '2',
     body: 'text-base leading-7',
     h1: 'text-lg',
     h2: 'text-lg',
     h3: 'text-base',
     textarea: 'text-base',
   },
-  xl: {
-    label: '5',
+  medium: {
+    label: '3',
     body: 'text-lg leading-8',
     h1: 'text-xl',
     h2: 'text-xl',
     h3: 'text-lg',
     textarea: 'text-lg',
+  },
+  large: {
+    label: '4',
+    body: 'text-xl leading-9',
+    h1: 'text-2xl',
+    h2: 'text-2xl',
+    h3: 'text-xl',
+    textarea: 'text-xl',
+  },
+  xl: {
+    label: '5',
+    body: 'text-2xl leading-10',
+    h1: 'text-3xl',
+    h2: 'text-3xl',
+    h3: 'text-2xl',
+    textarea: 'text-2xl',
   },
 };
 
