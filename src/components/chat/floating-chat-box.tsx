@@ -209,6 +209,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const [isThinking, setIsThinking] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [isMobileChatExpanded, setIsMobileChatExpanded] = useState(false);
+  const [isMobilePortrait, setIsMobilePortrait] = useState(false);
+  const [isPortraitHintDismissed, setIsPortraitHintDismissed] = useState(false);
   const [chatFontSize, setChatFontSize] = useState<ChatFontSize>(initialFontSize);
   const [paperContextSummary, setPaperContextSummary] = useState('');
   const [summaryProgress, setSummaryProgress] = useState<SummaryProgress | null>(null);
@@ -242,14 +244,24 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
 
   useEffect(() => {
     const updateViewportMode = () => {
-      setIsMobileViewport(window.innerWidth < mobileBreakpoint);
+      const nextIsMobileViewport = window.innerWidth < mobileBreakpoint;
+      setIsMobileViewport(nextIsMobileViewport);
+      setIsMobilePortrait(nextIsMobileViewport && window.innerHeight > window.innerWidth);
     };
 
     updateViewportMode();
     window.addEventListener('resize', updateViewportMode);
+    window.addEventListener('orientationchange', updateViewportMode);
 
-    return () => window.removeEventListener('resize', updateViewportMode);
+    return () => {
+      window.removeEventListener('resize', updateViewportMode);
+      window.removeEventListener('orientationchange', updateViewportMode);
+    };
   }, []);
+
+  useEffect(() => {
+    if (!isMobilePortrait) setIsPortraitHintDismissed(false);
+  }, [isMobilePortrait]);
 
   useEffect(() => {
     console.info('Floating chat mounted/rendered.', {
@@ -758,6 +770,20 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
           </div>
         </div>
       </header>
+
+      {isMobilePortrait && !isPortraitHintDismissed ? (
+        <div className="absolute inset-x-3 top-16 z-30 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 shadow-lg">
+          <p className="font-semibold">建议横屏阅读</p>
+          <p className="mt-1 text-xs leading-5 text-amber-800">手机竖屏空间太窄，横屏更适合一边看 PDF、一边展开聊天。</p>
+          <button
+            className="mt-2 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white"
+            onClick={() => setIsPortraitHintDismissed(true)}
+            type="button"
+          >
+            继续竖屏
+          </button>
+        </div>
+      ) : null}
 
       {isMobileViewport && !isMobileChatExpanded ? null : summaryProgress ? (
         <div className="border-b bg-amber-50 px-3 py-2 text-xs text-amber-900">
