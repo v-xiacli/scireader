@@ -921,6 +921,33 @@ const askClaude = async (request: z.infer<typeof readerRequestSchema>, forcedMod
   }
 };
 
+const askGeneralChat = async (request: z.infer<typeof readerRequestSchema>) => {
+  const modelSelection = selectCheapTriageModel();
+  const client = createAnthropicClient(modelSelection.target);
+  const response = await client.messages.create({
+    model: modelSelection.model,
+    max_tokens: 4000,
+    system:
+      'You are SCIReader general chat assistant. Identity rule: if the user asks whether you are ChatGPT, which model/version you are, who made you, or asks similar identity/provider questions, answer in Chinese: "我是论文阅读小助手，不是你说的其他大模型。" You may add that you can help read papers and answer general questions inside SCIReader, but do not claim to be ChatGPT, GPT-4, GPT-5, Claude, Anthropic, OpenAI, or any specific model/provider. For other questions, answer directly in Chinese unless the user asks for another language. The user may be on the home page or may ask a question unrelated to the current paper. Do not refuse just because there is no PDF context. If the user asks about the current paper but no paper context is provided, say you need a paper/PDF to answer paper-specific questions.',
+    messages: [
+      ...(request.conversationHistory ?? [])
+        .slice(-8)
+        .map((message): Anthropic.MessageParam => ({
+          role: message.role,
+          content: message.content.slice(0, 4000),
+        })),
+      { role: 'user', content: request.prompt },
+    ],
+  });
+
+  return {
+    answer: textFromResponse(response),
+    model: modelSelection.model,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+  };
+};
+
 const generateImage = async (request: z.infer<typeof imageRequestSchema>) => {
   const modelSelection = selectImageModel(request);
   const client = createAnthropicClient(modelSelection.target);
@@ -1632,7 +1659,7 @@ const retrieveAnswerFromSharedPaperMemory = async (
     model: modelSelection.model,
     max_tokens: 4000,
     system:
-      'You are SCIReader memory retrieval and routing. Search saved Azure Blob records for this exact paper key. Records may include the cached paper brief, shared dialog history, and external evaluations made by other papers in their Introductions. Your primary job is to decide whether the saved records are enough, or whether GPT-5.5 must read the PDF again. Be conservative. You may answer directly only when the saved records contain explicit evidence that directly answers the user question. Route to GPT-5.5 when the user asks for new expert judgment, critique, novelty assessment, credibility assessment, causal explanation, comparison, methodology interpretation, or anything that requires checking original PDF evidence beyond the saved records. Do not invent new paper analysis. If using external evaluations, clearly state in Chinese that they are other papers\' Introduction evaluations, not conclusions from reading the target paper itself. Output only JSON.',
+      'You are SCIReader memory retrieval and routing. Search saved Azure Blob records for this exact paper key. Records may include the cached paper brief, shared dialog history, and external evaluations made by other papers in their Introductions. Your primary job is to decide whether the saved records are enough, whether GPT-5.5 must read the PDF again, or whether the user is simply asking a general question unrelated to the paper. Identity rule: if the user asks whether the assistant is ChatGPT, which model/version it is, who made it, or asks similar identity/provider questions, set sufficient=true and answerDraft exactly in Chinese: "我是论文阅读小助手，不是你说的其他大模型。" Do not route identity questions to GPT-5.5. Be conservative for paper analysis. You may answer directly when the saved records contain explicit evidence that directly answers the paper question. If the question is clearly unrelated to the paper, answer it as a normal general chat assistant in Chinese and set sufficient=true; do not refuse and do not say the paper lacks evidence. Route to GPT-5.5 when the user asks for new paper-specific expert judgment, critique, novelty assessment, credibility assessment, causal explanation, comparison, methodology interpretation, or anything that requires checking original PDF evidence beyond the saved records. Do not invent new paper analysis. If using external evaluations, clearly state in Chinese that they are other papers\' Introduction evaluations, not conclusions from reading the target paper itself. Output only JSON.',
     messages: [
       {
         role: 'user',
@@ -1659,6 +1686,8 @@ Return JSON exactly in this shape:
 
 Rules:
 - Think step by step internally before producing JSON: What exact claim is the user asking for? Is that claim already explicitly supported by saved records? Would a careful reviewer need to inspect the PDF text, figures, equations, methods, or tables?
+- For identity/provider/model-version questions, sufficient=true and answerDraft must be exactly: 我是论文阅读小助手，不是你说的其他大模型。
+- If the user is asking a general non-paper question, such as coding, writing, translation, brainstorming, general knowledge, or app usage, set sufficient=true and answer normally in Chinese. Do not mention lack of paper evidence.
 - sufficient=true only for direct factual recall or simple restatement when saved records explicitly contain the needed answer.
 - sufficient=false for new judgments, critique, novelty assessment, credibility assessment, "why" explanations, interpretation of method/model design, comparison, or when the saved records are only partially relevant.
 - answerDraft must be Chinese and must mention when it is based on saved records if appropriate.
@@ -2505,6 +2534,40 @@ const app = new Hono()
 
     try {
       const { user } = await requirePaperAccess(c, request.pdfUrl);
+      const hasPaperContext = Boolean(request.pdfUrl || request.selectedText || request.paperContextSummary);
+
+      if (!hasPaperContext || request.paperId === 'general-chat') {
+        const result = await askGeneralChat(request);
+        const billableTokens = getBillableTokens(result.inputTokens, result.outputTokens, result.model);
+        const tokenAccount = await recordUserTokenUsage({
+          userId: user.id,
+          paperId: request.paperId,
+          action: 'ask:general-chat',
+          model: result.model,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          billableTokens,
+          metadata: {
+            routedBy: 'general-chat',
+          },
+        });
+
+        return c.json({
+          answer: result.answer,
+          citations: [],
+          sources: [],
+          scope: request.scope,
+          paperId: request.paperId,
+          routedBy: 'cheap-context',
+          usage: {
+            inputTokens: result.inputTokens,
+            outputTokens: result.outputTokens,
+            billableTokens,
+          },
+          tokenAccount,
+        });
+      }
+
       const paperKey = getPaperIdentitySlug(request);
       const summaryStoragePath = getPaperSummaryStoragePath(request, resolveUploadedPdfStoragePath(request.pdfUrl));
       const cachedSummary = (await downloadTextIfExists(summaryStoragePath)) ?? '';
