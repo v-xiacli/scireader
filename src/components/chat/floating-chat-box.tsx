@@ -389,27 +389,6 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     throw new Error('Paper summary is still processing. Please reopen this paper in a moment.');
   }, [paperId, paperPdfUrl, paperTitle, readingMode, readingModePrompt, detailedReport, paper?.authors, paper?.journal, paper?.year]);
 
-  const generateImage = useCallback(
-    async (prompt: string) => {
-      const response = await fetch('/api/reader-agent/image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt,
-          paperId,
-          title: paperTitle,
-          selectedText: selectedText?.text,
-        }),
-      });
-      const result = await response.json();
-
-      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Image generation failed.');
-
-      return result as { answer: string; imageUrl?: string; imageBase64?: string; prompt: string };
-    },
-    [paperId, paperTitle, selectedText?.text],
-  );
-
   useEffect(() => {
     if (!paperId || !paperPdfUrl) {
       setPaperContextSummary('');
@@ -618,7 +597,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
       id: crypto.randomUUID(),
       role: 'user',
       content: trimmed,
-      contextLabel: isImageMode ? 'Image generation' : selectedText ? `Selection on page ${selectedText.pageNumber ?? '?'}` : hasPaper ? 'Whole paper' : 'General chat',
+      contextLabel: selectedText ? `Selection on page ${selectedText.pageNumber ?? '?'}` : hasPaper ? 'Whole paper' : 'General chat',
     };
     const loadingId = crypto.randomUUID();
 
@@ -636,42 +615,21 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     setMessages((current) => [
       ...current,
       userMessage,
-      { id: loadingId, role: 'assistant', content: isImageMode ? 'Generating image...' : 'Analyzing...' },
+      { id: loadingId, role: 'assistant', content: 'Analyzing...' },
     ]);
     setInput('');
     setIsThinking(true);
 
     try {
-      if (isImageMode) {
-        const result = await generateImage(trimmed);
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === loadingId
-              ? {
-                  ...message,
-                  content: result.answer,
-                  imageUrl: result.imageUrl,
-                  imageBase64: result.imageBase64,
-                  imageAlt: result.prompt,
-                }
-              : message,
-          ),
-        );
-      } else {
-        const result = await askReaderAgent(trimmed, selectedText ? 'selected-text' : 'whole-paper');
-        const usageLabel = result.usage?.inputTokens
-          ? ` · ${result.usage.inputTokens.toLocaleString()} in / ${(result.usage.outputTokens ?? 0).toLocaleString()} out`
-          : '';
-        const contextLabel = result.routedBy === 'cheap-context' ? `Cheap context${usageLabel}` : result.routedBy === 'expensive-reader' ? `Expensive reader${usageLabel}` : undefined;
+      const result = await askReaderAgent(trimmed, selectedText ? 'selected-text' : 'whole-paper');
+      const usageLabel = result.usage?.inputTokens ? ` · ${result.usage.inputTokens.toLocaleString()} in / ${(result.usage.outputTokens ?? 0).toLocaleString()} out` : '';
+      const contextLabel = result.routedBy === 'cheap-context' ? `Cheap context${usageLabel}` : result.routedBy === 'expensive-reader' ? `Expensive reader${usageLabel}` : undefined;
 
-        setMessages((current) => current.map((message) => (message.id === loadingId ? { ...message, content: result.answer, contextLabel } : message)));
-      }
+      setMessages((current) => current.map((message) => (message.id === loadingId ? { ...message, content: result.answer, contextLabel } : message)));
     } catch (error) {
       setMessages((current) =>
         current.map((message) =>
-          message.id === loadingId
-            ? { ...message, content: error instanceof Error ? error.message : isImageMode ? 'Image generation failed.' : 'Reader agent failed.' }
-            : message,
+          message.id === loadingId ? { ...message, content: error instanceof Error ? error.message : 'Reader agent failed.' } : message,
         ),
       );
     } finally {
@@ -699,23 +657,19 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
             <p className="truncate text-[11px] text-muted-foreground">{paper?.title ?? 'Ask without opening a paper'}</p>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-1">
-            <button className="rounded-lg border p-1.5 text-slate-700 hover:bg-slate-50 disabled:opacity-40" disabled={!hasPaper} title="Paper context" type="button">
-              <FileSearch className="size-4" />
-            </button>
-            <button className="rounded-lg border p-1.5 text-slate-700 hover:bg-slate-50 disabled:opacity-40" disabled={!selectedText} title="Selected text" type="button">
-              <Quote className="size-4" />
-            </button>
             <button
-              className={isImageMode ? 'rounded-lg border border-primary bg-primary/10 p-1.5 text-primary' : 'rounded-lg border p-1.5 text-slate-700 hover:bg-slate-50'}
-              onClick={() => setIsImageMode((current) => !current)}
-              title="Image mode"
+              className="inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              onClick={(event) => {
+                event.stopPropagation();
+                setChatFontSize((current) => chatFontSizeOrder[(chatFontSizeOrder.indexOf(current) + 1) % chatFontSizeOrder.length]);
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+              title="调整聊天字体大小"
               type="button"
             >
-              <ImageIcon className="size-4" />
+              <Type className="size-4" />
+              {fontSizeStyle.label}
             </button>
-            <div className="rounded-lg bg-primary/10 p-1.5 text-primary">
-              <Bot className="size-4" />
-            </div>
           </div>
         </div>
       </header>
@@ -733,7 +687,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
         </div>
       ) : null}
 
-      {selectedText && !isImageMode ? (
+      {selectedText ? (
         <div className="border-b bg-blue-50 p-3 text-xs">
           <p className="font-medium text-blue-900">Selected text context</p>
           <p className="mt-1 line-clamp-3 text-blue-800">{selectedText.text}</p>
@@ -747,7 +701,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
             {message.imageUrl || message.imageBase64 ? (
               <img alt={message.imageAlt ?? 'Generated image'} className="mb-2 max-h-80 w-full rounded-lg object-contain" src={message.imageUrl ?? message.imageBase64} />
             ) : null}
-            <div className="max-w-none break-words text-xs leading-5">
+            <div className={`max-w-none break-words ${fontSizeStyle.body}`}>
               <ReactMarkdown
                 remarkPlugins={[remarkMath]}
                 rehypePlugins={[rehypeKatex]}
@@ -756,9 +710,9 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
                   li: ({ children }) => <li className="my-0.5 pl-0">{children}</li>,
                   ul: ({ children }) => <ul className="my-1 list-disc space-y-0 pl-4">{children}</ul>,
                   ol: ({ children }) => <ol className="my-1 list-decimal space-y-0 pl-4">{children}</ol>,
-                  h1: ({ children }) => <h1 className="my-1 text-sm font-semibold">{children}</h1>,
-                  h2: ({ children }) => <h2 className="my-1 text-sm font-semibold">{children}</h2>,
-                  h3: ({ children }) => <h3 className="my-1 text-xs font-semibold">{children}</h3>,
+                  h1: ({ children }) => <h1 className={`my-1 font-semibold ${fontSizeStyle.h1}`}>{children}</h1>,
+                  h2: ({ children }) => <h2 className={`my-1 font-semibold ${fontSizeStyle.h2}`}>{children}</h2>,
+                  h3: ({ children }) => <h3 className={`my-1 font-semibold ${fontSizeStyle.h3}`}>{children}</h3>,
                   strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
                   div: ({ children, className }) => <div className={className?.includes('math-display') ? `${className} overflow-x-auto py-1` : className}>{children}</div>,
                 }}
@@ -772,13 +726,13 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
 
       <footer className="border-t p-3">
         <textarea
-          className="max-h-48 min-h-20 w-full resize-y rounded-xl border bg-slate-50 p-2.5 text-sm outline-none focus:border-primary"
+          className={`max-h-48 min-h-20 w-full resize-y rounded-xl border bg-slate-50 p-2.5 outline-none focus:border-primary ${fontSizeStyle.textarea}`}
           disabled={isThinking}
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) void sendMessage();
           }}
-          placeholder={isImageMode ? 'Describe the image you want generated...' : 'Ask about the paper, selected text, methods, or citations...'}
+          placeholder="Ask about the paper, selected text, methods, or citations..."
           value={input}
         />
         <button
@@ -788,7 +742,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
           type="button"
         >
           {isThinking ? <Loader2 className="size-4 animate-spin" /> : <CornerDownLeft className="size-4" />}
-          {isThinking ? (isImageMode ? 'Image agent is working...' : 'Reader agent is working...') : isImageMode ? 'Generate image' : 'Send to reader agent'}
+          {isThinking ? 'Reader agent is working...' : 'Send to reader agent'}
         </button>
       </footer>
       {(
