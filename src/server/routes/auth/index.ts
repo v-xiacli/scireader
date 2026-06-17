@@ -30,6 +30,7 @@ const viewerPreferencesSchema = z.object({
   pdfZoom: z.number().min(25).max(500).optional(),
   chatPosition: z.object({ x: z.number(), y: z.number() }).optional(),
   chatSize: z.object({ width: z.number(), height: z.number() }).optional(),
+  chatFontSize: z.enum(['small', 'medium', 'large']).optional(),
   readingMode: z.enum(['reviewer', 'reader']).optional(),
   detailedReport: z.boolean().optional(),
 });

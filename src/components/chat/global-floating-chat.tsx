@@ -9,6 +9,7 @@ type ViewerPreferences = {
   pdfZoom?: number;
   chatPosition?: { x: number; y: number };
   chatSize?: { width: number; height: number };
+  chatFontSize?: 'small' | 'medium' | 'large';
 };
 
 export const GlobalFloatingChat = () => {
@@ -42,7 +43,7 @@ export const GlobalFloatingChat = () => {
   }, []);
 
   const saveLayout = useCallback(
-    (layout: { position: { x: number; y: number }; size: { width: number; height: number } }) => {
+    (layout: { position: { x: number; y: number }; size: { width: number; height: number }; fontSize?: 'small' | 'medium' | 'large' }) => {
       if (!isAuthenticated) return;
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
 
@@ -50,7 +51,7 @@ export const GlobalFloatingChat = () => {
         void fetch('/api/auth/viewer-preferences', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chatPosition: layout.position, chatSize: layout.size }),
+          body: JSON.stringify({ chatPosition: layout.position, chatSize: layout.size, chatFontSize: layout.fontSize }),
         });
       }, 400);
     },
@@ -66,6 +67,7 @@ export const GlobalFloatingChat = () => {
       hasPreferences: Boolean(preferences),
       chatPosition: preferences?.chatPosition,
       chatSize: preferences?.chatSize,
+      chatFontSize: preferences?.chatFontSize,
     });
   }, [isSessionLoading, isAuthenticated, paper, preferences]);
 
@@ -80,5 +82,14 @@ export const GlobalFloatingChat = () => {
 
   console.info('Global floating chat rendering.', { paperId: paper?.id, isAuthenticated });
 
-  return <FloatingChatBox initialPosition={preferences?.chatPosition} initialSize={preferences?.chatSize} onLayoutChange={saveLayout} paper={paper ?? undefined} selectedText={selectedText} />;
+  return (
+    <FloatingChatBox
+      initialFontSize={preferences?.chatFontSize}
+      initialPosition={preferences?.chatPosition}
+      initialSize={preferences?.chatSize}
+      onLayoutChange={saveLayout}
+      paper={paper ?? undefined}
+      selectedText={selectedText}
+    />
+  );
 };

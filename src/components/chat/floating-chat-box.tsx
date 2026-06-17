@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { Bot, CornerDownLeft, FileSearch, ImageIcon, Loader2, Quote } from 'lucide-react';
+import { CornerDownLeft, Loader2, Type } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
 import rehypeKatex from 'rehype-katex';
 import ReactMarkdown from 'react-markdown';
@@ -14,7 +14,8 @@ interface FloatingChatBoxProps {
   selectedText?: PaperSelection | null;
   initialPosition?: { x: number; y: number };
   initialSize?: { width: number; height: number };
-  onLayoutChange?: (layout: { position: { x: number; y: number }; size: { width: number; height: number } }) => void;
+  initialFontSize?: ChatFontSize;
+  onLayoutChange?: (layout: { position: { x: number; y: number }; size: { width: number; height: number }; fontSize: ChatFontSize }) => void;
 }
 
 const defaultPosition = { x: 0, y: 96 };
@@ -23,6 +24,7 @@ const minSize = { width: 320, height: 360 };
 const edgePadding = 8;
 
 type ResizeHandle = 'top' | 'right' | 'bottom' | 'left' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+type ChatFontSize = 'small' | 'medium' | 'large';
 type ConversationTurn = Pick<ChatMessage, 'role' | 'content'>;
 type StoredHistoryTurn = ConversationTurn & {
   createdAt: string;
@@ -81,6 +83,34 @@ For a whole-paper summary, produce a compact reading note with these five short 
 5. Limits: what is not proven, what operating range is narrow, and what should be checked before reuse.
 
 Rules: no section-by-section narration; no broad literature essay; explain equations and figures only when they change the technical interpretation; keep the whole report short, practical, and anchored to paper text.`,
+};
+
+const chatFontSizeOrder: ChatFontSize[] = ['small', 'medium', 'large'];
+const chatFontSizeStyles: Record<ChatFontSize, { label: string; body: string; h1: string; h2: string; h3: string; textarea: string }> = {
+  small: {
+    label: '小',
+    body: 'text-xs leading-5',
+    h1: 'text-sm',
+    h2: 'text-sm',
+    h3: 'text-xs',
+    textarea: 'text-sm',
+  },
+  medium: {
+    label: '中',
+    body: 'text-sm leading-6',
+    h1: 'text-base',
+    h2: 'text-base',
+    h3: 'text-sm',
+    textarea: 'text-sm',
+  },
+  large: {
+    label: '大',
+    body: 'text-base leading-7',
+    h1: 'text-lg',
+    h2: 'text-lg',
+    h3: 'text-base',
+    textarea: 'text-base',
+  },
 };
 
 const buildConversationHistory = (messages: ChatMessage[]): ConversationTurn[] =>
@@ -144,12 +174,13 @@ const clampLayout = (position: { x: number; y: number }, size: { width: number; 
   };
 };
 
-export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosition, initialSize, onLayoutChange }: FloatingChatBoxProps) => {
+export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosition, initialSize, initialFontSize = 'small', onLayoutChange }: FloatingChatBoxProps) => {
   const dragOffsetRef = useRef(defaultPosition);
   const resizeStartRef = useRef({ x: 0, y: 0, width: defaultSize.width, height: defaultSize.height, left: defaultPosition.x, top: defaultPosition.y });
   const resizeHandleRef = useRef<ResizeHandle>('bottom-right');
   const appliedInitialPositionKeyRef = useRef('');
   const appliedInitialSizeKeyRef = useRef('');
+  const appliedInitialFontSizeRef = useRef<ChatFontSize | null>(null);
   const sizeRef = useRef(initialSize ?? defaultSize);
   const [messages, setMessages] = useState<ChatMessage[]>(mockMessages);
   const [input, setInput] = useState('');
@@ -158,7 +189,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
-  const [isImageMode, setIsImageMode] = useState(false);
+  const [chatFontSize, setChatFontSize] = useState<ChatFontSize>(initialFontSize);
   const [paperContextSummary, setPaperContextSummary] = useState('');
   const [summaryProgress, setSummaryProgress] = useState<SummaryProgress | null>(null);
   const [isSummarizing, setIsSummarizing] = useState(false);
@@ -170,6 +201,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const readingModePrompt = paperReadingPrompts[readingMode];
   const detailedReport = paper?.detailedReport ?? false;
   const readingModeLabel = `${readingMode === 'reviewer' ? '审稿人模式' : '读者模式'} · ${detailedReport ? '详细' : '极简'}`;
+  const fontSizeStyle = chatFontSizeStyles[chatFontSize];
 
   useEffect(() => {
     sizeRef.current = size;
@@ -183,9 +215,17 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
       size,
       initialPosition,
       initialSize,
+      initialFontSize,
+      chatFontSize,
       viewport: typeof window === 'undefined' ? null : { width: window.innerWidth, height: window.innerHeight },
     });
-  }, [hasPaper, paperId, position, size, initialPosition, initialSize]);
+  }, [hasPaper, paperId, position, size, initialPosition, initialSize, initialFontSize, chatFontSize]);
+
+  useEffect(() => {
+    if (appliedInitialFontSizeRef.current === initialFontSize) return;
+    appliedInitialFontSizeRef.current = initialFontSize;
+    setChatFontSize(initialFontSize);
+  }, [initialFontSize]);
 
   useEffect(() => {
     if (!initialPosition) return;
@@ -219,8 +259,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   }, [initialSize, position]);
 
   useEffect(() => {
-    onLayoutChange?.({ position, size });
-  }, [onLayoutChange, position, size]);
+    onLayoutChange?.({ position, size, fontSize: chatFontSize });
+  }, [chatFontSize, onLayoutChange, position, size]);
 
   useEffect(() => {
     const placeOnRight = () => {
