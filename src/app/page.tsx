@@ -47,9 +47,11 @@ const HomePage = () => {
   const [authMode, setAuthMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [verificationCode, setVerificationCode] = useState('');
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
+  const [isSendingVerificationCode, setIsSendingVerificationCode] = useState(false);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
@@ -159,7 +161,7 @@ const HomePage = () => {
       const response = await fetch(`/api/auth/${authMode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(authMode === 'signup' ? { email, password, verificationCode } : { email, password }),
       });
       const result = await response.json();
 
@@ -172,6 +174,7 @@ const HomePage = () => {
       await loadUploadedPapers();
       setAuthMessage(`${authMode === 'signup' ? 'Account created' : 'Logged in'} as ${result.user.email}.`);
       setPassword('');
+      setVerificationCode('');
       setUploadMessage(null);
     } catch (error) {
       if (authMode === 'login') {
@@ -181,6 +184,28 @@ const HomePage = () => {
       setAuthMessage(error instanceof Error ? error.message : 'Authentication failed.');
     } finally {
       setIsAuthLoading(false);
+    }
+  };
+
+  const handleSendVerificationCode = async () => {
+    setIsSendingVerificationCode(true);
+    setAuthMessage(null);
+
+    try {
+      const response = await fetch('/api/auth/send-verification-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const result = await response.json();
+
+      if (!response.ok) throw new Error(result.error ?? result.message ?? 'Could not send verification code.');
+
+      setAuthMessage('Verification code sent. Please check your email.');
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : 'Could not send verification code.');
+    } finally {
+      setIsSendingVerificationCode(false);
     }
   };
 
@@ -357,7 +382,7 @@ const HomePage = () => {
               <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
                 <WalletCards className="size-4" /> Token balance
               </div>
-              <p className="mt-2 text-2xl font-semibold">{tokenAccount ? tokenAccount.tokenAvailable.toLocaleString() : '1,000,000'}</p>
+              <p className="mt-2 text-2xl font-semibold">{tokenAccount ? tokenAccount.tokenAvailable.toLocaleString() : '10,000'}</p>
               <p className="mt-1 max-w-44 text-xs text-muted-foreground">
                 {tokenAccount ? `${tokenAccount.tokenUsed.toLocaleString()} used / ${tokenAccount.tokenBalance.toLocaleString()} total` : 'Default account quota'}
               </p>
@@ -405,9 +430,31 @@ const HomePage = () => {
                   type="password"
                   value={password}
                 />
+                {authMode === 'signup' ? (
+                  <>
+                    <div className="flex gap-2 md:w-64">
+                      <input
+                        className="min-w-0 flex-1 rounded-xl border px-4 py-2 text-sm"
+                        inputMode="numeric"
+                        maxLength={6}
+                        onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                        placeholder="6-digit code"
+                        value={verificationCode}
+                      />
+                      <button
+                        className="rounded-xl border px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-70"
+                        disabled={isSendingVerificationCode || !email}
+                        onClick={() => void handleSendVerificationCode()}
+                        type="button"
+                      >
+                        {isSendingVerificationCode ? 'Sending...' : 'Send'}
+                      </button>
+                    </div>
+                  </>
+                ) : null}
                 <button
                   className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
-                  disabled={isAuthLoading || !email || !password}
+                  disabled={isAuthLoading || !email || !password || (authMode === 'signup' && verificationCode.length !== 6)}
                   onClick={() => void handleAuth()}
                   type="button"
                 >

@@ -26,6 +26,14 @@ const credentialsSchema = z.object({
   password: z.string().min(8).max(128),
 });
 
+const signupSchema = credentialsSchema.extend({
+  verificationCode: z.string().trim().regex(/^\d{6}$/),
+});
+
+const emailVerificationRequestSchema = z.object({
+  email: z.string().trim().email().max(254),
+});
+
 const viewerPreferencesSchema = z.object({
   pdfZoom: z.number().min(25).max(500).optional(),
   chatPosition: z.object({ x: z.number(), y: z.number() }).optional(),
@@ -74,6 +82,80 @@ const verifyPassword = async (password: string, storedHash: string) => {
 };
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
+
+const getVerificationCodeHash = (email: string, code: string, purpose = 'signup') => hashToken(`${purpose}:${email}:${code}`);
+const createVerificationCode = () => String(100000 + (randomBytes(4).readUInt32BE(0) % 900000));
+const verificationCodeMaxAgeSeconds = 10 * 60;
+const verificationCodeMaxAttempts = 5;
+
+const sendVerificationEmail = async (email: string, code: string) => {
+  const resendApiKey = process.env.RESEND_API_KEY?.trim();
+  const from = process.env.EMAIL_FROM?.trim() || process.env.RESEND_FROM_EMAIL?.trim() || 'SCIReader <onboarding@resend.dev>';
+
+  if (!resendApiKey) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Email service is not configured.');
+    }
+
+    console.warn('[auth:email-verification] RESEND_API_KEY not configured; development verification code', { email, code });
+    return;
+  }
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${resendApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from,
+      to: email,
+      subject: 'SCIReader verification code',
+      text: `Your SCIReader verification code is ${code}. It expires in 10 minutes.`,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Could not send verification email: ${response.status} ${body}`.trim());
+  }
+};
+
+const verifySignupCode = async (email: string, code: string) => {
+  const rows = (await getSql()`
+    SELECT id, code_hash, attempts
+    FROM email_verification_codes
+    WHERE email = ${email}
+      AND purpose = 'signup'
+      AND consumed_at IS NULL
+      AND expires_at > now()
+    ORDER BY created_at DESC
+    LIMIT 1
+  `) as Array<{ id: string; code_hash: string; attempts: number }>;
+  const latest = rows[0];
+
+  if (!latest) throw new Error('Verification code is missing or expired.');
+  if (Number(latest.attempts) >= verificationCodeMaxAttempts) throw new Error('Too many verification attempts. Please request a new code.');
+
+  const expected = Buffer.from(latest.code_hash, 'hex');
+  const received = Buffer.from(getVerificationCodeHash(email, code), 'hex');
+  const matched = expected.length === received.length && timingSafeEqual(expected, received);
+
+  if (!matched) {
+    await getSql()`
+      UPDATE email_verification_codes
+      SET attempts = attempts + 1
+      WHERE id = ${latest.id}
+    `;
+    throw new Error('Invalid verification code.');
+  }
+
+  await getSql()`
+    UPDATE email_verification_codes
+    SET consumed_at = now()
+    WHERE id = ${latest.id}
+  `;
+};
 
 const getPreferencePath = (userId: string) => `user-preferences/${userId}.md`;
 const getUploadedPapersPath = (userId: string) => `user-papers/${userId}.md`;
@@ -253,17 +335,64 @@ const app = new Hono()
 
     return c.json({ papers: await removeUploadedPaper(user.id, c.req.valid('json').filePath) });
   })
-  .post('/signup', zValidator('json', credentialsSchema), async (c) => {
-    const { email, password } = c.req.valid('json');
+  .post('/send-verification-code', zValidator('json', emailVerificationRequestSchema), async (c) => {
+    const { email } = c.req.valid('json');
     const normalizedEmail = email.toLowerCase();
 
     try {
       await ensureAuthTables();
 
+      const existingUsers = (await getSql()`
+        SELECT id
+        FROM users
+        WHERE email = ${normalizedEmail}
+        LIMIT 1
+      `) as Array<{ id: string }>;
+
+      if (existingUsers[0]) {
+        return c.json({ error: 'An account with this email already exists.' }, 409);
+      }
+
+      const recentCodes = (await getSql()`
+        SELECT COUNT(*)::int AS count
+        FROM email_verification_codes
+        WHERE email = ${normalizedEmail}
+          AND purpose = 'signup'
+          AND created_at > now() - INTERVAL '60 seconds'
+      `) as Array<{ count: number }>;
+
+      if (Number(recentCodes[0]?.count ?? 0) > 0) {
+        return c.json({ error: 'Please wait before requesting another verification code.' }, 429);
+      }
+
+      const code = createVerificationCode();
+      const expiresAt = new Date(Date.now() + verificationCodeMaxAgeSeconds * 1000);
+
+      await getSql()`
+        INSERT INTO email_verification_codes (email, purpose, code_hash, expires_at)
+        VALUES (${normalizedEmail}, 'signup', ${getVerificationCodeHash(normalizedEmail, code)}, ${expiresAt.toISOString()})
+      `;
+
+      await sendVerificationEmail(normalizedEmail, code);
+
+      return c.json({ sent: true, expiresInSeconds: verificationCodeMaxAgeSeconds });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not send verification code.';
+      return c.json({ error: 'Could not send verification code.', message }, 500);
+    }
+  })
+  .post('/signup', zValidator('json', signupSchema), async (c) => {
+    const { email, password, verificationCode } = c.req.valid('json');
+    const normalizedEmail = email.toLowerCase();
+
+    try {
+      await ensureAuthTables();
+      await verifySignupCode(normalizedEmail, verificationCode);
+
       const passwordHash = await hashPassword(password);
       const rows = (await getSql()`
-        INSERT INTO users (email, password_hash)
-        VALUES (${normalizedEmail}, ${passwordHash})
+        INSERT INTO users (email, password_hash, email_verified)
+        VALUES (${normalizedEmail}, ${passwordHash}, true)
         RETURNING id, email, created_at
       `) as Array<{ id: string; email: string; created_at: string }>;
       const token = await createSession(rows[0].id);
@@ -273,6 +402,13 @@ const app = new Hono()
     } catch (error) {
       if (error instanceof Error && error.message.includes('duplicate key')) {
         return c.json({ error: 'An account with this email already exists.' }, 409);
+      }
+
+      if (
+        error instanceof Error &&
+        ['Verification code is missing or expired.', 'Too many verification attempts. Please request a new code.', 'Invalid verification code.'].includes(error.message)
+      ) {
+        return c.json({ error: error.message }, 400);
       }
 
       const message = error instanceof Error ? error.message : 'Signup failed.';

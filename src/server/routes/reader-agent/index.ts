@@ -964,8 +964,8 @@ const generateImage = async (request: z.infer<typeof imageRequestSchema>) => {
   const modelSelection = selectImageModel(request);
   const client = createAnthropicClient(modelSelection.target);
   const context = [
-    request.title ? `论文标题�?{request.title}` : null,
-    request.selectedText ? `选中文本�?{request.selectedText}` : null,
+    request.title ? `Paper title: ${request.title}` : null,
+    request.selectedText ? `Selected text: ${request.selectedText}` : null,
   ]
     .filter(Boolean)
     .join('\n');
@@ -987,6 +987,9 @@ const generateImage = async (request: z.infer<typeof imageRequestSchema>) => {
   return {
     answer,
     prompt: request.prompt,
+    model: modelSelection.model,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
     ...image,
   };
 };
@@ -2908,7 +2911,7 @@ const app = new Hono()
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Reader agent failed.';
-      const status = message === 'Not authenticated.' ? 401 : message === 'You do not have access to this PDF.' ? 403 : 500;
+      const status = message === 'Not authenticated.' ? 401 : message === 'You do not have access to this PDF.' ? 403 : isInsufficientTokenBalanceError(error) ? 402 : 500;
 
       return c.json({ error: 'Reader agent failed.', message }, status);
     }
@@ -2917,13 +2920,39 @@ const app = new Hono()
     const request = c.req.valid('json');
 
     try {
-      const result = await generateImage(request);
+      const { user } = await requirePaperAccess(c);
+      await ensurePositiveTokenBalance(user.id);
 
-      return c.json(result);
+      const result = await generateImage(request);
+      const billableTokens = getBillableTokens(result.inputTokens, result.outputTokens, result.model);
+      const tokenAccount = await recordUserTokenUsage({
+        userId: user.id,
+        paperId: request.paperId,
+        action: 'image:generate',
+        model: result.model,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        billableTokens,
+        metadata: {
+          hasTitle: Boolean(request.title),
+          hasSelectedText: Boolean(request.selectedText),
+        },
+      });
+
+      return c.json({
+        ...result,
+        usage: {
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          billableTokens,
+        },
+        tokenAccount,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Image generation failed.';
+      const status = message === 'Not authenticated.' ? 401 : isInsufficientTokenBalanceError(error) ? 402 : 500;
 
-      return c.json({ error: 'Image generation failed.', message }, 500);
+      return c.json({ error: 'Image generation failed.', message }, status);
     }
   })
   .post('/summarize', zValidator('json', readerRequestSchema), async (c) => {
@@ -2931,6 +2960,8 @@ const app = new Hono()
 
     try {
       const { user } = await requirePaperAccess(c, request.pdfUrl);
+      await ensurePositiveTokenBalance(user.id);
+
       const storagePath = resolveUploadedPdfStoragePath(request.pdfUrl);
       const summaryStoragePath = getPaperSummaryStoragePath(request, storagePath);
       const cachedSummary = await downloadTextIfExists(summaryStoragePath);
@@ -3150,7 +3181,7 @@ const app = new Hono()
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Paper summary failed.';
-      const status = message === 'Not authenticated.' ? 401 : message === 'You do not have access to this PDF.' ? 403 : 500;
+      const status = message === 'Not authenticated.' ? 401 : message === 'You do not have access to this PDF.' ? 403 : isInsufficientTokenBalanceError(error) ? 402 : 500;
 
       console.error('[reader-agent:summarize] request failed', {
         paperId: request.paperId,

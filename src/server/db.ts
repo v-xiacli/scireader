@@ -3,6 +3,8 @@
 let client: ReturnType<typeof neon> | null = null;
 let initialized = false;
 
+export const DEFAULT_TOKEN_BALANCE = 10_000;
+
 export const getSql = () => {
   const databaseUrl = process.env.DATABASE_URL?.trim();
 
@@ -37,8 +39,16 @@ export const ensureAuthTables = async () => {
     )
   `;
 
-  await getSql()`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_balance BIGINT NOT NULL DEFAULT 1000000`;
+  await getSql()`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_balance BIGINT NOT NULL DEFAULT 10000`;
   await getSql()`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_used BIGINT NOT NULL DEFAULT 0`;
+  await getSql()`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false`;
+  await getSql()`ALTER TABLE users ALTER COLUMN token_balance SET DEFAULT 10000`;
+  await getSql()`
+    UPDATE users
+    SET token_balance = 10000,
+        updated_at = now()
+    WHERE token_balance = 1000000
+  `;
 
   await getSql()`
     CREATE TABLE IF NOT EXISTS token_usage_events (
@@ -55,6 +65,21 @@ export const ensureAuthTables = async () => {
     )
   `;
 
+  await getSql()`
+    CREATE TABLE IF NOT EXISTS email_verification_codes (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      email TEXT NOT NULL,
+      purpose TEXT NOT NULL DEFAULT 'signup',
+      code_hash TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      expires_at TIMESTAMPTZ NOT NULL,
+      consumed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+
+  await getSql()`CREATE INDEX IF NOT EXISTS email_verification_codes_email_idx ON email_verification_codes (email, purpose, created_at DESC)`;
+
   initialized = true;
 };
 
@@ -68,7 +93,7 @@ export const getUserTokenAccount = async (userId: string) => {
     LIMIT 1
   `) as Array<{ token_balance: string | number; token_used: string | number }>;
   const row = rows[0];
-  const balance = Number(row?.token_balance ?? 1_000_000);
+  const balance = Number(row?.token_balance ?? DEFAULT_TOKEN_BALANCE);
   const used = Number(row?.token_used ?? 0);
 
   return {
