@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { downloadFileAsAdmin, downloadTextAsAdmin, uploadFileAsAdmin, uploadTextAsAdmin } from '@/lib/firebase/server/storage-admin';
 import { readNeo4j, verifyNeo4jConnection, writeNeo4j } from '@/lib/neo4j';
 import { getUserStoragePrefix } from '@/lib/storage-paths';
-import { recordUserTokenUsage } from '@/server/db';
+import { getUserTokenAccount, recordUserTokenUsage } from '@/server/db';
 import { getCurrentUser, loadUploadedPapers, sessionCookieName } from '@/server/routes/auth';
 
 type ExtractedPdfPage = {
@@ -162,7 +162,7 @@ const TAVILY_RESULT_COUNT = 5;
 const shouldUseWebSearch = (prompt: string) => /\b(news|latest|recent|today|current|now|breaking|this week|this month|2026|2025)\b|新闻|最新|最近|今天|当前|现在|实时|热点|头条/i.test(prompt);
 
 const extractFigureCaptions = (text: string) => {
-  const captionPattern = /(?:^|\n)\s*(?:fig(?:ure)?\.?|�?\s*\d+[\s\S]{0,600}?(?=\n\s*(?:fig(?:ure)?\.?|�?\s*\d+|\n\s*(?:references|acknowledg|appendix)\b|$)/gi;
+  const captionPattern = /(?:^|\n)\s*(?:fig(?:ure)?\.?|table\.?)\s*\d+[\s\S]{0,600}?(?=\n\s*(?:fig(?:ure)?\.?|table\.?)\s*\d+|\n\s*(?:references|acknowledg|appendix)\b|$)/gi;
 
   return Array.from(text.matchAll(captionPattern))
     .map((match) => match[0].replace(/\s+/g, ' ').trim())
@@ -513,7 +513,7 @@ const getMetadataInfoValue = (info: Record<string, unknown>, key: string) => {
 
 const parseAuthors = (value?: string) =>
   value
-    ?.split(/\s*(?:,|;|\band\b|&|，|�?\s*/i)
+    ?.split(/\s*(?:,|;|\band\b|&)\s*/i)
     .map((author) => author.replace(/\d+|\*|†|‡|§/g, '').trim())
     .filter(Boolean)
     .slice(0, 2) ?? [];
@@ -755,27 +755,28 @@ const searchWebForPrompt = async (prompt: string): Promise<TavilySearchResult[]>
 const buildUserPrompt = (request: z.infer<typeof readerRequestSchema>, extractedPdf?: ExtractedPdf, webSearchResults: TavilySearchResult[] = []) => {
   const webSearchText = webSearchResults.length ? `Tavily Web search results:\n${formatWebSearchResults(webSearchResults)}\n\n` : '';
 
-  if (!extractedPdf && !request.selectedText) return `${webSearchText}用户请求�?{request.prompt}`;
+  if (!extractedPdf && !request.selectedText) return `${webSearchText}User request:\n${request.prompt}`;
 
   const pageText = request.pageNumber ? extractedPdf?.pages.find((page) => page.pageNumber === request.pageNumber)?.text : undefined;
   const figureCaptions = extractedPdf?.figureCaptions.length
-    ? `\n图题/图注候选：\n${extractedPdf.figureCaptions.map((caption, index) => `${index + 1}. ${caption}`).join('\n')}`
+    ? `\nFigure/table caption candidates:\n${extractedPdf.figureCaptions.map((caption, index) => `${index + 1}. ${caption}`).join('\n')}`
     : '';
   const pdfText = extractedPdf?.text
-    ? `\nPDF 提取正文：\n${request.scope === 'current-page' && pageText ? `[�?${request.pageNumber} 页]\n${pageText}` : extractedPdf.text}`
-    : '\nPDF 提取正文：未能从本地 PDF 提取到文本，请基于用户提供的选中文本回答；没有依据时说明未找到�?;
+    ? `\nExtracted PDF text:\n${request.scope === 'current-page' && pageText ? `[Page ${request.pageNumber}]\n${pageText}` : extractedPdf.text}`
+    : '\nExtracted PDF text: No full text was extracted. Use selected text if provided; say when evidence is missing.';
 
-  return `论文标题�?{request.title ?? request.paperId}
-请求范围�?{request.scope}
-${request.selectedText ? `选中文本：\n${request.selectedText}\n` : ''}${figureCaptions}${pdfText}
+  return `Paper title: ${request.title ?? request.paperId}
+Request scope: ${request.scope}
+${request.selectedText ? `Selected text:\n${request.selectedText}\n` : ''}${figureCaptions}${pdfText}
 
-${webSearchText}用户请求�?{request.prompt}`;
+${webSearchText}User request:
+${request.prompt}`;
 };
 
 const buildReaderSystemPrompt = (hasPdfContext: boolean, hasWebSearch: boolean, modePrompt?: string, responseLanguage: 'english' | 'chinese' = 'chinese') => {
   const languageInstruction = responseLanguage === 'english'
     ? 'Respond in English. The answer will be translated to Chinese by a separate low-cost model, so keep terminology precise and preserve all numbers, equations, figure/table labels, citations, and Markdown structure. Format inline math as \\(...\\) and display math as $$...$$ so the UI can render it with KaTeX.'
-    : 'Respond entirely in Chinese. Preserve all important numbers, equations, figure/table labels, citations, and Markdown structure. 公式请使�?KaTeX 可渲染格式：行内公式�?\\(...\\)，独立公式用 $$...$$�?;
+    : 'Respond entirely in Chinese. Preserve important numbers, equations, figure/table labels, citations, and Markdown structure. Format inline math as \\(...\\) and display math as $$...$$ for KaTeX rendering.';
   const nextBasePrompt = hasPdfContext
     ? `${modePrompt?.trim() || 'You are SCIReader, a careful academic paper reading assistant. Prioritize the provided paper content, saved paper notes, selected text, and page images. If the paper does not provide clear evidence, explicitly say that the paper does not provide sufficient information to determine.'}\n\n${languageInstruction}\n\nUse only the provided paper evidence unless the user asks for outside context. Do not fabricate details.`
     : `You are SCIReader's general AI assistant. Answer the user's question directly.\n\n${languageInstruction}`;
@@ -783,14 +784,6 @@ const buildReaderSystemPrompt = (hasPdfContext: boolean, hasWebSearch: boolean, 
   return hasWebSearch
     ? `${nextBasePrompt}\nThe user question involves recent or real-time information. You will receive Tavily Web search results. Prioritize those results, cite relevant source URLs, and state clearly when the search results are insufficient or conflicting.`
     : nextBasePrompt;
-
-  const basePrompt = hasPdfContext
-    ? '你是 SCIReader 的论文阅读助手。请用中文回答用户问题，优先基于已提供的论文内容、论文速记、选中文本和页面截图。你擅长总结论文要点、解释方法和实验、提取公式、比较相关工作、解释图表。若论文中没有明确依据，请直接说明“论文中未明确找到”，不要编造�?
-    : '你是 SCIReader 的通用 AI 助手。请直接回答用户问题；如果用户要求写作、代码、解释、翻译或总结，请正常完成，不要假设一定有论文上下文�?;
-
-  return hasWebSearch
-    ? `${basePrompt}\n用户问题涉及近期或实时信息。你会收�?Tavily Web search results，请优先基于这些结果回答，并在答案中引用相关来源 URL；如果搜索结果不足或互相矛盾，请明确说明。`
-    : basePrompt;
 };
 
 const buildReaderUserPrompt = (request: z.infer<typeof readerRequestSchema>, extractedPdf?: ExtractedPdf, webSearchResults: TavilySearchResult[] = []) => {
@@ -963,7 +956,7 @@ const generateImage = async (request: z.infer<typeof imageRequestSchema>) => {
     model: modelSelection.model,
     max_tokens: 4000,
     system:
-      '你是 SCIReader 的图像生成助手。请根据用户需求生成图片；如果当前模型不能直接返回图片，请输出可直接用于图像生成模型的详细英文提示词，并用中文简要说明�?,
+      'You are SCIReader image assistant. If the current model cannot directly return an image, output a detailed English image-generation prompt and a brief Chinese explanation.',
     messages: [
       {
         role: 'user',
@@ -1474,11 +1467,11 @@ const checkSummaryFreshnessWithCheapModel = async (request: z.infer<typeof reade
     model: modelSelection.model,
     max_tokens: 1200,
     system:
-      '你是 SCIReader 的低成本总结质检助手。你只能检查已保存论文报告是否已经足够简洁、结构化，并包含核心技术机制、关键数值、证据强度和主要局限。不要重新总结论文，不要做深度论文理解。只输出 JSON�?,
+      'You are SCIReader low-cost summary freshness checker. Check only whether the saved paper report is concise, structured, and covers core mechanism, key numbers, evidence strength, and main limitations. Do not re-summarize the paper. Output only JSON.',
     messages: [
       {
         role: 'user',
-        content: `论文标题: ${request.title ?? request.paperId}\n期刊: ${request.journal ?? '未知'}\n年份: ${request.year ?? '未知'}\n\n用户期望的总结任务:\n${request.prompt}\n\n已保存总结:\n${cachedSummary.slice(0, 20000)}\n\n请判断已保存总结是否需要用高成本模型重新读�?PDF 更新。只有当总结明显为空泛、过长失控、缺少核心技术机�?关键数�?证据强度/主要局限、与用户期望不匹配，或看起来被截断时，fresh=false。输�?JSON，格式为 {"fresh": boolean, "reason": string, "improvementPrompt": string }。fresh=false �?improvementPrompt 给高成本模型明确说明需要补强什么；fresh=true 时不要输�?improvementPrompt。`,
+        content: `Paper title: ${request.title ?? request.paperId}\nJournal: ${request.journal ?? 'Unknown'}\nYear: ${request.year ?? 'Unknown'}\n\nUser summary request:\n${request.prompt}\n\nSaved summary:\n${cachedSummary.slice(0, 20000)}\n\nReturn JSON: {"fresh": boolean, "reason": string, "improvementPrompt": string}. Set fresh=false only if the summary is empty, generic, too long, missing core mechanism/key numbers/evidence strength/main limitations, mismatched to the user request, or appears truncated. When fresh=false, improvementPrompt must explain what GPT-5.5 should improve.`,
       },
     ],
   });
@@ -1730,11 +1723,11 @@ const triageWithCheapModel = async (request: z.infer<typeof readerRequestSchema>
     model: modelSelection.model,
     max_tokens: 2000,
     system:
-      '你是 SCIReader 的低成本上下文检索助手。你的职责只有两件事�?) 从已保存的论文总结和历史对话里查找、压缩和整理已有信息�?) 判断这些已有信息是否足够回答当前问题。你不能做新的论文理解、推理扩展或深度分析。如果已有信息足够，就输出基于已有信息的简洁回答草稿；如果不够，就输出给高成本模型的更清晰任务提示。只输出 JSON�?,
+      'You are SCIReader low-cost context retrieval assistant. Search saved paper summary and dialog history. Decide whether saved information is enough to answer. Do not perform new paper analysis. Output only JSON.',
     messages: [
       {
         role: 'user',
-        content: `论文标题: ${request.title ?? request.paperId}\n\n已保存总结:\n${cachedSummary || '暂无总结'}\n\n已保存历�?\n${historyText || '暂无历史'}\n\n当前问题:\n${request.prompt}\n\n请输�?JSON，格式为 {"sufficient": boolean, "contextSummary": string, "answerDraft": string, "expensivePrompt": string }。当 sufficient=true 时必须提�?answerDraft；当 sufficient=false 时必须提�?expensivePrompt。`,
+        content: `Paper title: ${request.title ?? request.paperId}\n\nSaved summary:\n${cachedSummary || 'None'}\n\nSaved history:\n${historyText || 'None'}\n\nCurrent question:\n${request.prompt}\n\nReturn JSON: {"sufficient": boolean, "contextSummary": string, "answerDraft": string, "expensivePrompt": string}. Provide answerDraft when sufficient=true and expensivePrompt when sufficient=false.`,
       },
     ],
   });

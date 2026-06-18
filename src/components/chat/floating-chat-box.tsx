@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { CornerDownLeft, Loader2, Maximize2, Minimize2, Type } from 'lucide-react';
+import { CornerDownLeft, Download, Loader2, Maximize2, Minimize2, Type, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
 import rehypeKatex from 'rehype-katex';
 import ReactMarkdown from 'react-markdown';
@@ -140,6 +140,17 @@ const buildConversationHistory = (messages: ChatMessage[]): ConversationTurn[] =
       content: message.content.slice(0, 2000),
     }));
 
+const isExportableAssistantMessage = (message: ChatMessage) =>
+  message.role === 'assistant' && Boolean(message.content.trim()) && !['Analyzing...', 'Generating image...'].includes(message.content);
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+
 const getSummaryProgress = (elapsedSeconds: number): SummaryProgress => {
   if (elapsedSeconds < 3) return { percent: 12, label: 'No saved summary found yet. Starting summary generation...', elapsedSeconds };
   if (elapsedSeconds < 10) return { percent: 28, label: 'Reading the uploaded PDF...', elapsedSeconds };
@@ -200,6 +211,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const appliedInitialSizeKeyRef = useRef('');
   const appliedInitialFontSizeRef = useRef<ChatFontSize | null>(null);
   const sizeRef = useRef(initialSize ?? defaultSize);
+  const messageBodyRefs = useRef(new Map<string, HTMLDivElement>());
   const [messages, setMessages] = useState<ChatMessage[]>(mockMessages);
   const [input, setInput] = useState('');
   const [position, setPosition] = useState(initialPosition ?? defaultPosition);
@@ -211,6 +223,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const [isMobileChatExpanded, setIsMobileChatExpanded] = useState(false);
   const [isMobilePortrait, setIsMobilePortrait] = useState(false);
   const [isPortraitHintDismissed, setIsPortraitHintDismissed] = useState(false);
+  const [isExportMode, setIsExportMode] = useState(false);
+  const [selectedExportIds, setSelectedExportIds] = useState<Set<string>>(() => new Set());
   const [chatFontSize, setChatFontSize] = useState<ChatFontSize>(initialFontSize);
   const [paperContextSummary, setPaperContextSummary] = useState('');
   const [summaryProgress, setSummaryProgress] = useState<SummaryProgress | null>(null);
@@ -227,6 +241,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const fontSizeStyle = chatFontSizeStyles[chatFontSize];
   const canDecreaseFontSize = fontSizeIndex > 0;
   const canIncreaseFontSize = fontSizeIndex < chatFontSizeOrder.length - 1;
+  const exportableMessages = messages.filter(isExportableAssistantMessage);
+  const selectedExportCount = selectedExportIds.size;
   const viewportWidth = typeof window === 'undefined' ? 390 : window.innerWidth;
   const viewportHeight = typeof window === 'undefined' ? 720 : window.innerHeight;
   const mobileLayout = isMobileViewport
@@ -262,6 +278,15 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   useEffect(() => {
     if (!isMobilePortrait) setIsPortraitHintDismissed(false);
   }, [isMobilePortrait]);
+
+  useEffect(() => {
+    setSelectedExportIds((current) => {
+      const validIds = new Set(exportableMessages.map((message) => message.id));
+      const next = new Set([...current].filter((id) => validIds.has(id)));
+
+      return next.size === current.size ? current : next;
+    });
+  }, [exportableMessages]);
 
   useEffect(() => {
     console.info('Floating chat mounted/rendered.', {
@@ -628,6 +653,99 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     }
   };
 
+  const toggleExportSelection = (messageId: string) => {
+    setSelectedExportIds((current) => {
+      const next = new Set(current);
+
+      if (next.has(messageId)) {
+        next.delete(messageId);
+      } else {
+        next.add(messageId);
+      }
+
+      return next;
+    });
+  };
+
+  const getPreviousUserQuestion = (assistantIndex: number) => {
+    for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+      if (messages[index]?.role === 'user') return messages[index].content;
+    }
+
+    return '';
+  };
+
+  const exportSelectedAnswersToPdf = () => {
+    const selectedMessages = messages
+      .map((message, index) => ({ message, index }))
+      .filter(({ message }) => selectedExportIds.has(message.id) && isExportableAssistantMessage(message));
+
+    if (!selectedMessages.length) {
+      window.alert('请选择至少一条 AI 回答。');
+      return;
+    }
+
+    const title = paper?.title ?? 'SCIReader chat export';
+    const exportedAt = new Date().toLocaleString();
+    const sections = selectedMessages
+      .map(({ message, index }, selectionIndex) => {
+        const renderedHtml = messageBodyRefs.current.get(message.id)?.innerHTML;
+        const question = getPreviousUserQuestion(index);
+
+        return `<section class="answer-section">
+          <div class="answer-meta">#${selectionIndex + 1}${message.contextLabel ? ` · ${escapeHtml(message.contextLabel)}` : ''}</div>
+          ${question ? `<h2>Question</h2><div class="question">${escapeHtml(question)}</div>` : ''}
+          <h2>Answer</h2>
+          <div class="answer">${renderedHtml || `<p>${escapeHtml(message.content).replace(/\n/g, '<br />')}</p>`}</div>
+        </section>`;
+      })
+      .join('\n');
+    const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(title)} - SCIReader export</title>
+  <style>
+    body { color: #111827; font-family: Arial, "Microsoft YaHei", sans-serif; line-height: 1.65; margin: 32px; }
+    header { border-bottom: 1px solid #d1d5db; margin-bottom: 24px; padding-bottom: 16px; }
+    h1 { font-size: 22px; margin: 0 0 8px; }
+    h2 { font-size: 15px; margin: 14px 0 8px; }
+    .subtle, .answer-meta { color: #6b7280; font-size: 12px; }
+    .answer-section { break-inside: avoid; border-bottom: 1px solid #e5e7eb; margin-bottom: 24px; padding-bottom: 20px; }
+    .question { background: #eff6ff; border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; }
+    .answer { background: #f8fafc; border-radius: 8px; padding: 10px 12px; }
+    .answer p { margin: 6px 0; white-space: pre-wrap; }
+    .answer ul, .answer ol { padding-left: 22px; }
+    .katex-display { overflow-x: auto; overflow-y: hidden; }
+    @page { margin: 18mm; }
+    @media print { body { margin: 0; } .answer-section { break-inside: avoid; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>${escapeHtml(title)}</h1>
+    <div class="subtle">SCIReader export · ${escapeHtml(readingModeLabel)} · ${escapeHtml(exportedAt)}</div>
+  </header>
+  ${sections}
+  <script>
+    window.addEventListener('load', () => {
+      setTimeout(() => window.print(), 250);
+    });
+  </script>
+</body>
+</html>`;
+    const printWindow = window.open('', '_blank', 'width=980,height=720');
+
+    if (!printWindow) {
+      window.alert('浏览器阻止了导出窗口，请允许弹窗后重试。');
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
   useEffect(() => {
     if (!isResizing) return;
 
@@ -721,6 +839,24 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
             <p className="truncate text-[11px] text-muted-foreground">{paper?.title ?? 'Ask without opening a paper'}</p>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-1">
+            {exportableMessages.length ? (
+              <button
+                className={isExportMode ? 'inline-flex items-center gap-1 rounded-lg border border-primary bg-primary/10 px-2 py-1.5 text-xs font-medium text-primary' : 'inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50'}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIsExportMode((current) => {
+                    if (current) setSelectedExportIds(new Set());
+                    return !current;
+                  });
+                }}
+                onPointerDown={(event) => event.stopPropagation()}
+                title={isExportMode ? '退出导出选择' : '选择回答导出 PDF'}
+                type="button"
+              >
+                {isExportMode ? <X className="size-4" /> : <Download className="size-4" />}
+                {isExportMode ? '取消' : '导出'}
+              </button>
+            ) : null}
             {isMobileViewport ? (
               <button
                 className="inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
@@ -785,6 +921,34 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
         </div>
       ) : null}
 
+      {isExportMode && !(isMobileViewport && !isMobileChatExpanded) ? (
+        <div className="flex items-center gap-2 border-b bg-slate-50 px-3 py-2 text-xs">
+          <span className="text-slate-600">已选 {selectedExportCount} 条回答</span>
+          <button
+            className="ml-auto rounded-lg border px-2.5 py-1.5 font-medium text-slate-700 hover:bg-white"
+            onClick={() => setSelectedExportIds(new Set(exportableMessages.map((message) => message.id)))}
+            type="button"
+          >
+            全选
+          </button>
+          <button
+            className="rounded-lg border px-2.5 py-1.5 font-medium text-slate-700 hover:bg-white"
+            onClick={() => setSelectedExportIds(new Set())}
+            type="button"
+          >
+            清空
+          </button>
+          <button
+            className="rounded-lg bg-primary px-2.5 py-1.5 font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={!selectedExportCount}
+            onClick={exportSelectedAnswersToPdf}
+            type="button"
+          >
+            导出选中
+          </button>
+        </div>
+      ) : null}
+
       {isMobileViewport && !isMobileChatExpanded ? null : summaryProgress ? (
         <div className="border-b bg-amber-50 px-3 py-2 text-xs text-amber-900">
           <div className="flex items-center justify-between gap-3">
@@ -806,13 +970,40 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
       ) : null}
 
       <div className={isMobileViewport && !isMobileChatExpanded ? 'hidden' : 'min-h-0 flex-1 space-y-2 overflow-auto p-3'}>
-        {messages.map((message) => (
+        {messages.map((message) => {
+          const canExportMessage = isExportableAssistantMessage(message);
+          const isSelectedForExport = selectedExportIds.has(message.id);
+
+          return (
           <div className={message.role === 'user' ? 'ml-auto max-w-[92%] rounded-xl bg-primary p-2.5 text-primary-foreground' : 'mr-auto max-w-[96%] rounded-xl bg-slate-100 p-2.5'} key={message.id}>
-            {message.contextLabel ? <p className="mb-1 text-[11px] opacity-70">{message.contextLabel}</p> : null}
+            <div className="mb-1 flex items-center gap-2">
+              {isExportMode && canExportMessage ? (
+                <label className="inline-flex items-center gap-1 text-[11px] font-medium opacity-80">
+                  <input
+                    checked={isSelectedForExport}
+                    className="size-3.5"
+                    onChange={() => toggleExportSelection(message.id)}
+                    type="checkbox"
+                  />
+                  PDF
+                </label>
+              ) : null}
+              {message.contextLabel ? <p className="text-[11px] opacity-70">{message.contextLabel}</p> : null}
+            </div>
             {message.imageUrl || message.imageBase64 ? (
               <img alt={message.imageAlt ?? 'Generated image'} className="mb-2 max-h-80 w-full rounded-lg object-contain" src={message.imageUrl ?? message.imageBase64} />
             ) : null}
-            <div className={`max-w-none break-words ${fontSizeStyle.body}`}>
+            <div
+              className={`max-w-none break-words ${fontSizeStyle.body}`}
+              ref={(node) => {
+                if (!canExportMessage) return;
+                if (node) {
+                  messageBodyRefs.current.set(message.id, node);
+                } else {
+                  messageBodyRefs.current.delete(message.id);
+                }
+              }}
+            >
               <ReactMarkdown
                 remarkPlugins={[remarkMath]}
                 rehypePlugins={[rehypeKatex]}
@@ -832,7 +1023,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
               </ReactMarkdown>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       <footer className={isMobileViewport && !isMobileChatExpanded ? 'hidden' : 'border-t p-3'}>
