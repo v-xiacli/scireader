@@ -2054,7 +2054,7 @@ const generateChunkedEnglishSummary = async (
     });
 
     const wantsDetailedReport = request.detailedReport === true;
-    const summaryLanguage: 'english' | 'chinese' = extractedPdf.sourceLanguage === 'chinese' ? 'chinese' : 'english';
+    const summaryLanguage: 'english' | 'chinese' = extractedPdf.sourceLanguage === 'english' ? 'english' : 'chinese';
     const summaryLanguageInstruction = getSummaryLanguageInstruction(summaryLanguage);
 
     console.log('[reader-agent:summarize] source language detected', {
@@ -2706,7 +2706,7 @@ const app = new Hono()
         blobRecords: blobExternalEvaluations.length,
       });
       const sourceLanguage = await detectSourceLanguageForAsk(request, storagePath);
-      const shouldAskExpensiveReaderInChinese = sourceLanguage === 'chinese';
+      const shouldAskExpensiveReaderInChinese = sourceLanguage !== 'english';
       const translatedPrompt = shouldAskExpensiveReaderInChinese
         ? { text: request.prompt, model: 'source-language-direct', inputTokens: 0, outputTokens: 0 }
         : await translateUserQuestionToEnglish(request);
