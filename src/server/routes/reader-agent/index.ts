@@ -24,6 +24,10 @@ type ExtractedPdf = {
   pages: ExtractedPdfPage[];
   text: string;
   figureCaptions: string[];
+  sourceLanguage: 'chinese' | 'english' | 'mixed';
+  extractedChars: number;
+  returnedChars: number;
+  wasTruncated: boolean;
 };
 
 type PaperMetadata = {
@@ -101,7 +105,8 @@ type ReferenceEvaluationRecord = {
 
 type PaperReadingMode = 'reviewer' | 'reader';
 
-const MAX_EXTRACTED_TEXT_CHARS = 140_000;
+const MAX_EXTRACTED_TEXT_CHARS = 600_000;
+const MAX_DIRECT_READER_TEXT_CHARS = 140_000;
 const MAX_FIGURE_CAPTIONS = 40;
 const MAX_PAGE_IMAGES = 6;
 const PDF_RENDER_SCALE = 2;
@@ -170,6 +175,16 @@ const extractFigureCaptions = (text: string) => {
     .slice(0, MAX_FIGURE_CAPTIONS);
 };
 
+const detectTextLanguage = (text: string): ExtractedPdf['sourceLanguage'] => {
+  const sample = text.slice(0, 80_000);
+  const cjkChars = sample.match(/[\u3400-\u9fff\uf900-\ufaff]/g)?.length ?? 0;
+  const latinWords = sample.match(/[A-Za-z]+(?:['-][A-Za-z]+)?/g)?.length ?? 0;
+
+  if (cjkChars >= 500 && cjkChars > latinWords * 1.2) return 'chinese';
+  if (cjkChars >= 300 && latinWords >= 300) return 'mixed';
+  return 'english';
+};
+
 const ensurePdfCanvasPolyfills = async () => {
   const canvas = await import('@napi-rs/canvas');
   const globalScope = globalThis as typeof globalThis & {
@@ -225,9 +240,11 @@ const extractPdfText = async (localPdfPath: string): Promise<ExtractedPdf> => {
     if (text) pages.push({ pageNumber, text });
   }
 
-  const fullText = pages.map((page) => `[�?${page.pageNumber} 页]\n${page.text}`).join('\n\n');
-  const text = fullText.length > MAX_EXTRACTED_TEXT_CHARS ? `${fullText.slice(0, MAX_EXTRACTED_TEXT_CHARS)}\n\n[PDF 文本过长，已截断。]` : fullText;
+  const fullText = pages.map((page) => `[Page ${page.pageNumber}]\n${page.text}`).join('\n\n');
+  const wasTruncated = fullText.length > MAX_EXTRACTED_TEXT_CHARS;
+  const text = wasTruncated ? `${fullText.slice(0, MAX_EXTRACTED_TEXT_CHARS)}\n\n[PDF text is very long; direct-reader context was truncated. Chunked summary still uses all extracted pages.]` : fullText;
   const figureCaptions = extractFigureCaptions(fullText);
+  const sourceLanguage = detectTextLanguage(fullText);
 
   console.log('[reader-agent:pdf] text extraction finished', {
     localPdfPath,
@@ -235,6 +252,8 @@ const extractPdfText = async (localPdfPath: string): Promise<ExtractedPdf> => {
     pagesWithText: pages.length,
     extractedChars: fullText.length,
     returnedChars: text.length,
+    sourceLanguage,
+    wasTruncated,
     figureCaptions: figureCaptions.length,
   });
 
@@ -242,7 +261,32 @@ const extractPdfText = async (localPdfPath: string): Promise<ExtractedPdf> => {
     pages,
     text,
     figureCaptions,
+    sourceLanguage,
+    extractedChars: fullText.length,
+    returnedChars: text.length,
+    wasTruncated,
   };
+};
+
+const detectPdfLanguageFromTempFile = async (localPdfPath: string, maxPages = 6): Promise<ExtractedPdf['sourceLanguage']> => {
+  const pdfjs = await loadPdfjs();
+  const data = new Uint8Array(await fs.readFile(localPdfPath));
+  const pdf = await pdfjs.getDocument(getPdfDocumentOptions(data)).promise;
+  const pageTexts: string[] = [];
+
+  for (let pageNumber = 1; pageNumber <= Math.min(pdf.numPages, maxPages); pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const textContent = await page.getTextContent();
+    const text = textContent.items
+      .map((item) => ('str' in item ? item.str : ''))
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (text) pageTexts.push(text);
+  }
+
+  return detectTextLanguage(pageTexts.join('\n\n'));
 };
 
 const renderPdfPageImages = async (localPdfPath: string, pageNumbers?: number[]): Promise<PdfPageImage[]> => {
@@ -332,6 +376,27 @@ const materializePdfToTempFile = async (storagePath: string) => {
   await fs.writeFile(localPdfPath, buffer);
 
   return { localPdfPath, outputDir, buffer };
+};
+
+const detectSourceLanguageForAsk = async (request: z.infer<typeof readerRequestSchema>, storagePath: string | null): Promise<ExtractedPdf['sourceLanguage']> => {
+  const selectedTextLanguage = request.selectedText?.trim() ? detectTextLanguage(request.selectedText) : null;
+
+  if (selectedTextLanguage === 'chinese') return 'chinese';
+  if (!storagePath) return selectedTextLanguage ?? 'english';
+
+  const tempPdf = await materializePdfToTempFile(storagePath);
+
+  try {
+    return await detectPdfLanguageFromTempFile(tempPdf.localPdfPath);
+  } catch (error) {
+    console.warn('[reader-agent:ask] source language detection failed; using translation pipeline', {
+      paperId: request.paperId,
+      message: error instanceof Error ? error.message : 'Unknown language detection error.',
+    });
+    return selectedTextLanguage ?? 'english';
+  } finally {
+    await fs.rm(tempPdf.outputDir, { recursive: true, force: true });
+  }
 };
 
 const cleanPaperKeyPart = (part?: string) => part?.toLowerCase().replace(/[^a-z0-9]/g, '') ?? '';
@@ -813,7 +878,7 @@ const buildReaderUserPrompt = (request: z.infer<typeof readerRequestSchema>, ext
     ? `\nFigure/table caption candidates:\n${extractedPdf.figureCaptions.map((caption, index) => `${index + 1}. ${caption}`).join('\n')}`
     : '';
   const englishPdfText = extractedPdf?.text
-    ? `\nExtracted PDF text:\n${request.scope === 'current-page' && pageText ? `[Page ${request.pageNumber}]\n${pageText}` : extractedPdf.text}`
+    ? `\nExtracted PDF text:\n${request.scope === 'current-page' && pageText ? `[Page ${request.pageNumber}]\n${pageText}` : extractedPdf.text.slice(0, MAX_DIRECT_READER_TEXT_CHARS)}${request.scope !== 'current-page' && extractedPdf.text.length > MAX_DIRECT_READER_TEXT_CHARS ? '\n\n[Direct-reader context truncated for this question. Ask for a section/chapter or use the generated summary for full-document coverage.]' : ''}`
     : request.selectedText || request.paperContextSummary
       ? '\nExtracted PDF text: Full text is not available in this request. Use the provided notes or selected text; if evidence is missing, say the paper does not provide sufficient information.'
       : '';
@@ -836,7 +901,7 @@ ${request.prompt}`;
     ? `\n图题/图注候选：\n${extractedPdf.figureCaptions.map((caption, index) => `${index + 1}. ${caption}`).join('\n')}`
     : '';
   const pdfText = extractedPdf?.text
-    ? `\nPDF 提取正文：\n${request.scope === 'current-page' && pageText ? `[�?${request.pageNumber} 页]\n${pageText}` : extractedPdf.text}`
+    ? `\nPDF 提取正文：\n${request.scope === 'current-page' && pageText ? `[第 ${request.pageNumber} 页]\n${pageText}` : extractedPdf.text.slice(0, MAX_DIRECT_READER_TEXT_CHARS)}${request.scope !== 'current-page' && extractedPdf.text.length > MAX_DIRECT_READER_TEXT_CHARS ? '\n\n[本次直接问答的全文上下文已截断。需要全书覆盖时，请使用后台分块总结或指定章节/页码追问。]' : ''}`
     : request.selectedText || request.paperContextSummary
       ? '\nPDF 提取正文：本次未提供完整正文，请基于论文速记或选中文本回答；没有依据时说明未找到�?
       : '';
@@ -1787,6 +1852,11 @@ const getCompactSummaryInstruction = (mode: PaperReadingMode) =>
     ? 'You are a cross-disciplinary engineering and applied-science reviewer. Extract only the real technical mechanism, novelty, key numbers with units, evidence strength, paper tier clues, and the largest credibility risk. Be terse.'
     : 'You are a cross-disciplinary engineering and applied-science research reader. Extract only the core technical idea, mechanism, key numbers with units, reusable design insight, paper tier clues, and limits. Be terse.';
 
+const getSummaryLanguageInstruction = (language: 'english' | 'chinese') =>
+  language === 'chinese'
+    ? 'Respond in Chinese. The source paper is primarily Chinese, so do not translate the paper into English first. Preserve numbers, units, equations, figure/table labels, citations, and Markdown structure.'
+    : 'Respond in English. The final result may be translated to Chinese by a low-cost model; preserve numbers, units, equations, figure/table labels, citations, and Markdown structure.';
+
 const briefSummaryPrompt = `你将收到一份针对某篇论文生成的"深度阅读笔记"（完整版，可能来�?审稿模式"�?写稿模式"两种模板之一）�?
 请基于这份笔记，只提炼以下五点，使用中文输出，每点严格控制在1-2句话内：
 
@@ -1965,7 +2035,7 @@ const generateChunkedEnglishSummary = async (
       { jobId, paperId: request.paperId, phase: 'fallback-no-pdf' },
     );
 
-    return { answer: result.answer, inputTokens: result.inputTokens, outputTokens: result.outputTokens, model: result.model };
+    return { answer: result.answer, inputTokens: result.inputTokens, outputTokens: result.outputTokens, model: result.model, responseLanguage: 'english' as const };
   }
 
   setJobStatus({ phase: 'materializing-pdf', message: 'Downloading PDF from storage into a temporary file.' });
@@ -1984,6 +2054,18 @@ const generateChunkedEnglishSummary = async (
     });
 
     const wantsDetailedReport = request.detailedReport === true;
+    const summaryLanguage: 'english' | 'chinese' = extractedPdf.sourceLanguage === 'chinese' ? 'chinese' : 'english';
+    const summaryLanguageInstruction = getSummaryLanguageInstruction(summaryLanguage);
+
+    console.log('[reader-agent:summarize] source language detected', {
+      jobId,
+      paperId: request.paperId,
+      sourceLanguage: extractedPdf.sourceLanguage,
+      summaryLanguage,
+      extractedChars: extractedPdf.extractedChars,
+      returnedChars: extractedPdf.returnedChars,
+      wasTruncated: extractedPdf.wasTruncated,
+    });
 
     if (!wantsDetailedReport && extractedPdf.text.length <= SUMMARY_BRIEF_SINGLE_PASS_MAX_CHARS) {
       setJobStatus({
@@ -2004,7 +2086,8 @@ const generateChunkedEnglishSummary = async (
       const briefResult = await createExpensiveTextResponse(
         `${getCompactSummaryInstruction(getReadingMode(request))}
 
-Respond in English. Create a compact first-pass evidence note, not a full report.
+${summaryLanguageInstruction}
+Create a compact first-pass evidence note, not a full report.
 Use exactly these five bullets, each under 35 words:
 - core technical mechanism
 - key structure/parameter
@@ -2039,6 +2122,7 @@ ${extractedPdf.text}`,
         inputTokens: briefResult.inputTokens,
         outputTokens: briefResult.outputTokens,
         model: briefResult.model,
+        responseLanguage: summaryLanguage,
       };
     }
 
@@ -2085,7 +2169,8 @@ ${extractedPdf.text}`,
         const chunkSystem = wantsDetailedReport
           ? `${compactInstruction}
 
-Respond in English. This is batch ${index + 1} of ${chunks.length}. Write compact but useful notes for a detailed review.
+${summaryLanguageInstruction}
+This is batch ${index + 1} of ${chunks.length}. Write compact but useful notes for a detailed review.
 Use 7-10 bullets, each under 45 words. Capture only evidence present in this batch:
 - venue/journal/conference or publication clues if visible
 - technical mechanism and assumptions
@@ -2098,7 +2183,8 @@ Use 7-10 bullets, each under 45 words. Capture only evidence present in this bat
 Do not write a full report. Do not mention pages outside this batch.`
           : `${compactInstruction}
 
-Respond in English. This is batch ${index + 1} of ${chunks.length}. Write exactly 5 bullets, each under 28 words:
+${summaryLanguageInstruction}
+This is batch ${index + 1} of ${chunks.length}. Write exactly 5 bullets, each under 28 words:
 - mechanism/design trick
 - key structure or equation only if essential
 - strongest 1-3 numbers with units
@@ -2139,7 +2225,8 @@ ${chunk.text}`,
         chunkResult = await createExpensiveTextResponse(
           `${compactInstruction}
 
-Respond in English. Retry output: exactly 4 bullets, each under 22 words. Keep only mechanism, key numbers, evidence type, and main weakness.`,
+${summaryLanguageInstruction}
+Retry output: exactly 4 bullets, each under 22 words. Keep only mechanism, key numbers, evidence type, and main weakness.`,
           `Paper title: ${request.title ?? request.paperId}
 Pages in this batch: ${chunk.pageNumbers.join(', ') || 'unknown'}
 
@@ -2208,6 +2295,7 @@ ${chunk.text.slice(0, 5000)}`,
         inputTokens,
         outputTokens,
         model: model || selectExpensiveReaderModel().model,
+        responseLanguage: summaryLanguage,
       };
     }
 
@@ -2242,7 +2330,8 @@ ${chunkNotes.join('\n\n---\n\n')}`;
       finalResult = await createExpensiveTextResponse(
         `${compactInstruction}
 
-Respond in English. Synthesize the batch notes into a structured detailed cross-disciplinary paper review under 1500 words.
+${summaryLanguageInstruction}
+Synthesize the batch notes into a structured detailed cross-disciplinary paper review under 1500 words.
 Use exactly these sections:
 1. Paper tier / publication-level assessment
 2. Verdict
@@ -2286,7 +2375,8 @@ Do not add unsupported claims. Do not repeat points. Do not include a follow-up 
       finalResult = await createExpensiveTextResponse(
         `${compactInstruction}
 
-Respond in English. Create a short final report under 600 words from these batch notes. Preserve only mechanism, key numbers, evidence strength, and limits.`,
+${summaryLanguageInstruction}
+Create a short final report under 600 words from these batch notes. Preserve only mechanism, key numbers, evidence strength, and limits.`,
         finalInput.slice(0, 35_000),
         1200,
         { jobId, paperId: request.paperId, phase: 'final-synthesis-retry', chunks: chunks.length },
@@ -2328,6 +2418,7 @@ Respond in English. Create a short final report under 600 words from these batch
       inputTokens,
       outputTokens,
       model,
+      responseLanguage: summaryLanguage,
     };
   } finally {
     await fs.rm(tempPdf.outputDir, { recursive: true, force: true });
@@ -2377,14 +2468,20 @@ const startSummaryGenerationJob = (
 
     const result = await generateChunkedEnglishSummary(request, jobId, setJobStatus);
     const wantsDetailedReport = request.detailedReport === true;
+    const alreadyChinese = result.responseLanguage === 'chinese';
+
     setJobStatus({
       phase: 'translating',
       message: wantsDetailedReport
-        ? 'Translating final English summary into Chinese with cheap model.'
+        ? alreadyChinese
+          ? 'Final report is already Chinese; skipping translation.'
+          : 'Translating final English summary into Chinese with cheap model.'
         : 'Compressing final report into a brief Chinese overview with cheap model.',
     });
     const finalChineseResult = wantsDetailedReport
-      ? await translateReaderAnswerToChinese(result.answer, request)
+      ? alreadyChinese
+        ? { text: result.answer, model: 'source-language-direct', inputTokens: 0, outputTokens: 0 }
+        : await translateReaderAnswerToChinese(result.answer, request)
       : await summarizeReaderAnswerBrieflyInChinese(result.answer, request, jobId);
     const summary = finalChineseResult.text;
     const inputTokens = (freshness?.inputTokens ?? 0) + result.inputTokens + finalChineseResult.inputTokens;
@@ -2537,7 +2634,7 @@ const app = new Hono()
     const request = c.req.valid('json');
 
     try {
-      const { user } = await requirePaperAccess(c, request.pdfUrl);
+      const { user, storagePath } = await requirePaperAccess(c, request.pdfUrl);
       if (isIdentityQuestion(request.prompt)) {
         return c.json({
           answer: identityAnswerChinese,
@@ -2608,9 +2705,19 @@ const app = new Hono()
         neo4jRecords: neo4jExternalEvaluations.length,
         blobRecords: blobExternalEvaluations.length,
       });
-      const translatedPrompt = await translateUserQuestionToEnglish(request);
+      const sourceLanguage = await detectSourceLanguageForAsk(request, storagePath);
+      const shouldAskExpensiveReaderInChinese = sourceLanguage === 'chinese';
+      const translatedPrompt = shouldAskExpensiveReaderInChinese
+        ? { text: request.prompt, model: 'source-language-direct', inputTokens: 0, outputTokens: 0 }
+        : await translateUserQuestionToEnglish(request);
       const nowForTranslatedPipeline = new Date().toISOString();
       let memoryResult;
+
+      console.log('[reader-agent:ask] source language routing', {
+        paperId: request.paperId,
+        sourceLanguage,
+        expensiveReaderLanguage: shouldAskExpensiveReaderInChinese ? 'chinese' : 'english',
+      });
 
       try {
         memoryResult = await retrieveAnswerFromSharedPaperMemory(request, cachedSummary, sharedHistory, externalEvaluations, translatedPrompt.text);
@@ -2719,7 +2826,8 @@ const app = new Hono()
         });
       }
 
-      const expensiveSystemPrompt = buildReaderSystemPrompt(true, false, request.modePrompt, 'english');
+      const expensiveReaderLanguage = shouldAskExpensiveReaderInChinese ? 'chinese' : 'english';
+      const expensiveSystemPrompt = buildReaderSystemPrompt(true, false, request.modePrompt, expensiveReaderLanguage);
       const expensiveContext = [
         cachedSummary ? `Cached paper brief:\n${cachedSummary.slice(0, 12000)}` : null,
         memoryResult.result.contextSummary ? `Cheap retrieval context:\n${memoryResult.result.contextSummary}` : null,
@@ -2735,9 +2843,11 @@ const app = new Hono()
           conversationHistory: [],
         },
         selectExpensiveReaderModel(),
-        'english',
+        expensiveReaderLanguage,
       );
-      const translatedAnswer = await translateReaderAnswerToChinese(expensiveTranslatedResult.answer, request);
+      const translatedAnswer = shouldAskExpensiveReaderInChinese
+        ? { text: expensiveTranslatedResult.answer, model: 'source-language-direct', inputTokens: 0, outputTokens: 0 }
+        : await translateReaderAnswerToChinese(expensiveTranslatedResult.answer, request);
       const translatedInputTokens = memoryInputTokens + expensiveTranslatedResult.inputTokens + translatedAnswer.inputTokens;
       const translatedOutputTokens = memoryOutputTokens + expensiveTranslatedResult.outputTokens + translatedAnswer.outputTokens;
       const translatedBillableTokens =
