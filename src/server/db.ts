@@ -74,7 +74,7 @@ export const getUserTokenAccount = async (userId: string) => {
   return {
     tokenBalance: balance,
     tokenUsed: used,
-    tokenAvailable: Math.max(balance - used, 0),
+    tokenAvailable: balance - used,
   };
 };
 

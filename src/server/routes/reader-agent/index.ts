@@ -662,6 +662,23 @@ const getModelTokenWeight = (model?: string) => {
 const getBillableTokens = (inputTokens: number, outputTokens: number, model?: string) =>
   Math.ceil((Math.max(0, inputTokens) + Math.max(0, outputTokens)) * getModelTokenWeight(model));
 
+const insufficientTokenMessage = 'token余额不足，请充值';
+
+const ensurePositiveTokenBalance = async (userId: string) => {
+  const tokenAccount = await getUserTokenAccount(userId);
+
+  if (tokenAccount.tokenAvailable < 0) {
+    const error = new Error(insufficientTokenMessage);
+    error.name = 'InsufficientTokenBalanceError';
+    throw error;
+  }
+
+  return tokenAccount;
+};
+
+const isInsufficientTokenBalanceError = (error: unknown) =>
+  error instanceof Error && (error.name === 'InsufficientTokenBalanceError' || error.message === insufficientTokenMessage);
+
 const getAnthropicCredential = (target: AnthropicModelTarget) => {
   if (target === 'cheap') {
     return {
@@ -2534,6 +2551,8 @@ const app = new Hono()
           tokenAccount: await getUserTokenAccount(user.id),
         });
       }
+
+      await ensurePositiveTokenBalance(user.id);
 
       const hasPaperContext = Boolean(request.pdfUrl || request.selectedText || request.paperContextSummary);
 
