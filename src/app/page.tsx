@@ -393,7 +393,7 @@ const HomePage = () => {
           <div className="mt-5 grid gap-3 border-t pt-4 text-sm md:grid-cols-3">
             <div>
               <p className="font-medium">充值参考</p>
-              <p className="mt-1 text-muted-foreground">10 元 = 2,000,000 token，首登赠送 10,000 token。</p>
+              <p className="mt-1 text-muted-foreground">10 元 = 1,000,000 token，首登赠送 10,000 token。</p>
             </div>
             <div>
               <p className="font-medium">扣费规则</p>
@@ -401,7 +401,7 @@ const HomePage = () => {
             </div>
             <div>
               <p className="font-medium">阅读估算</p>
-              <p className="mt-1 text-muted-foreground">10 元约可精读 80-150 篇 5000 words 英文文献，长论文另计。</p>
+              <p className="mt-1 text-muted-foreground">10 元约可精读 40-80 篇 5000 words 英文文献，超长论文按实际 token 扣费。</p>
             </div>
           </div>
         </header>
