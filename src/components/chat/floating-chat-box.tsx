@@ -151,6 +151,13 @@ const escapeHtml = (value: string) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
 
+const normalizeExportHtml = (html: string) =>
+  html
+    .replace(/\sclass="[^"]*"/g, '')
+    .replace(/\sstyle="[^"]*"/g, '')
+    .replace(/<(h[1-6])[^>]*>/g, '<$1>')
+    .replace(/<(p|ul|ol|li|strong|em|code|pre|blockquote|table|thead|tbody|tr|th|td|span|div)[^>]*>/g, '<$1>');
+
 const getSummaryProgress = (elapsedSeconds: number): SummaryProgress => {
   if (elapsedSeconds < 3) return { percent: 12, label: 'No saved summary found yet. Starting summary generation...', elapsedSeconds };
   if (elapsedSeconds < 10) return { percent: 28, label: 'Reading the uploaded PDF...', elapsedSeconds };
@@ -696,7 +703,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
           <div class="answer-meta">#${selectionIndex + 1}${message.contextLabel ? ` · ${escapeHtml(message.contextLabel)}` : ''}</div>
           ${question ? `<h2>Question</h2><div class="question">${escapeHtml(question)}</div>` : ''}
           <h2>Answer</h2>
-          <div class="answer">${renderedHtml || `<p>${escapeHtml(message.content).replace(/\n/g, '<br />')}</p>`}</div>
+          <div class="answer">${renderedHtml ? normalizeExportHtml(renderedHtml) : `<p>${escapeHtml(message.content).replace(/\n/g, '<br />')}</p>`}</div>
         </section>`;
       })
       .join('\n');
@@ -706,18 +713,26 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   <meta charset="utf-8" />
   <title>${escapeHtml(title)} - SCIReader export</title>
   <style>
-    body { color: #111827; font-family: Arial, "Microsoft YaHei", sans-serif; line-height: 1.65; margin: 32px; }
-    header { border-bottom: 1px solid #d1d5db; margin-bottom: 24px; padding-bottom: 16px; }
-    h1 { font-size: 22px; margin: 0 0 8px; }
-    h2 { font-size: 15px; margin: 14px 0 8px; }
-    .subtle, .answer-meta { color: #6b7280; font-size: 12px; }
-    .answer-section { break-inside: avoid; border-bottom: 1px solid #e5e7eb; margin-bottom: 24px; padding-bottom: 20px; }
-    .question { background: #eff6ff; border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; }
-    .answer { background: #f8fafc; border-radius: 8px; padding: 10px 12px; }
-    .answer p { margin: 6px 0; white-space: pre-wrap; }
-    .answer ul, .answer ol { padding-left: 22px; }
+    html { font-size: 11pt; }
+    body { color: #111827; font-family: Arial, "Microsoft YaHei", sans-serif; line-height: 1.48; margin: 0; }
+    header { border-bottom: 1px solid #d1d5db; margin-bottom: 14px; padding-bottom: 10px; }
+    h1 { font-size: 16pt; line-height: 1.25; margin: 0 0 5px; }
+    h2 { font-size: 11.5pt; line-height: 1.3; margin: 10px 0 5px; }
+    h3 { font-size: 11pt; line-height: 1.3; margin: 8px 0 4px; }
+    p { margin: 4px 0; }
+    .subtle, .answer-meta { color: #6b7280; font-size: 8.5pt; }
+    .answer-section { break-inside: auto; border-bottom: 1px solid #e5e7eb; margin-bottom: 14px; padding-bottom: 12px; }
+    .question { background: #eff6ff; border-radius: 5px; font-size: 9.5pt; line-height: 1.45; padding: 7px 8px; white-space: pre-wrap; }
+    .answer { background: #f8fafc; border-radius: 5px; font-size: 10.2pt; line-height: 1.5; padding: 8px 9px; }
+    .answer p { margin: 4px 0; white-space: pre-wrap; }
+    .answer ul, .answer ol { margin: 4px 0; padding-left: 18px; }
+    .answer li { margin: 2px 0; }
+    .answer table { border-collapse: collapse; font-size: 9pt; width: 100%; }
+    .answer th, .answer td { border: 1px solid #d1d5db; padding: 4px 5px; vertical-align: top; }
+    code { background: #eef2f7; border-radius: 3px; font-family: Consolas, monospace; font-size: 9pt; padding: 1px 3px; }
+    pre { background: #111827; border-radius: 5px; color: white; font-size: 8.5pt; line-height: 1.4; overflow-wrap: anywhere; padding: 8px; white-space: pre-wrap; }
     .katex-display { overflow-x: auto; overflow-y: hidden; }
-    @page { margin: 18mm; }
+    @page { size: A4; margin: 15mm 14mm; }
     @media print { body { margin: 0; } .answer-section { break-inside: avoid; } }
   </style>
 </head>
