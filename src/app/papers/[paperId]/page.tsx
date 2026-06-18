@@ -99,8 +99,8 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
           ← Paper library
         </Link>
         <div className="text-sm text-muted-foreground">PDF viewer + large floating chat</div>
-        <div className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">{readingMode === 'reviewer' ? '审稿人模式' : '读者模式'}</div>
-        <div className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{detailedReport ? '详细报告' : '极简速览'}</div>
+        <div className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">{readingMode === 'reviewer' ? '審稿人模式' : '讀者模式'}</div>
+        <div className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{detailedReport ? '詳細報告' : '極簡速覽'}</div>
       </nav>
       <div className="flex h-full min-h-0 justify-center overflow-hidden">
         <PdfReader initialZoom={preferences?.pdfZoom} onSelectionChange={setSelectedText} onZoomChange={saveZoom} paper={paper} />

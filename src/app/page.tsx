@@ -25,8 +25,8 @@ type ExtractedPaperMetadata = {
 };
 
 const readingModes: Array<{ id: PaperReadingMode; label: string; description: string }> = [
-  { id: 'reviewer', label: '审稿人模式', description: '重点检查创新性、证据强度、可信度和局限。' },
-  { id: 'reader', label: '读者模式', description: '重点提炼思路、可复用方法、文献定位和后续问题。' },
+  { id: 'reviewer', label: '審稿人模式', description: '重點檢查創新性、證據強度、可信度和局限。' },
+  { id: 'reader', label: '讀者模式', description: '重點提煉思路、可複用方法、文獻定位和後續問題。' },
 ];
 
 const normalizeDownloadUrl = (downloadUrl: string) => {
@@ -233,7 +233,7 @@ const HomePage = () => {
           title: paper.title,
           journal: paper.journal,
           year: paper.year,
-          prompt: '请总结这篇文档',
+          prompt: '請總結這篇文檔',
         }),
       });
       const result = await response.json();
@@ -390,18 +390,21 @@ const HomePage = () => {
               </div>
             </div>
           </div>
+          <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            本網站不面向中國大陸用戶開放。
+          </div>
           <div className="mt-5 grid gap-3 border-t pt-4 text-sm md:grid-cols-3">
             <div>
-              <p className="font-medium">充值参考</p>
-              <p className="mt-1 text-muted-foreground">10 元 = 1,000,000 token，首登赠送 10,000 token。</p>
+              <p className="font-medium">充值參考</p>
+              <p className="mt-1 text-muted-foreground">僅接受美元充值；US$1 ≈ 1,080,000 token，首登贈送 10,000 token。</p>
             </div>
             <div>
-              <p className="font-medium">扣费规则</p>
+              <p className="font-medium">扣費規則</p>
               <p className="mt-1 text-muted-foreground">5.4-mini 按 1 倍，5.4 按 1.5 倍，5.5 按 2 倍。</p>
             </div>
             <div>
-              <p className="font-medium">阅读估算</p>
-              <p className="mt-1 text-muted-foreground">10 元约可精读 40-80 篇 5000 words 英文文献，超长论文按实际 token 扣费。</p>
+              <p className="font-medium">閱讀估算</p>
+              <p className="mt-1 text-muted-foreground">US$1 約可精讀 45-90 篇 5000 words 英文文獻，超長論文按實際 token 扣費。</p>
             </div>
           </div>
         </header>
@@ -565,10 +568,10 @@ const HomePage = () => {
                     return nextDetailedReport;
                   });
                 }}
-                title={detailedReport ? '生成完整物理报告' : '先生成极简速览'}
+                title={detailedReport ? '生成完整閱讀報告' : '先生成極簡速覽'}
                 type="button"
               >
-                详细报告 {detailedReport ? '开' : '关'}
+                詳細報告 {detailedReport ? '開' : '關'}
               </button>
               {uploadMessage ? <p className="text-sm text-muted-foreground">{uploadMessage}</p> : null}
             </div>

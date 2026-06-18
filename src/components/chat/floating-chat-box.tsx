@@ -243,7 +243,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const readingMode: PaperReadingMode = paper?.readingMode ?? 'reviewer';
   const readingModePrompt = paperReadingPrompts[readingMode];
   const detailedReport = paper?.detailedReport ?? false;
-  const readingModeLabel = `${readingMode === 'reviewer' ? '审稿人模式' : '读者模式'} · ${detailedReport ? '详细' : '极简'}`;
+  const readingModeLabel = `${readingMode === 'reviewer' ? '審稿人模式' : '讀者模式'} · ${detailedReport ? '詳細' : '極簡'}`;
   const fontSizeIndex = chatFontSizeOrder.indexOf(chatFontSize);
   const fontSizeStyle = chatFontSizeStyles[chatFontSize];
   const canDecreaseFontSize = fontSizeIndex > 0;
@@ -551,7 +551,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
           {
             id: loadingId,
             role: 'assistant',
-            content: error instanceof Error ? error.message : '论文要点生成失败，可以直接提问，我会读取论文回答。',
+            content: error instanceof Error ? error.message : '論文要點生成失敗，可以直接提問，我會讀取論文回答。',
             contextLabel: 'Paper report',
           },
         ]);
@@ -688,7 +688,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
       .filter(({ message }) => selectedExportIds.has(message.id) && isExportableAssistantMessage(message));
 
     if (!selectedMessages.length) {
-      window.alert('请选择至少一条 AI 回答。');
+      window.alert('請選擇至少一條 AI 回答。');
       return;
     }
 
@@ -752,7 +752,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     const printWindow = window.open('', '_blank', 'width=980,height=720');
 
     if (!printWindow) {
-      window.alert('浏览器阻止了导出窗口，请允许弹窗后重试。');
+      window.alert('瀏覽器阻止了匯出視窗，請允許彈窗後重試。');
       return;
     }
 
@@ -865,11 +865,11 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
                   });
                 }}
                 onPointerDown={(event) => event.stopPropagation()}
-                title={isExportMode ? '退出导出选择' : '选择回答导出 PDF'}
+                title={isExportMode ? '退出匯出選擇' : '選擇回答匯出 PDF'}
                 type="button"
               >
                 {isExportMode ? <X className="size-4" /> : <Download className="size-4" />}
-                {isExportMode ? '取消' : '导出'}
+                {isExportMode ? '取消' : '匯出'}
               </button>
             ) : null}
             {isMobileViewport ? (
@@ -880,7 +880,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
                   setIsMobileChatExpanded((current) => !current);
                 }}
                 onPointerDown={(event) => event.stopPropagation()}
-                title={isMobileChatExpanded ? '最小化聊天框' : '展开聊天框'}
+                title={isMobileChatExpanded ? '最小化聊天框' : '展開聊天框'}
                 type="button"
               >
                 {isMobileChatExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
@@ -895,13 +895,13 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
                 setChatFontSize((current) => chatFontSizeOrder[Math.max(0, chatFontSizeOrder.indexOf(current) - 1)]);
               }}
               onPointerDown={(event) => event.stopPropagation()}
-              title="减小聊天字体"
+              title="縮小聊天字體"
               type="button"
             >
               <Type className="size-4" />
               -
             </button>
-            <span className="min-w-5 text-center text-[11px] font-medium text-slate-500" title="当前字体档位">
+            <span className="min-w-5 text-center text-[11px] font-medium text-slate-500" title="目前字體檔位">
               {fontSizeStyle.label}
             </span>
             <button
@@ -912,7 +912,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
                 setChatFontSize((current) => chatFontSizeOrder[Math.min(chatFontSizeOrder.length - 1, chatFontSizeOrder.indexOf(current) + 1)]);
               }}
               onPointerDown={(event) => event.stopPropagation()}
-              title="增大聊天字体"
+              title="放大聊天字體"
               type="button"
             >
               <Type className="size-4" />
@@ -924,27 +924,27 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
 
       {isMobilePortrait && !isPortraitHintDismissed ? (
         <div className="absolute inset-x-3 top-16 z-30 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 shadow-lg">
-          <p className="font-semibold">建议横屏阅读</p>
-          <p className="mt-1 text-xs leading-5 text-amber-800">手机竖屏空间太窄，横屏更适合一边看 PDF、一边展开聊天。</p>
+          <p className="font-semibold">建議橫屏閱讀</p>
+          <p className="mt-1 text-xs leading-5 text-amber-800">手機豎屏空間太窄，橫屏更適合一邊看 PDF、一邊展開聊天。</p>
           <button
             className="mt-2 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white"
             onClick={() => setIsPortraitHintDismissed(true)}
             type="button"
           >
-            继续竖屏
+            繼續豎屏
           </button>
         </div>
       ) : null}
 
       {isExportMode && !(isMobileViewport && !isMobileChatExpanded) ? (
         <div className="flex items-center gap-2 border-b bg-slate-50 px-3 py-2 text-xs">
-          <span className="text-slate-600">已选 {selectedExportCount} 条回答</span>
+          <span className="text-slate-600">已選 {selectedExportCount} 條回答</span>
           <button
             className="ml-auto rounded-lg border px-2.5 py-1.5 font-medium text-slate-700 hover:bg-white"
             onClick={() => setSelectedExportIds(new Set(exportableMessages.map((message) => message.id)))}
             type="button"
           >
-            全选
+            全選
           </button>
           <button
             className="rounded-lg border px-2.5 py-1.5 font-medium text-slate-700 hover:bg-white"
@@ -959,7 +959,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
             onClick={exportSelectedAnswersToPdf}
             type="button"
           >
-            导出选中
+            匯出選中
           </button>
         </div>
       ) : null}
