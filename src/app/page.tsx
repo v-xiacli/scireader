@@ -356,36 +356,52 @@ const HomePage = () => {
   return (
     <main className="min-h-screen px-8 py-6">
       <section className="mx-auto flex max-w-7xl flex-col gap-8">
-        <header className="flex items-center justify-between rounded-3xl bg-white p-6 shadow-sm">
-          <div>
-            <p className="text-sm font-medium uppercase tracking-wide text-primary">SCIReader</p>
-            <h1 className="mt-2 text-3xl font-semibold">Read papers with AI</h1>
-            <p className="mt-2 max-w-2xl text-muted-foreground">
-              Upload a PDF, read it on the left, and ask questions in the chat on the right.
-            </p>
-          </div>
-          <div className="flex gap-3">
-            <div className="rounded-2xl border bg-slate-50 p-4 text-right">
-              <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-                <WalletCards className="size-4" /> Token estimate
-              </div>
-              <p className="mt-2 text-2xl font-semibold">
-                {tokenEstimate ? (tokenEstimate.billableTokens ?? tokenEstimate.inputTokens).toLocaleString() : '--'}
-              </p>
-              <p className="mt-1 max-w-44 text-xs text-muted-foreground">
-                {tokenEstimate
-                  ? `${tokenEstimate.inputTokens.toLocaleString()} raw · ${tokenEstimate.model}${tokenEstimate.tokenWeight ? ` x${tokenEstimate.tokenWeight}` : ''}`
-                  : tokenEstimateMessage}
+        <header className="rounded-3xl bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-sm font-medium uppercase tracking-wide text-primary">SCIReader</p>
+              <h1 className="mt-2 text-3xl font-semibold">Read papers with AI</h1>
+              <p className="mt-2 max-w-2xl text-muted-foreground">
+                Upload a PDF, read it on the left, and ask questions in the chat on the right.
               </p>
             </div>
-            <div className="rounded-2xl border bg-slate-50 p-4 text-right">
-              <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-                <WalletCards className="size-4" /> Token balance
+            <div className="flex flex-col gap-3 sm:flex-row lg:justify-end">
+              <div className="rounded-2xl border bg-slate-50 p-4 text-right">
+                <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
+                  <WalletCards className="size-4" /> Token estimate
+                </div>
+                <p className="mt-2 text-2xl font-semibold">
+                  {tokenEstimate ? (tokenEstimate.billableTokens ?? tokenEstimate.inputTokens).toLocaleString() : '--'}
+                </p>
+                <p className="mt-1 max-w-44 text-xs text-muted-foreground">
+                  {tokenEstimate
+                    ? `${tokenEstimate.inputTokens.toLocaleString()} raw · ${tokenEstimate.model}${tokenEstimate.tokenWeight ? ` x${tokenEstimate.tokenWeight}` : ''}`
+                    : tokenEstimateMessage}
+                </p>
               </div>
-              <p className="mt-2 text-2xl font-semibold">{tokenAccount ? tokenAccount.tokenAvailable.toLocaleString() : '10,000'}</p>
-              <p className="mt-1 max-w-44 text-xs text-muted-foreground">
-                {tokenAccount ? `${tokenAccount.tokenUsed.toLocaleString()} used / ${tokenAccount.tokenBalance.toLocaleString()} total` : 'Default account quota'}
-              </p>
+              <div className="rounded-2xl border bg-slate-50 p-4 text-right">
+                <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
+                  <WalletCards className="size-4" /> Token balance
+                </div>
+                <p className="mt-2 text-2xl font-semibold">{tokenAccount ? tokenAccount.tokenAvailable.toLocaleString() : '10,000'}</p>
+                <p className="mt-1 max-w-44 text-xs text-muted-foreground">
+                  {tokenAccount ? `${tokenAccount.tokenUsed.toLocaleString()} used / ${tokenAccount.tokenBalance.toLocaleString()} total` : 'Default account quota'}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="mt-5 grid gap-3 border-t pt-4 text-sm md:grid-cols-3">
+            <div>
+              <p className="font-medium">充值参考</p>
+              <p className="mt-1 text-muted-foreground">10 元 = 2,000,000 token，首登赠送 10,000 token。</p>
+            </div>
+            <div>
+              <p className="font-medium">扣费规则</p>
+              <p className="mt-1 text-muted-foreground">5.4-mini 按 1 倍，5.4 按 1.5 倍，5.5 按 2 倍。</p>
+            </div>
+            <div>
+              <p className="font-medium">阅读估算</p>
+              <p className="mt-1 text-muted-foreground">10 元约可精读 80-150 篇 5000 words 英文文献，长论文另计。</p>
             </div>
           </div>
         </header>
