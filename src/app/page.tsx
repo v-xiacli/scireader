@@ -115,6 +115,7 @@ const HomePage = () => {
   const [writingArticles, setWritingArticles] = useState<WritingArticle[]>([]);
   const [writingSelectedArticlePaths, setWritingSelectedArticlePaths] = useState<string[]>([]);
   const [deletingWritingPath, setDeletingWritingPath] = useState<string | null>(null);
+  const [loadingWritingPath, setLoadingWritingPath] = useState<string | null>(null);
 
   const isLoggedIn = Boolean(authUser);
   const papers = uploadedPapers;
@@ -564,6 +565,42 @@ const HomePage = () => {
     }
   };
 
+  const handleOpenWritingArticle = async (article: WritingArticle) => {
+    if (loadingWritingPath) return;
+
+    setLoadingWritingPath(article.storagePath);
+    setWritingMessage(null);
+
+    try {
+      const response = await fetch('/api/reader-agent/writing-results/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storagePath: article.storagePath }),
+      });
+      const result = await response.json();
+
+      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Could not open article.');
+
+      setWritingResult({
+        draft: result.draft,
+        references: [],
+        storagePath: article.storagePath,
+        savedAt: article.savedAt,
+        article,
+      });
+      setWritingTopic(article.topic);
+      setWritingLanguage(article.outputLanguage);
+      setWritingSelectedArticlePaths((current) =>
+        current.includes(article.storagePath) ? current : [...current, article.storagePath],
+      );
+      setWritingMessage(`已打开历史写作：${article.topic}`);
+    } catch (error) {
+      setWritingMessage(error instanceof Error ? error.message : 'Could not open article.');
+    } finally {
+      setLoadingWritingPath(null);
+    }
+  };
+
   const handleRemoveWritingArticle = async (article: WritingArticle) => {
     if (deletingWritingPath) return;
 
@@ -923,15 +960,26 @@ const HomePage = () => {
                     </p>
                     <p className="mt-2 truncate text-xs text-muted-foreground">{article.storagePath}</p>
                   </div>
-                  <button
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border p-2 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 sm:self-center"
-                    disabled={deletingWritingPath === article.storagePath}
-                    onClick={() => void handleRemoveWritingArticle(article)}
-                    title="Remove from list"
-                    type="button"
-                  >
-                    {deletingWritingPath === article.storagePath ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
-                  </button>
+                  <div className="flex items-center gap-2 sm:self-center">
+                    <button
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border p-2 text-slate-500 transition hover:border-primary hover:bg-white hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={loadingWritingPath === article.storagePath}
+                      onClick={() => void handleOpenWritingArticle(article)}
+                      title="Open in writing output"
+                      type="button"
+                    >
+                      {loadingWritingPath === article.storagePath ? <Loader2 className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
+                    </button>
+                    <button
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border p-2 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={deletingWritingPath === article.storagePath}
+                      onClick={() => void handleRemoveWritingArticle(article)}
+                      title="Remove from list"
+                      type="button"
+                    >
+                      {deletingWritingPath === article.storagePath ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                    </button>
+                  </div>
                 </div>
               );
             }) : (
