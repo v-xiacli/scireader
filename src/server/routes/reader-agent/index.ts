@@ -589,6 +589,82 @@ const parseAuthors = (value?: string) =>
     .filter(Boolean)
     .slice(0, 2) ?? [];
 
+const cleanCitationAuthor = (author: string) => author.replace(/\d+|\*|†|‡|§/g, '').replace(/\s+/g, ' ').trim();
+
+const parseCitationAuthors = (value?: string) => {
+  const normalized = normalizeMetadataText(value);
+  if (!normalized) return [];
+
+  const normalizeList = (authors: string[]) => authors.map(cleanCitationAuthor).filter(Boolean);
+  if (/;|\band\b|&/i.test(normalized)) return normalizeList(normalized.split(/\s*(?:;|\band\b|&)\s*/i));
+
+  const commaParts = normalized.split(/\s*,\s*/).filter(Boolean);
+  if (commaParts.length === 2 && /^[A-Z](?:\.?\s*[A-Z])*\.?$/i.test(commaParts[1])) return normalizeList([normalized]);
+  if (commaParts.length > 2 && commaParts.length % 2 === 0 && commaParts.every((part, index) => index % 2 === 0 || /^[A-Z](?:\.?\s*[A-Z])*\.?$/i.test(part))) {
+    const authors: string[] = [];
+    for (let index = 0; index < commaParts.length; index += 2) authors.push(`${commaParts[index]}, ${commaParts[index + 1]}`);
+
+    return normalizeList(authors);
+  }
+
+  return normalizeList(commaParts.length > 1 ? commaParts : [normalized]);
+};
+
+const formatIeeeAuthorName = (author: string) => {
+  const cleanAuthor = author.replace(/\.$/, '').trim();
+  if (!cleanAuthor || /\bet\s+al\.?$/i.test(cleanAuthor) || /[\u3400-\u9fff]/.test(cleanAuthor)) return cleanAuthor;
+  if (/^[A-Z](?:\.\s*)+[A-Za-z' -]+$/.test(cleanAuthor)) return cleanAuthor;
+
+  const commaMatch = cleanAuthor.match(/^([^,]+),\s*(.+)$/);
+  const nameParts = commaMatch ? `${commaMatch[2]} ${commaMatch[1]}`.split(/\s+/) : cleanAuthor.split(/\s+/);
+  if (nameParts.length < 2) return cleanAuthor;
+
+  const surname = nameParts[nameParts.length - 1];
+  const initials = nameParts
+    .slice(0, -1)
+    .map((part) => part.match(/[A-Za-z]/)?.[0]?.toUpperCase())
+    .filter(Boolean)
+    .map((initial) => `${initial}.`)
+    .join(' ');
+
+  return initials ? `${initials} ${surname}` : cleanAuthor;
+};
+
+const joinIeeeAuthors = (authors: string[]) => {
+  if (!authors.length) return 'Unknown author';
+  const formattedAuthors = authors.map(formatIeeeAuthorName).filter(Boolean);
+  if (!formattedAuthors.length) return 'Unknown author';
+  if (formattedAuthors.length > 6) return `${formattedAuthors[0]} et al.`;
+  if (formattedAuthors.length === 1) return formattedAuthors[0];
+  if (formattedAuthors.length === 2) return `${formattedAuthors[0]} and ${formattedAuthors[1]}`;
+
+  return `${formattedAuthors.slice(0, -1).join(', ')}, and ${formattedAuthors[formattedAuthors.length - 1]}`;
+};
+
+const trimCitationField = (value?: string) => normalizeMetadataText(value)?.replace(/[.。]+$/, '');
+
+const buildIeeeCitation = (request: Pick<z.infer<typeof readerRequestSchema>, 'paperId' | 'title' | 'authors' | 'journal' | 'year'>) => {
+  const authors = joinIeeeAuthors(parseCitationAuthors(request.authors));
+  const title = trimCitationField(request.title) || trimCitationField(request.paperId) || 'Untitled paper';
+  const journal = trimCitationField(request.journal);
+  const year = trimCitationField(request.year);
+  const publicationParts = [journal ? `*${journal}*` : null, year].filter(Boolean);
+
+  return `${authors}, "${title},"${publicationParts.length ? ` ${publicationParts.join(', ')}` : ''}.`;
+};
+
+const hasIeeeCitationPreface = (summary: string) => /^##\s*(?:IEEE规范引用格式|IEEE Citation)\b/i.test(summary.trim());
+
+const withIeeeCitationPreface = (
+  summary: string,
+  request: Pick<z.infer<typeof readerRequestSchema>, 'paperId' | 'title' | 'authors' | 'journal' | 'year'>,
+) => {
+  const trimmedSummary = summary.trim();
+  if (!trimmedSummary || hasIeeeCitationPreface(trimmedSummary)) return trimmedSummary;
+
+  return `## IEEE规范引用格式\n\n${buildIeeeCitation(request)}\n\n---\n\n${trimmedSummary}`;
+};
+
 const extractYear = (text: string) => text.match(/(?:19|20)\d{2}/)?.[0];
 
 const inferMetadataFromText = (text: string, fallbackTitle?: string): PaperMetadata => {
@@ -2788,7 +2864,7 @@ const startSummaryGenerationJob = (
         ? { text: result.answer, model: 'source-language-direct', inputTokens: 0, outputTokens: 0 }
         : await translateReaderAnswerToChinese(result.answer, request)
       : await summarizeReaderAnswerBrieflyInChinese(result.answer, request, jobId);
-    const summary = finalChineseResult.text;
+    const summary = withIeeeCitationPreface(finalChineseResult.text, request);
     const inputTokens = (freshness?.inputTokens ?? 0) + result.inputTokens + finalChineseResult.inputTokens;
     const outputTokens = (freshness?.outputTokens ?? 0) + result.outputTokens + finalChineseResult.outputTokens;
     const billableTokens =
@@ -3391,10 +3467,12 @@ const app = new Hono()
       });
 
       if (cachedSummary?.trim()) {
+        const citedCachedSummary = withIeeeCitationPreface(cachedSummary, request);
+        const shouldUpdateCachedSummaryCitation = citedCachedSummary !== cachedSummary.trim();
         let freshness;
 
         try {
-          freshness = await checkSummaryFreshnessWithCheapModel(request, cachedSummary);
+          freshness = await checkSummaryFreshnessWithCheapModel(request, citedCachedSummary);
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Cheap summary freshness check failed.';
 
@@ -3404,7 +3482,7 @@ const app = new Hono()
           });
 
           return c.json({
-            summary: cachedSummary,
+            summary: citedCachedSummary,
             cached: true,
             scope: request.scope,
             paperId: request.paperId,
@@ -3444,8 +3522,12 @@ const app = new Hono()
             reason: freshness.result.reason,
           });
 
+          if (shouldUpdateCachedSummaryCitation) {
+            await uploadTextAsAdmin(citedCachedSummary, summaryStoragePath);
+          }
+
           return c.json({
-            summary: cachedSummary,
+            summary: citedCachedSummary,
             cached: true,
             scope: request.scope,
             paperId: request.paperId,
@@ -3485,7 +3567,7 @@ const app = new Hono()
         });
 
         return c.json({
-          summary: cachedSummary,
+          summary: citedCachedSummary,
           cached: true,
           refreshed: true,
           refreshing: true,
@@ -3512,7 +3594,7 @@ const app = new Hono()
           conversationHistory: [],
         }, selectExpensiveReaderModel(), 'english');
         const translatedSummary = await translateReaderAnswerToChinese(result.answer, request);
-        const summary = translatedSummary.text;
+        const summary = withIeeeCitationPreface(translatedSummary.text, request);
 
         console.log('[reader-agent:summarize] expensive summary generation finished', {
           paperId: request.paperId,
@@ -3575,7 +3657,7 @@ const app = new Hono()
         conversationHistory: [],
       }, selectExpensiveReaderModel(), 'english');
       const translatedSummary = await translateReaderAnswerToChinese(result.answer, request);
-      const summary = translatedSummary.text;
+      const summary = withIeeeCitationPreface(translatedSummary.text, request);
 
       console.log('[reader-agent:summarize] no cached summary; expensive summary generation finished', {
         paperId: request.paperId,
