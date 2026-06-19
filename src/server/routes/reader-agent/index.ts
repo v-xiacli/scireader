@@ -50,6 +50,9 @@ type TavilySearchResult = {
   score?: number;
 };
 
+type ReaderMessageContent = Exclude<Anthropic.MessageParam['content'], string>;
+type ReaderMessageContentBlock = ReaderMessageContent[number];
+
 type PaperAccess = {
   user: { id: string; email: string; created_at: string };
   storagePath: string | null;
@@ -107,6 +110,9 @@ type PaperReadingMode = 'reviewer' | 'reader';
 
 const MAX_EXTRACTED_TEXT_CHARS = 600_000;
 const MAX_DIRECT_READER_TEXT_CHARS = 140_000;
+const MAX_RETRIEVED_READER_TEXT_CHARS = 80_000;
+const MIN_PROMPT_CACHE_TEXT_CHARS = 4_000;
+const READER_RETRIEVAL_TOP_PAGES = 10;
 const MAX_FIGURE_CAPTIONS = 40;
 const MAX_PAGE_IMAGES = 6;
 const PDF_RENDER_SCALE = 2;
@@ -673,25 +679,34 @@ type AnthropicModelSelection = {
 const isProfessionalKnowledgePrompt = (prompt: string) =>
   /\b(professional|expert|scientific|academic|peer review|knowledge check|verify|validate|critique|methodology|formula|equation|theorem|statistical|实验|科研|科学|学术|专业|专家|审稿|校验|验证|检查|批判|方法论|公式|定理|统计)\b/i.test(prompt);
 
+const isExpertReviewPrompt = (prompt: string) =>
+  /\b(fake innovation|pseudo[-\s]?innovation|novelty|peer review|reviewer|accept|reject|major revision|minor revision|credibility|fabricat|fraud|data quality|paper tier|publication level|top journal|weak paper|opportunistic|审稿|创新性|伪创新|假创新|能不能发|为什么能发|接收|拒稿|大修|小修|可信度|数据造假|造假嫌疑|论文档次|论文水平|期刊档次|灌水|水刊|捡漏|分区|中科院|核心期刊)\b/i.test(prompt);
+
 const selectReaderModel = (request: z.infer<typeof readerRequestSchema>): AnthropicModelSelection => {
   if (request.model) return { model: request.model, target: 'default' };
 
-  const expertModel = process.env.ANTHROPIC_EXPENSIVE_MODEL?.trim();
+  const expertModel = process.env.ANTHROPIC_EXPERT_MODEL?.trim() || process.env.ANTHROPIC_EXPENSIVE_MODEL?.trim();
+  const readerModel = process.env.ANTHROPIC_READER_MODEL?.trim();
   const textModel = process.env.ANTHROPIC_CHEAP_MODEL?.trim();
-  const defaultModel = process.env.ANTHROPIC_MODEL?.trim() || 'gpt-5.5';
+  const defaultReaderModel = process.env.ANTHROPIC_MODEL?.trim() || 'gpt-5.4';
+  const defaultExpertModel = 'gpt-5.5';
 
-  if (request.scope === 'figure' || isProfessionalKnowledgePrompt(request.prompt)) {
-    return { model: expertModel || defaultModel, target: expertModel ? 'expensive' : 'default' };
+  if (request.scope === 'figure' || isExpertReviewPrompt(request.prompt)) {
+    return { model: expertModel || defaultExpertModel, target: 'expensive' };
   }
 
-  return { model: textModel || defaultModel, target: textModel ? 'cheap' : 'default' };
+  if (isProfessionalKnowledgePrompt(request.prompt)) {
+    return { model: readerModel || defaultReaderModel, target: readerModel ? 'expensive' : 'default' };
+  }
+
+  return { model: textModel || defaultReaderModel, target: textModel ? 'cheap' : 'default' };
 };
 
 const selectImageModel = (request: z.infer<typeof imageRequestSchema>): AnthropicModelSelection => {
   if (request.model) return { model: request.model, target: 'default' };
 
-  const expertModel = process.env.ANTHROPIC_EXPENSIVE_MODEL?.trim();
-  const defaultModel = process.env.ANTHROPIC_MODEL?.trim() || 'gpt-5.5';
+  const expertModel = process.env.ANTHROPIC_EXPERT_MODEL?.trim();
+  const defaultModel = process.env.ANTHROPIC_MODEL?.trim() || 'gpt-5.4';
 
   return { model: expertModel || defaultModel, target: expertModel ? 'expensive' : 'default' };
 };
@@ -699,7 +714,7 @@ const selectImageModel = (request: z.infer<typeof imageRequestSchema>): Anthropi
 const selectTokenEstimateModel = (request: z.infer<typeof tokenEstimateRequestSchema>): AnthropicModelSelection => {
   if (request.model) return { model: request.model, target: 'default' };
 
-  const defaultModel = process.env.ANTHROPIC_MODEL?.trim() || 'gpt-5.5';
+  const defaultModel = process.env.ANTHROPIC_MODEL?.trim() || 'gpt-5.4';
 
   return { model: defaultModel, target: 'default' };
 };
@@ -712,16 +727,25 @@ const selectCheapTriageModel = (): AnthropicModelSelection => {
 };
 
 const selectExpensiveReaderModel = (): AnthropicModelSelection => {
-  const expertModel = process.env.ANTHROPIC_EXPENSIVE_MODEL?.trim();
-  const defaultModel = process.env.ANTHROPIC_MODEL?.trim() || 'gpt-5.5';
+  const readerModel = process.env.ANTHROPIC_READER_MODEL?.trim();
+  const defaultModel = process.env.ANTHROPIC_MODEL?.trim() || 'gpt-5.4';
 
-  return { model: expertModel || defaultModel, target: expertModel ? 'expensive' : 'default' };
+  return { model: readerModel || defaultModel, target: readerModel ? 'expensive' : 'default' };
+};
+
+const selectExpertReviewModel = (): AnthropicModelSelection => {
+  const expertModel = process.env.ANTHROPIC_EXPERT_MODEL?.trim() || process.env.ANTHROPIC_EXPENSIVE_MODEL?.trim();
+  const defaultModel = 'gpt-5.5';
+
+  return { model: expertModel || defaultModel, target: 'expensive' };
 };
 
 const getModelTokenWeight = (model?: string) => {
   const normalizedModel = model?.toLowerCase() ?? '';
 
-  return normalizedModel.includes('gpt-5.5') ? 2 : 1;
+  if (normalizedModel.includes('gpt-5.5')) return 2;
+  if (/gpt-5\.4(?!-mini)/.test(normalizedModel)) return 1.5;
+  return 1;
 };
 
 const getBillableTokens = (inputTokens: number, outputTokens: number, model?: string) =>
@@ -868,6 +892,253 @@ const buildReaderSystemPrompt = (hasPdfContext: boolean, hasWebSearch: boolean, 
     : nextBasePrompt;
 };
 
+const addReaderTextBlock = (blocks: ReaderMessageContent, text: string, cacheable = false) => {
+  const trimmedText = text.trim();
+
+  if (!trimmedText) return false;
+
+  const shouldCache = cacheable && trimmedText.length >= MIN_PROMPT_CACHE_TEXT_CHARS;
+  blocks.push(
+    shouldCache
+      ? ({ type: 'text', text: trimmedText, cache_control: { type: 'ephemeral' } } as ReaderMessageContentBlock)
+      : ({ type: 'text', text: trimmedText } as ReaderMessageContentBlock),
+  );
+
+  return shouldCache;
+};
+
+const countOccurrences = (text: string, term: string) => {
+  if (!term) return 0;
+
+  let count = 0;
+  let index = 0;
+
+  while ((index = text.indexOf(term, index)) !== -1) {
+    count += 1;
+    index += term.length;
+  }
+
+  return count;
+};
+
+const readerRetrievalStopWords = new Set([
+  'about',
+  'above',
+  'after',
+  'again',
+  'against',
+  'analysis',
+  'answer',
+  'based',
+  'because',
+  'before',
+  'between',
+  'could',
+  'detail',
+  'does',
+  'from',
+  'have',
+  'into',
+  'main',
+  'method',
+  'paper',
+  'please',
+  'result',
+  'show',
+  'study',
+  'that',
+  'their',
+  'there',
+  'these',
+  'this',
+  'what',
+  'when',
+  'where',
+  'which',
+  'with',
+  'would',
+]);
+
+const extractReaderRetrievalTerms = (prompt: string) => {
+  const lowerPrompt = prompt.toLowerCase();
+  const latinTerms = lowerPrompt.match(/[a-z][a-z0-9-]{2,}/g) ?? [];
+  const cjkTerms = lowerPrompt.match(/[\u4e00-\u9fff]{2,}/g) ?? [];
+
+  return Array.from(new Set([...latinTerms, ...cjkTerms])).filter((term) => !readerRetrievalStopWords.has(term) && term.length <= 40);
+};
+
+const scorePdfPageForPrompt = (prompt: string, pageText: string, terms: string[]) => {
+  const lowerPrompt = prompt.toLowerCase();
+  const lowerPageText = pageText.toLowerCase();
+  let score = 0;
+
+  for (const term of terms) {
+    score += countOccurrences(lowerPageText, term) * Math.min(term.length, 16);
+  }
+
+  if (/\b(introduction|related work|background)\b|引言|相关工作|背景/.test(lowerPrompt) && /\b(introduction|related work|background)\b|引言|相关工作|背景/i.test(pageText)) {
+    score += 120;
+  }
+
+  if (/\b(method|approach|model|algorithm|architecture)\b|方法|模型|算法|结构/.test(lowerPrompt) && /\b(method|approach|model|algorithm|architecture)\b|方法|模型|算法|结构/i.test(pageText)) {
+    score += 90;
+  }
+
+  if (/\b(result|experiment|evaluation|baseline|ablation)\b|实验|结果|对比|消融/.test(lowerPrompt) && /\b(result|experiment|evaluation|baseline|ablation)\b|实验|结果|对比|消融/i.test(pageText)) {
+    score += 90;
+  }
+
+  if (/\b(conclusion|discussion|limitation)\b|结论|讨论|局限/.test(lowerPrompt) && /\b(conclusion|discussion|limitation)\b|结论|讨论|局限/i.test(pageText)) {
+    score += 100;
+  }
+
+  return score;
+};
+
+const formatPdfPageText = (page: ExtractedPdfPage) => `[Page ${page.pageNumber}]\n${page.text}`;
+
+const selectRetrievedPdfPages = (prompt: string, pages: ExtractedPdfPage[]) => {
+  const terms = extractReaderRetrievalTerms(prompt);
+  const scoredPages = pages
+    .map((page) => ({
+      page,
+      score: scorePdfPageForPrompt(prompt, page.text, terms),
+    }))
+    .sort((left, right) => right.score - left.score);
+  const selectedPageNumbers = new Set<number>();
+
+  for (const page of pages.slice(0, 2)) selectedPageNumbers.add(page.pageNumber);
+  for (const page of pages.slice(-2)) selectedPageNumbers.add(page.pageNumber);
+
+  for (const scoredPage of scoredPages) {
+    if (selectedPageNumbers.size >= READER_RETRIEVAL_TOP_PAGES) break;
+    if (scoredPage.score <= 0 && terms.length > 0) continue;
+    selectedPageNumbers.add(scoredPage.page.pageNumber);
+  }
+
+  if (selectedPageNumbers.size < Math.min(READER_RETRIEVAL_TOP_PAGES, pages.length)) {
+    for (const page of pages) {
+      if (selectedPageNumbers.size >= Math.min(READER_RETRIEVAL_TOP_PAGES, pages.length)) break;
+      selectedPageNumbers.add(page.pageNumber);
+    }
+  }
+
+  const selectedPages = pages.filter((page) => selectedPageNumbers.has(page.pageNumber));
+  const pageTexts: string[] = [];
+  let chars = 0;
+
+  for (const page of selectedPages) {
+    const text = formatPdfPageText(page);
+    const remainingChars = MAX_RETRIEVED_READER_TEXT_CHARS - chars;
+
+    if (remainingChars <= 0) break;
+
+    if (text.length > remainingChars) {
+      pageTexts.push(`${text.slice(0, remainingChars)}\n[Page excerpt truncated to fit the retrieval budget.]`);
+      chars = MAX_RETRIEVED_READER_TEXT_CHARS;
+      break;
+    }
+
+    pageTexts.push(text);
+    chars += text.length;
+  }
+
+  return {
+    pageNumbers: selectedPages.map((page) => page.pageNumber),
+    text: pageTexts.join('\n\n'),
+    terms,
+  };
+};
+
+const selectReaderPdfContext = (request: z.infer<typeof readerRequestSchema>, extractedPdf?: ExtractedPdf) => {
+  if (!extractedPdf?.text.trim()) return null;
+
+  const pageText = request.pageNumber ? extractedPdf.pages.find((page) => page.pageNumber === request.pageNumber) : undefined;
+
+  if ((request.scope === 'current-page' || request.scope === 'figure' || request.scope === 'selected-text') && pageText?.text.trim()) {
+    return {
+      text: `Extracted PDF text for the current page:\n${formatPdfPageText(pageText)}`,
+      strategy: `page-${pageText.pageNumber}`,
+      pageNumbers: [pageText.pageNumber],
+      cacheable: pageText.text.length >= MIN_PROMPT_CACHE_TEXT_CHARS,
+    };
+  }
+
+  if (extractedPdf.text.length <= MAX_DIRECT_READER_TEXT_CHARS) {
+    return {
+      text: `Extracted PDF text:\n${extractedPdf.text}`,
+      strategy: 'full-text',
+      pageNumbers: extractedPdf.pages.map((page) => page.pageNumber),
+      cacheable: true,
+    };
+  }
+
+  const retrieved = selectRetrievedPdfPages(request.prompt, extractedPdf.pages);
+
+  return {
+    text: `Retrieved PDF excerpts for this question. The full extracted paper has ${extractedPdf.extractedChars} characters across ${extractedPdf.pages.length} pages, so this request sends only the most relevant pages plus opening/closing context.\nRetrieved pages: ${retrieved.pageNumbers.join(', ') || 'none'}\nRetrieval terms: ${retrieved.terms.join(', ') || 'none'}\n\n${retrieved.text}`,
+    strategy: 'retrieved-pages',
+    pageNumbers: retrieved.pageNumbers,
+    cacheable: retrieved.text.length >= MIN_PROMPT_CACHE_TEXT_CHARS,
+  };
+};
+
+const formatConversationHistoryForReaderPrompt = (history?: Array<{ role: 'user' | 'assistant'; content: string }>) => {
+  const turns = (history ?? [])
+    .slice(-8)
+    .map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}: ${message.content.slice(0, 3000)}`);
+
+  return turns.length ? `Recent conversation for continuity:\n${turns.join('\n\n')}` : '';
+};
+
+const buildReaderPromptContent = (request: z.infer<typeof readerRequestSchema>, extractedPdf?: ExtractedPdf, webSearchResults: TavilySearchResult[] = []) => {
+  const blocks: ReaderMessageContent = [];
+  const pdfContext = selectReaderPdfContext(request, extractedPdf);
+  const paperContextSummary = request.paperContextSummary?.trim()
+    ? `Known paper notes:\n${request.paperContextSummary.trim().slice(0, 12000)}`
+    : '';
+  const figureCaptions = extractedPdf?.figureCaptions.length
+    ? `Figure/table caption candidates:\n${extractedPdf.figureCaptions.map((caption, index) => `${index + 1}. ${caption}`).join('\n')}`
+    : '';
+  const stableHeader = [
+    `Paper title: ${request.title ?? request.paperId}`,
+    `Request scope: ${request.scope}`,
+    paperContextSummary,
+    figureCaptions,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+  let cacheableBlocks = 0;
+
+  addReaderTextBlock(blocks, stableHeader);
+
+  if (pdfContext) {
+    if (addReaderTextBlock(blocks, pdfContext.text, pdfContext.cacheable)) cacheableBlocks += 1;
+  } else if (request.selectedText || request.paperContextSummary) {
+    addReaderTextBlock(blocks, 'Extracted PDF text: Full text is not available in this request. Use the provided notes or selected text; if evidence is missing, say the paper does not provide sufficient information.');
+  }
+
+  const webSearchText = webSearchResults.length ? `Tavily Web search results:\n${formatWebSearchResults(webSearchResults)}` : '';
+  const dynamicPrompt = [
+    formatConversationHistoryForReaderPrompt(request.conversationHistory),
+    request.selectedText ? `Selected text:\n${request.selectedText}` : '',
+    webSearchText,
+    `User request:\n${request.prompt}`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  addReaderTextBlock(blocks, dynamicPrompt);
+
+  return {
+    content: blocks,
+    cacheableBlocks,
+    pdfContextChars: pdfContext?.text.length ?? 0,
+    pdfContextStrategy: pdfContext?.strategy ?? 'none',
+    pdfContextPages: pdfContext?.pageNumbers ?? [],
+  };
+};
+
 const buildReaderUserPrompt = (request: z.infer<typeof readerRequestSchema>, extractedPdf?: ExtractedPdf, webSearchResults: TavilySearchResult[] = []) => {
   const webSearchText = webSearchResults.length ? `Tavily Web search results:\n${formatWebSearchResults(webSearchResults)}\n\n` : '';
   const pageText = request.pageNumber ? extractedPdf?.pages.find((page) => page.pageNumber === request.pageNumber)?.text : undefined;
@@ -940,7 +1211,9 @@ const askClaude = async (request: z.infer<typeof readerRequestSchema>, forcedMod
 
     const modelSelection = forcedModelSelection ?? selectReaderModel(request);
     const client = createAnthropicClient(modelSelection.target);
-    const content: Exclude<Anthropic.MessageParam['content'], string> = [{ type: 'text', text: buildReaderUserPrompt(request, extractedPdf, webSearchResults) }];
+    const promptContent = buildReaderPromptContent(request, extractedPdf, webSearchResults);
+    const content = promptContent.content;
+    const finalPromptBlock = content.pop();
 
     for (const image of pageImages) {
       if (true) {
@@ -957,8 +1230,12 @@ const askClaude = async (request: z.infer<typeof readerRequestSchema>, forcedMod
       });
     }
 
-    if (tempPdf) {
-      content.push({
+    if (finalPromptBlock) content.push(finalPromptBlock);
+
+    const shouldAttachPdfDocument = Boolean(tempPdf && !extractedPdf?.text.trim() && pageImages.length === 0);
+
+    if (shouldAttachPdfDocument && tempPdf) {
+      content.splice(Math.max(content.length - 1, 0), 0, {
         type: 'document',
         source: {
           type: 'base64',
@@ -966,24 +1243,43 @@ const askClaude = async (request: z.infer<typeof readerRequestSchema>, forcedMod
           data: tempPdf.buffer.toString('base64'),
         },
         title: request.title ?? request.paperId,
-      });
+        cache_control: { type: 'ephemeral' },
+      } as ReaderMessageContentBlock);
     }
 
+    console.log('[reader-agent:ask] prompt context prepared', {
+      paperId: request.paperId,
+      scope: request.scope,
+      model: modelSelection.model,
+      pdfContextStrategy: promptContent.pdfContextStrategy,
+      pdfContextChars: promptContent.pdfContextChars,
+      pdfContextPages: promptContent.pdfContextPages.slice(0, 20),
+      cacheableBlocks: promptContent.cacheableBlocks,
+      pageImages: pageImages.map((image) => image.pageNumber),
+      attachedPdfDocument: shouldAttachPdfDocument,
+      messageBlocks: content.length,
+    });
+
     const response = await client.beta.messages.create({
-      betas: localPdfPath ? ['files-api-2025-04-14'] : [],
+      betas: shouldAttachPdfDocument ? ['files-api-2025-04-14'] : [],
       model: modelSelection.model,
       max_tokens: 16000,
-      cache_control: { type: 'ephemeral' },
       system: buildReaderSystemPrompt(Boolean(localPdfPath || extractedPdf || request.selectedText || request.paperContextSummary), hasWebSearch, request.modePrompt, responseLanguage),
-      messages: [
-        ...(request.conversationHistory ?? [])
-          .slice(-8)
-          .map((message): Anthropic.MessageParam => ({
-            role: message.role,
-            content: message.content.slice(0, 4000),
-          })),
-        { role: 'user', content },
-      ],
+      messages: [{ role: 'user', content }],
+    });
+    const usageWithCache = response.usage as typeof response.usage & {
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
+    };
+
+    console.log('[reader-agent:ask] reader request finished', {
+      paperId: request.paperId,
+      scope: request.scope,
+      model: modelSelection.model,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      cacheCreationInputTokens: usageWithCache.cache_creation_input_tokens ?? 0,
+      cacheReadInputTokens: usageWithCache.cache_read_input_tokens ?? 0,
     });
 
     return {
@@ -1739,7 +2035,7 @@ const retrieveAnswerFromSharedPaperMemory = async (
     model: modelSelection.model,
     max_tokens: 4000,
     system:
-      'You are SCIReader memory retrieval and routing. Search saved Azure Blob records for this exact paper key. Identity rule: if the user asks identity, source, creator, father, provider, model, or version questions, set sufficient=true and answerDraft exactly: 我是论文阅读小助手. Do not route identity questions to GPT-5.5. For paper analysis, decide whether saved records are enough or GPT-5.5 must read the PDF again. If the question is clearly unrelated to the paper, answer as normal general chat in Chinese and set sufficient=true. Do not refuse just because paper evidence is absent for a non-paper question. Output only JSON.',
+      'You are SCIReader memory retrieval and routing. Search saved Azure Blob records for this exact paper key. Identity rule: if the user asks identity, source, creator, father, provider, model, or version questions, set sufficient=true and answerDraft exactly: 我是论文阅读小助手. Do not route identity questions to the high-cost reader. For paper analysis, decide whether saved records are enough or the high-cost reader must read the PDF again. If the question is clearly unrelated to the paper, answer as normal general chat in Chinese and set sufficient=true. Do not refuse just because paper evidence is absent for a non-paper question. Output only JSON.',
     messages: [
       {
         role: 'user',
@@ -1895,6 +2191,9 @@ const estimateTokenConsumption = async (request: z.infer<typeof tokenEstimateReq
       inputTokens,
       pdfBytes: tempPdf.buffer.byteLength,
       extractedChars: extractedPdf.text.length,
+      pages: extractedPdf.pages.length,
+      sourceLanguage: extractedPdf.sourceLanguage,
+      wasTruncated: extractedPdf.wasTruncated,
       durationMs: Date.now() - startedAt,
     });
 
@@ -1906,6 +2205,11 @@ const estimateTokenConsumption = async (request: z.infer<typeof tokenEstimateReq
       prompt,
       estimated: true,
       method: 'local-text-estimate',
+      pages: extractedPdf.pages.length,
+      extractedChars: extractedPdf.extractedChars,
+      returnedChars: extractedPdf.returnedChars,
+      sourceLanguage: extractedPdf.sourceLanguage,
+      wasTruncated: extractedPdf.wasTruncated,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'PDF text extraction failed.';
@@ -1929,6 +2233,7 @@ const estimateTokenConsumption = async (request: z.infer<typeof tokenEstimateReq
       prompt,
       estimated: true,
       method: 'local-byte-estimate',
+      pdfBytes: tempPdf.buffer.byteLength,
       warning: `PDF text extraction failed; returned a byte-based local estimate: ${message}`,
     };
   } finally {
@@ -2835,6 +3140,7 @@ const app = new Hono()
       ]
         .filter(Boolean)
         .join('\n\n');
+      const expensiveModelSelection = isExpertReviewPrompt(request.prompt) ? selectExpertReviewModel() : selectExpensiveReaderModel();
       const expensiveTranslatedResult = await askClaude(
         {
           ...request,
@@ -2842,7 +3148,7 @@ const app = new Hono()
           paperContextSummary: expensiveContext,
           conversationHistory: [],
         },
-        selectExpensiveReaderModel(),
+        expensiveModelSelection,
         expensiveReaderLanguage,
       );
       const translatedAnswer = shouldAskExpensiveReaderInChinese

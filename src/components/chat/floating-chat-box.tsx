@@ -60,6 +60,31 @@ type SummaryResponse = {
   } | null;
 };
 
+type TokenEstimateResponse = {
+  inputTokens: number;
+  billableTokens?: number;
+  tokenWeight?: number;
+  model?: string;
+  method?: string;
+  pages?: number;
+  extractedChars?: number;
+  returnedChars?: number;
+  sourceLanguage?: 'chinese' | 'english' | 'mixed';
+  wasTruncated?: boolean;
+  warning?: string;
+};
+
+type LargeSummaryWarning = {
+  summaryKey: string;
+  inputTokens: number;
+  billableTokens: number;
+  model?: string;
+  pages?: number;
+  reason: string;
+};
+
+const largeSummaryBillableTokenThreshold = 500_000;
+
 const paperReadingPrompts: Record<PaperReadingMode, string> = {
   reviewer: `You are a cross-disciplinary engineering and applied-science paper reviewer. Be skeptical, concise, and evidence-based.
 
@@ -159,16 +184,16 @@ const normalizeExportHtml = (html: string) =>
     .replace(/<(p|ul|ol|li|strong|em|code|pre|blockquote|table|thead|tbody|tr|th|td|span|div)[^>]*>/g, '<$1>');
 
 const getSummaryProgress = (elapsedSeconds: number): SummaryProgress => {
-  if (elapsedSeconds < 3) return { percent: 12, label: 'No saved summary found yet. Starting summary generation...', elapsedSeconds };
-  if (elapsedSeconds < 10) return { percent: 28, label: 'Reading the uploaded PDF...', elapsedSeconds };
-  if (elapsedSeconds < 25) return { percent: 52, label: 'Generating the first compact paper report...', elapsedSeconds };
-  if (elapsedSeconds < 60) return { percent: 76, label: 'Still preparing the compact paper report...', elapsedSeconds };
+  if (elapsedSeconds < 3) return { percent: 12, label: '尚未找到已保存摘要，正在開始生成...', elapsedSeconds };
+  if (elapsedSeconds < 10) return { percent: 28, label: '正在讀取上傳的 PDF...', elapsedSeconds };
+  if (elapsedSeconds < 25) return { percent: 52, label: '正在生成第一版精簡論文報告...', elapsedSeconds };
+  if (elapsedSeconds < 60) return { percent: 76, label: '仍在準備精簡論文報告...', elapsedSeconds };
 
-  return { percent: 90, label: 'Still working. First-time summaries can take a few minutes...', elapsedSeconds };
+  return { percent: 90, label: '仍在處理。首次生成可能需要幾分鐘...', elapsedSeconds };
 };
 
 const formatSummaryProgressMessage = (progress: SummaryProgress) =>
-  `${progress.label}\n\n${progress.percent}% complete · ${progress.elapsedSeconds}s elapsed\n\nI will show the summary here automatically when it is ready. After that, future opens should load the saved summary instead of regenerating.`;
+  `${progress.label}\n\n已完成 ${progress.percent}% · 已用 ${progress.elapsedSeconds}s\n\n摘要完成後會自動顯示在這裡；之後再次打開同一篇文獻會優先讀取已保存摘要。`;
 
 const wait = (milliseconds: number, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
@@ -187,6 +212,47 @@ const wait = (milliseconds: number, signal?: AbortSignal) =>
       { once: true },
     );
   });
+
+const formatTokenCount = (tokens: number) => `${Math.round(tokens).toLocaleString()} token`;
+
+const getSummaryRunKey = (paperId: string | undefined, paperPdfUrl: string | undefined, readingMode: PaperReadingMode, detailedReport: boolean) =>
+  paperId && paperPdfUrl ? `${paperId}:${paperPdfUrl}:${readingMode}:${detailedReport ? 'detailed' : 'brief'}` : '';
+
+const isLikelyDissertation = (paper: PaperSummary | null | undefined, estimate?: TokenEstimateResponse) => {
+  const metadataText = [paper?.title, paper?.journal, paper?.abstract]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return (
+    /\b(dissertation|doctoral thesis|phd thesis|ph\.?d\.?|master'?s thesis|thesis)\b|博士|學位論文|学位论文|碩士|硕士/.test(metadataText) ||
+    (estimate?.pages ?? paper?.pages ?? 0) >= 120
+  );
+};
+
+const buildLargeSummaryWarning = (summaryKey: string, paper: PaperSummary | null | undefined, estimate?: TokenEstimateResponse): LargeSummaryWarning | null => {
+  if (!summaryKey || !estimate) return null;
+
+  const inputTokens = estimate.inputTokens ?? 0;
+  const billableTokens = estimate.billableTokens ?? inputTokens;
+  const likelyDissertation = isLikelyDissertation(paper, estimate);
+  const isLarge = billableTokens >= largeSummaryBillableTokenThreshold || inputTokens >= largeSummaryBillableTokenThreshold;
+
+  if (!isLarge && !likelyDissertation) return null;
+
+  const reason = isLarge
+    ? `估算本次摘要可能消耗 ${formatTokenCount(Math.max(billableTokens, inputTokens))}，已超過 500,000 token。`
+    : '這份文件頁數或元資料像學位論文，完整摘要可能消耗很高。';
+
+  return {
+    summaryKey,
+    inputTokens,
+    billableTokens,
+    model: estimate.model,
+    pages: estimate.pages ?? paper?.pages,
+    reason,
+  };
+};
 
 const normalizeMathMarkdown = (content: string) =>
   content
@@ -236,6 +302,9 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const [paperContextSummary, setPaperContextSummary] = useState('');
   const [summaryProgress, setSummaryProgress] = useState<SummaryProgress | null>(null);
   const [isSummarizing, setIsSummarizing] = useState(false);
+  const [largeSummaryWarning, setLargeSummaryWarning] = useState<LargeSummaryWarning | null>(null);
+  const [confirmedLargeSummaryKey, setConfirmedLargeSummaryKey] = useState('');
+  const [isCheckingSummaryCost, setIsCheckingSummaryCost] = useState(false);
   const hasPaper = Boolean(paper);
   const paperId = paper?.id;
   const paperPdfUrl = paper?.pdfUrl;
@@ -243,6 +312,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const readingMode: PaperReadingMode = paper?.readingMode ?? 'reviewer';
   const readingModePrompt = paperReadingPrompts[readingMode];
   const detailedReport = paper?.detailedReport ?? false;
+  const summaryRunKey = getSummaryRunKey(paperId, paperPdfUrl, readingMode, detailedReport);
   const readingModeLabel = `${readingMode === 'reviewer' ? '審稿人模式' : '讀者模式'} · ${detailedReport ? '詳細' : '極簡'}`;
   const fontSizeIndex = chatFontSizeOrder.indexOf(chatFontSize);
   const fontSizeStyle = chatFontSizeStyles[chatFontSize];
@@ -420,6 +490,33 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     return Array.isArray(result.history) ? (result.history as StoredHistoryTurn[]) : [];
   }, [paperId, paperPdfUrl, paperTitle, paper?.authors, paper?.journal, paper?.year]);
 
+  const estimateSummaryCost = useCallback(async (signal?: AbortSignal): Promise<TokenEstimateResponse | null> => {
+    if (!paperId || !paperPdfUrl) return null;
+
+    const response = await fetch('/api/reader-agent/count-tokens', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal,
+      body: JSON.stringify({
+        paperId,
+        pdfUrl: paperPdfUrl,
+        title: paperTitle,
+        authors: paper?.authors,
+        journal: paper?.journal,
+        year: paper?.year,
+        prompt: readingModePrompt,
+        readingMode,
+        modePrompt: readingModePrompt,
+        detailedReport,
+      }),
+    });
+    const result = (await response.json()) as TokenEstimateResponse & { message?: string; error?: string };
+
+    if (!response.ok) throw new Error(result.message ?? result.error ?? 'Token estimate failed.');
+
+    return result;
+  }, [paperId, paperPdfUrl, paperTitle, paper?.authors, paper?.journal, paper?.year, readingModePrompt, readingMode, detailedReport]);
+
   const summarizePaper = useCallback(async (signal?: AbortSignal) => {
     if (!paperId || !paperPdfUrl) return '';
 
@@ -482,6 +579,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
       setPaperContextSummary('');
       setSummaryProgress(null);
       setIsSummarizing(false);
+      setIsCheckingSummaryCost(false);
+      setLargeSummaryWarning(null);
       setMessages(mockMessages);
       return;
     }
@@ -489,64 +588,118 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     let isActive = true;
     const abortController = new AbortController();
     const loadingId = crypto.randomUUID();
-    const startedAt = Date.now();
-    const initialProgress = getSummaryProgress(0);
+    let progressTimer: number | undefined;
 
-    const updateProgress = () => {
-      const nextProgress = getSummaryProgress(Math.floor((Date.now() - startedAt) / 1000));
-      setSummaryProgress(nextProgress);
-      setMessages((current) => current.map((message) => (message.id === loadingId ? { ...message, content: formatSummaryProgressMessage(nextProgress) } : message)));
+    const clearProgressTimer = () => {
+      if (progressTimer !== undefined) {
+        window.clearInterval(progressTimer);
+        progressTimer = undefined;
+      }
     };
 
-    const progressTimer = window.setInterval(updateProgress, 1000);
+    const runSummaryFlow = async () => {
+      setPaperContextSummary('');
+      setSummaryProgress(null);
+      setLargeSummaryWarning(null);
+      setIsSummarizing(false);
+      setIsCheckingSummaryCost(true);
+      setMessages([
+        {
+          id: loadingId,
+          role: 'assistant',
+          content: '正在估算這份文獻的摘要 token 消耗。超大文件不會自動生成摘要，需要你確認後才會開始。',
+          contextLabel: 'Paper report',
+        },
+      ]);
 
-    setPaperContextSummary('');
-    setSummaryProgress(initialProgress);
-    setIsSummarizing(true);
-    setMessages([
-      {
-        id: loadingId,
-        role: 'assistant',
-        content: formatSummaryProgressMessage(initialProgress),
-        contextLabel: 'Paper report',
-      },
-    ]);
+      let estimate: TokenEstimateResponse | null = null;
 
-    summarizePaper(abortController.signal)
-      .then(async (summary) => {
-        if (!isActive) return;
+      try {
+        estimate = await estimateSummaryCost(abortController.signal);
+      } catch (error) {
+        if (abortController.signal.aborted) throw error;
+        console.warn('[reader-agent:summarize] token estimate before auto-summary failed; continuing cautiously', error);
+      }
 
-        window.clearInterval(progressTimer);
-        setSummaryProgress(null);
-        setIsSummarizing(false);
-        const history = await loadPaperHistory().catch(() => []);
-        if (!isActive) return;
+      if (!isActive) return;
 
-        setPaperContextSummary(summary);
+      const warning = buildLargeSummaryWarning(summaryRunKey, paper, estimate ?? undefined);
+
+      if (warning && confirmedLargeSummaryKey !== summaryRunKey) {
+        setIsCheckingSummaryCost(false);
+        setLargeSummaryWarning(warning);
         setMessages([
           {
             id: loadingId,
             role: 'assistant',
-            content: summary,
+            content: `${warning.reason}\n\n這類博士論文/超長文獻不會自動生成摘要。你可以直接提問，我會按需抽取相關頁面回答；如果仍要生成整篇摘要，請點上方確認按鈕。`,
             contextLabel: 'Paper report',
           },
-          ...history.map((turn, index): ChatMessage => ({
-            id: `history-${turn.createdAt}-${index}`,
-            role: turn.role,
-            content: turn.content,
-            contextLabel: turn.role === 'assistant'
-              ? `${turn.routedBy === 'cheap-context' ? 'Saved answer · cheap context' : 'Saved answer · expensive reader'}${turn.inputTokens ? ` · ${turn.inputTokens.toLocaleString()} in / ${(turn.outputTokens ?? 0).toLocaleString()} out` : ''}`
-              : 'Saved question',
-          })),
         ]);
-      })
-      .catch((error) => {
+        return;
+      }
+
+      setIsCheckingSummaryCost(false);
+      setLargeSummaryWarning(null);
+
+      const startedAt = Date.now();
+      const initialProgress = getSummaryProgress(0);
+      const updateProgress = () => {
+        const nextProgress = getSummaryProgress(Math.floor((Date.now() - startedAt) / 1000));
+        setSummaryProgress(nextProgress);
+        setMessages((current) => current.map((message) => (message.id === loadingId ? { ...message, content: formatSummaryProgressMessage(nextProgress) } : message)));
+      };
+
+      progressTimer = window.setInterval(updateProgress, 1000);
+
+      setSummaryProgress(initialProgress);
+      setIsSummarizing(true);
+      setMessages([
+        {
+          id: loadingId,
+          role: 'assistant',
+          content: formatSummaryProgressMessage(initialProgress),
+          contextLabel: 'Paper report',
+        },
+      ]);
+
+      const summary = await summarizePaper(abortController.signal);
+
+      if (!isActive) return;
+
+      clearProgressTimer();
+      setSummaryProgress(null);
+      setIsSummarizing(false);
+      const history = await loadPaperHistory().catch(() => []);
+      if (!isActive) return;
+
+      setPaperContextSummary(summary);
+      setMessages([
+        {
+          id: loadingId,
+          role: 'assistant',
+          content: summary,
+          contextLabel: 'Paper report',
+        },
+        ...history.map((turn, index): ChatMessage => ({
+          id: `history-${turn.createdAt}-${index}`,
+          role: turn.role,
+          content: turn.content,
+          contextLabel: turn.role === 'assistant'
+            ? `${turn.routedBy === 'cheap-context' ? 'Saved answer · cheap context' : 'Saved answer · expensive reader'}${turn.inputTokens ? ` · ${turn.inputTokens.toLocaleString()} in / ${(turn.outputTokens ?? 0).toLocaleString()} out` : ''}`
+            : 'Saved question',
+        })),
+      ]);
+    };
+
+    runSummaryFlow().catch((error) => {
         if (!isActive) return;
         if (error instanceof DOMException && error.name === 'AbortError') return;
 
-        window.clearInterval(progressTimer);
+        clearProgressTimer();
         setSummaryProgress(null);
         setIsSummarizing(false);
+        setIsCheckingSummaryCost(false);
         setMessages([
           {
             id: loadingId,
@@ -560,10 +713,11 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     return () => {
       isActive = false;
       abortController.abort();
-      window.clearInterval(progressTimer);
+      clearProgressTimer();
       setIsSummarizing(false);
+      setIsCheckingSummaryCost(false);
     };
-  }, [paperId, paperPdfUrl, readingMode, summarizePaper, loadPaperHistory]);
+  }, [confirmedLargeSummaryKey, estimateSummaryCost, loadPaperHistory, paper, paperId, paperPdfUrl, readingMode, summarizePaper, summaryRunKey]);
 
   const startDragging = (event: PointerEvent<HTMLElement>) => {
     if (isMobileViewport) return;
@@ -961,6 +1115,35 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
           >
             匯出選中
           </button>
+        </div>
+      ) : null}
+
+      {isMobileViewport && !isMobileChatExpanded ? null : largeSummaryWarning ? (
+        <div className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">超長文獻需要確認</p>
+              <p className="mt-1 leading-5 text-amber-800">
+                {largeSummaryWarning.reason}
+                {largeSummaryWarning.pages ? ` 頁數：約 ${largeSummaryWarning.pages.toLocaleString()} 頁。` : ' '}
+                直接提問會按需抽取頁面；整篇摘要需手動開始。
+              </p>
+            </div>
+            <button
+              className="rounded-lg bg-amber-600 px-3 py-1.5 font-medium text-white hover:bg-amber-700"
+              onClick={() => {
+                setConfirmedLargeSummaryKey(largeSummaryWarning.summaryKey);
+                setLargeSummaryWarning(null);
+              }}
+              type="button"
+            >
+              仍要生成摘要
+            </button>
+          </div>
+          <p className="mt-1 text-[11px] text-amber-700">
+            估算：{formatTokenCount(largeSummaryWarning.billableTokens)} billable
+            {largeSummaryWarning.model ? ` · ${largeSummaryWarning.model}` : ''}
+          </p>
         </div>
       ) : null}
 
