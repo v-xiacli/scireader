@@ -173,10 +173,21 @@ const writingPaperSchema = z.object({
   filePath: z.string().optional(),
 });
 
+const writingArticleSchema = z.object({
+  topic: z.string().min(1),
+  storagePath: z.string().min(1),
+  outputLanguage: z.enum(['chinese', 'english']).optional(),
+  kind: z.enum(['introduction', 'follow-up']).optional(),
+});
+
 const writingRequestSchema = z.object({
   topic: z.string().trim().min(2).max(500),
   outputLanguage: z.enum(['chinese', 'english']),
-  selectedPapers: z.array(writingPaperSchema).min(1).max(20),
+  selectedPapers: z.array(writingPaperSchema).max(20).default([]),
+  selectedArticles: z.array(writingArticleSchema).max(10).default([]),
+}).refine((request) => request.selectedPapers.length > 0 || request.selectedArticles.length > 0, {
+  message: 'Select at least one paper or article.',
+  path: ['selectedPapers'],
 });
 
 const writingFollowUpRequestSchema = writingRequestSchema.extend({
@@ -735,6 +746,14 @@ type WritingSource = {
   externalEvaluations: ReferenceEvaluationRecord[];
 };
 
+type WritingArticleSource = {
+  topic: string;
+  storagePath: string;
+  outputLanguage?: 'chinese' | 'english';
+  kind?: 'introduction' | 'follow-up';
+  content: string;
+};
+
 type WritingArticleRecord = {
   id: string;
   topic: string;
@@ -875,6 +894,31 @@ const loadCachedSummaryForWriting = async (paper: z.infer<typeof writingPaperSch
   }
 
   return null;
+};
+
+const loadSelectedWritingArticles = async (userId: string, articles: z.infer<typeof writingArticleSchema>[]): Promise<WritingArticleSource[]> => {
+  const indexedArticles = await loadWritingArticleRecords(userId);
+  const indexedPaths = new Set(indexedArticles.map((article) => article.storagePath));
+  const sources: WritingArticleSource[] = [];
+
+  for (const article of articles) {
+    const storagePath = assertUserWritingStoragePath(userId, article.storagePath);
+    if (!indexedPaths.has(storagePath)) continue;
+
+    const content = await downloadTextIfExists(storagePath);
+    if (!content?.trim()) continue;
+
+    const indexedArticle = indexedArticles.find((item) => item.storagePath === storagePath);
+    sources.push({
+      topic: indexedArticle?.topic ?? article.topic,
+      storagePath,
+      outputLanguage: indexedArticle?.outputLanguage ?? article.outputLanguage,
+      kind: indexedArticle?.kind ?? article.kind,
+      content,
+    });
+  }
+
+  return sources;
 };
 
 const stripGeneratedReferences = (draft: string) => draft.split(/\n#{1,3}\s*(?:References|参考文献|引用文献)\b/i)[0]?.trim() || draft.trim();
