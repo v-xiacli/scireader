@@ -200,7 +200,7 @@ const writingFollowUpRequestSchema = writingBaseRequestSchema.extend({
   path: ['selectedPapers'],
 });
 
-const writingResultDeleteSchema = z.object({
+const writingResultPathSchema = z.object({
   storagePath: z.string().min(1),
 });
 
@@ -864,6 +864,12 @@ const removeWritingArticleRecord = async (userId: string, storagePath: string) =
   const nextArticles = currentArticles.filter((article) => article.storagePath !== normalizedPath);
 
   return saveWritingArticleRecords(userId, nextArticles);
+};
+
+const extractWritingArticleDraft = (content: string) => {
+  const jsonBlockMatch = content.match(/^# .+?\n\n```json\n[\s\S]*?\n```\n\n/);
+
+  return jsonBlockMatch ? content.slice(jsonBlockMatch[0].length).trim() : content.trim();
 };
 
 const getWritingPaperRequest = (paper: z.infer<typeof writingPaperSchema>) => ({
@@ -3721,7 +3727,32 @@ const app = new Hono()
       return c.json({ error: 'Writing results failed.', message }, status);
     }
   })
-  .delete('/writing-results', zValidator('json', writingResultDeleteSchema), async (c) => {
+  .post('/writing-results/read', zValidator('json', writingResultPathSchema), async (c) => {
+    const request = c.req.valid('json');
+
+    try {
+      const { user } = await requirePaperAccess(c);
+      const storagePath = assertUserWritingStoragePath(user.id, request.storagePath);
+      const articles = await loadWritingArticleRecords(user.id);
+      const article = articles.find((item) => item.storagePath === storagePath);
+
+      if (!article) return c.json({ error: 'Writing result not found in article list.' }, 404);
+
+      const content = await downloadTextAsAdmin(storagePath);
+
+      return c.json({
+        article,
+        content,
+        draft: extractWritingArticleDraft(content),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not read writing result.';
+      const status = message === 'Not authenticated.' ? 401 : error instanceof Error && error.name === 'InvalidWritingResultPathError' ? 400 : 500;
+
+      return c.json({ error: 'Could not read writing result.', message }, status);
+    }
+  })
+  .delete('/writing-results', zValidator('json', writingResultPathSchema), async (c) => {
     const request = c.req.valid('json');
 
     try {
