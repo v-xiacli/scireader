@@ -40,6 +40,16 @@ const normalizeDownloadUrl = (downloadUrl: string) => {
 
 const fallbackPaperKey = (fileName: string) => fileName.replace(/\.pdf$/i, '').toLowerCase().replace(/[^a-z0-9]/g, '') || 'uploadedpaper';
 
+const getBillingModeLabel = (model?: string) => {
+  const normalizedModel = model?.toLowerCase() ?? '';
+
+  if (normalizedModel.includes('5.5')) return 'pro';
+  if (normalizedModel.includes('5.4-mini')) return 'min';
+  if (normalizedModel.includes('5.4')) return 'normal';
+
+  return 'normal';
+};
+
 const HomePage = () => {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -375,7 +385,7 @@ const HomePage = () => {
                 </p>
                 <p className="mt-1 max-w-44 text-xs text-muted-foreground">
                   {tokenEstimate
-                    ? `${tokenEstimate.inputTokens.toLocaleString()} raw · ${tokenEstimate.model}${tokenEstimate.tokenWeight ? ` x${tokenEstimate.tokenWeight}` : ''}`
+                    ? `${tokenEstimate.inputTokens.toLocaleString()} raw · ${getBillingModeLabel(tokenEstimate.model)}${tokenEstimate.tokenWeight ? ` x${tokenEstimate.tokenWeight}` : ''}`
                     : tokenEstimateMessage}
                 </p>
               </div>
@@ -400,7 +410,7 @@ const HomePage = () => {
             </div>
             <div>
               <p className="font-medium">扣費規則</p>
-              <p className="mt-1 text-muted-foreground">5.4-mini 按 1 倍，5.4 按 1.5 倍，5.5 按 2 倍。</p>
+              <p className="mt-1 text-muted-foreground">min 按 1 倍，normal 按 1.5 倍，pro 按 2 倍。</p>
             </div>
             <div>
               <p className="font-medium">閱讀估算</p>
