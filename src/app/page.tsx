@@ -113,12 +113,15 @@ const HomePage = () => {
   const [writingFollowUp, setWritingFollowUp] = useState('');
   const [isWritingFollowUp, setIsWritingFollowUp] = useState(false);
   const [writingArticles, setWritingArticles] = useState<WritingArticle[]>([]);
+  const [writingSelectedArticlePaths, setWritingSelectedArticlePaths] = useState<string[]>([]);
   const [deletingWritingPath, setDeletingWritingPath] = useState<string | null>(null);
 
   const isLoggedIn = Boolean(authUser);
   const papers = uploadedPapers;
   const getWritingPaperKey = (paper: PaperSummary) => paper.filePath ?? paper.id;
   const selectedWritingPapers = uploadedPapers.filter((paper) => writingSelectedPaperKeys.includes(getWritingPaperKey(paper)));
+  const selectedWritingArticles = writingArticles.filter((article) => writingSelectedArticlePaths.includes(article.storagePath));
+  const selectedWritingMaterialCount = selectedWritingPapers.length + selectedWritingArticles.length;
 
   const applyViewerPreferences = (preferences?: ViewerPreferences | null) => {
     if (preferences?.readingMode) setReadingMode(preferences.readingMode);
@@ -283,6 +286,7 @@ const HomePage = () => {
     setUploadedPapers([]);
     setWritingArticles([]);
     setWritingSelectedPaperKeys([]);
+    setWritingSelectedArticlePaths([]);
     setAuthMessage('Logged out.');
   };
 
@@ -429,6 +433,14 @@ const HomePage = () => {
     setWritingSelectedPaperKeys((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]);
   };
 
+  const toggleWritingArticle = (article: WritingArticle) => {
+    setWritingSelectedArticlePaths((current) =>
+      current.includes(article.storagePath)
+        ? current.filter((item) => item !== article.storagePath)
+        : [...current, article.storagePath],
+    );
+  };
+
   const handleGenerateWriting = async () => {
     if (!isLoggedIn) {
       setWritingMessage('Please log in before using writing mode.');
@@ -440,8 +452,8 @@ const HomePage = () => {
       return;
     }
 
-    if (!selectedWritingPapers.length) {
-      setWritingMessage('请选择至少一篇已读文件。');
+    if (!selectedWritingMaterialCount) {
+      setWritingMessage('请选择至少一篇已读文件或已生成文章。');
       return;
     }
 
@@ -463,6 +475,12 @@ const HomePage = () => {
             year: paper.year,
             pdfUrl: paper.pdfUrl,
             filePath: paper.filePath,
+          })),
+          selectedArticles: selectedWritingArticles.map((article) => ({
+            topic: article.topic,
+            storagePath: article.storagePath,
+            outputLanguage: article.outputLanguage,
+            kind: article.kind,
           })),
         }),
       });
@@ -520,6 +538,12 @@ const HomePage = () => {
             pdfUrl: paper.pdfUrl,
             filePath: paper.filePath,
           })),
+          selectedArticles: selectedWritingArticles.map((article) => ({
+            topic: article.topic,
+            storagePath: article.storagePath,
+            outputLanguage: article.outputLanguage,
+            kind: article.kind,
+          })),
         }),
       });
       const result = await response.json();
@@ -557,6 +581,7 @@ const HomePage = () => {
       if (!response.ok) throw new Error(result.message ?? result.error ?? 'Could not delete article.');
 
       setWritingArticles(result.articles);
+      setWritingSelectedArticlePaths((current) => current.filter((item) => item !== article.storagePath));
       if (writingResult?.storagePath === article.storagePath) setWritingResult(null);
       setWritingMessage('Article removed.');
     } catch (error) {
@@ -731,7 +756,7 @@ const HomePage = () => {
               <h2 className="text-xl font-semibold">写作模式</h2>
             </div>
             <p className="text-sm text-muted-foreground">
-              基于已保存的读书笔记组织 Introduction，并按首次出现顺序生成引用编号；写作模式按 3 倍 token 计费。
+              基于已保存的读书笔记组织 Introduction，并按首次出现顺序生成引用编号；写作模式按 1.5 倍 token 计费。
             </p>
           </div>
 
@@ -767,9 +792,9 @@ const HomePage = () => {
               </div>
 
               <div>
-                <p className="text-sm font-medium">已选文献</p>
+                <p className="text-sm font-medium">已选素材</p>
                 <div className="mt-2 min-h-20 rounded-xl border p-3">
-                  {selectedWritingPapers.length ? (
+                  {selectedWritingMaterialCount ? (
                     <div className="flex flex-wrap gap-2">
                       {selectedWritingPapers.map((paper) => (
                         <button
@@ -785,16 +810,30 @@ const HomePage = () => {
                           </span>
                         </button>
                       ))}
+                      {selectedWritingArticles.map((article) => (
+                        <button
+                          className="max-w-full rounded-lg border bg-indigo-50 px-3 py-2 text-left text-sm transition hover:border-primary hover:bg-white"
+                          key={article.storagePath}
+                          onClick={() => toggleWritingArticle(article)}
+                          title="取消选择"
+                          type="button"
+                        >
+                          <span className="block truncate font-medium">{article.topic}</span>
+                          <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                            Article · {article.kind === 'follow-up' ? 'Follow-up' : 'Introduction'} · {formatArticleDate(article.savedAt)}
+                          </span>
+                        </button>
+                      ))}
                     </div>
                   ) : (
-                    <p className="text-sm text-muted-foreground">请在下面的 Your papers 列表里勾选要用于写作的文献。</p>
+                    <p className="text-sm text-muted-foreground">请在下面的 Your papers 或 Your articles 列表里勾选要用于写作的素材。</p>
                   )}
                 </div>
               </div>
 
               <button
                 className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
-                disabled={isWriting || !isLoggedIn || !writingTopic.trim() || !selectedWritingPapers.length}
+                disabled={isWriting || !isLoggedIn || !writingTopic.trim() || !selectedWritingMaterialCount}
                 onClick={() => void handleGenerateWriting()}
                 type="button"
               >
@@ -827,7 +866,7 @@ const HomePage = () => {
                 />
                 <button
                   className="inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-70"
-                  disabled={isWritingFollowUp || !writingFollowUp.trim() || !selectedWritingPapers.length}
+                  disabled={isWritingFollowUp || !writingFollowUp.trim() || !selectedWritingMaterialCount}
                   onClick={() => void handleWritingFollowUp()}
                   type="button"
                 >
@@ -848,38 +887,54 @@ const HomePage = () => {
           </div>
 
           <div className="mt-5 grid gap-3">
-            {writingArticles.length ? writingArticles.map((article) => (
-              <div
-                className="flex flex-col gap-3 rounded-2xl border p-4 transition hover:border-primary hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between"
-                key={article.storagePath}
-              >
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="font-semibold">{article.topic}</h3>
-                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
-                      {article.kind === 'follow-up' ? 'Follow-up' : 'Introduction'}
-                    </span>
-                    <span className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
-                      {article.outputLanguage === 'english' ? 'English' : '中文'}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {formatArticleDate(article.savedAt)} · {article.selectedPaperCount} papers
-                    {article.billableTokens ? ` · ${article.billableTokens.toLocaleString()} billable` : ''}
-                  </p>
-                  <p className="mt-2 truncate text-xs text-muted-foreground">{article.storagePath}</p>
-                </div>
-                <button
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border p-2 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 sm:self-center"
-                  disabled={deletingWritingPath === article.storagePath}
-                  onClick={() => void handleRemoveWritingArticle(article)}
-                  title="Remove from list"
-                  type="button"
+            {writingArticles.length ? writingArticles.map((article) => {
+              const isSelectedForWriting = writingSelectedArticlePaths.includes(article.storagePath);
+
+              return (
+                <div
+                  className="flex flex-col gap-3 rounded-2xl border p-4 transition hover:border-primary hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between"
+                  key={article.storagePath}
                 >
-                  {deletingWritingPath === article.storagePath ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
-                </button>
-              </div>
-            )) : (
+                  <label
+                    className="flex shrink-0 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm transition hover:border-primary hover:bg-white"
+                    title={isSelectedForWriting ? '取消加入写作模式' : '加入写作模式'}
+                  >
+                    <input
+                      checked={isSelectedForWriting}
+                      className="size-4"
+                      onChange={() => toggleWritingArticle(article)}
+                      type="checkbox"
+                    />
+                    <span className="hidden sm:inline">写作</span>
+                  </label>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-semibold">{article.topic}</h3>
+                      <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
+                        {article.kind === 'follow-up' ? 'Follow-up' : 'Introduction'}
+                      </span>
+                      <span className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
+                        {article.outputLanguage === 'english' ? 'English' : '中文'}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {formatArticleDate(article.savedAt)} · {article.selectedPaperCount} papers
+                      {article.billableTokens ? ` · ${article.billableTokens.toLocaleString()} billable` : ''}
+                    </p>
+                    <p className="mt-2 truncate text-xs text-muted-foreground">{article.storagePath}</p>
+                  </div>
+                  <button
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border p-2 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 sm:self-center"
+                    disabled={deletingWritingPath === article.storagePath}
+                    onClick={() => void handleRemoveWritingArticle(article)}
+                    title="Remove from list"
+                    type="button"
+                  >
+                    {deletingWritingPath === article.storagePath ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                  </button>
+                </div>
+              );
+            }) : (
               <div className="rounded-2xl border bg-slate-50 p-4 text-sm text-muted-foreground">
                 还没有写作结果。生成 Introduction 后会自动出现在这里。
               </div>

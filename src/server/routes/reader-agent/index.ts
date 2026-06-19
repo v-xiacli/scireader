@@ -116,7 +116,7 @@ const READER_RETRIEVAL_TOP_PAGES = 10;
 const MAX_FIGURE_CAPTIONS = 40;
 const MAX_PAGE_IMAGES = 6;
 const PDF_RENDER_SCALE = 2;
-const WRITING_BILLING_MULTIPLIER = 3;
+const WRITING_BILLING_MULTIPLIER = 1.5;
 
 const readerRequestSchema = z.object({
   paperId: z.string().min(1),
@@ -180,19 +180,24 @@ const writingArticleSchema = z.object({
   kind: z.enum(['introduction', 'follow-up']).optional(),
 });
 
-const writingRequestSchema = z.object({
+const writingBaseRequestSchema = z.object({
   topic: z.string().trim().min(2).max(500),
   outputLanguage: z.enum(['chinese', 'english']),
   selectedPapers: z.array(writingPaperSchema).max(20).default([]),
   selectedArticles: z.array(writingArticleSchema).max(10).default([]),
-}).refine((request) => request.selectedPapers.length > 0 || request.selectedArticles.length > 0, {
+});
+
+const writingRequestSchema = writingBaseRequestSchema.refine((request) => request.selectedPapers.length > 0 || request.selectedArticles.length > 0, {
   message: 'Select at least one paper or article.',
   path: ['selectedPapers'],
 });
 
-const writingFollowUpRequestSchema = writingRequestSchema.extend({
+const writingFollowUpRequestSchema = writingBaseRequestSchema.extend({
   question: z.string().trim().min(1).max(1000),
   currentDraft: z.string().trim().min(1).max(60000),
+}).refine((request) => request.selectedPapers.length > 0 || request.selectedArticles.length > 0, {
+  message: 'Select at least one paper or article.',
+  path: ['selectedPapers'],
 });
 
 const writingResultDeleteSchema = z.object({
@@ -2749,7 +2754,7 @@ const prepareWritingSources = async (userId: string, request: z.infer<typeof wri
     throw error;
   }
 
-  if (!sources.length) {
+  if (request.selectedPapers.length > 0 && !sources.length) {
     const error = new Error('No usable reading notes were found for the selected papers.');
     error.name = 'MissingWritingSummaryError';
     throw error;
@@ -2758,7 +2763,7 @@ const prepareWritingSources = async (userId: string, request: z.infer<typeof wri
   return sources;
 };
 
-const buildWritingPrompt = (request: z.infer<typeof writingRequestSchema>, sources: WritingSource[]) => {
+const buildWritingPrompt = (request: z.infer<typeof writingRequestSchema>, sources: WritingSource[], articleSources: WritingArticleSource[]) => {
   const languageInstruction = request.outputLanguage === 'english'
     ? 'Write in polished academic English.'
     : '使用中文写作，保持学术论文 Introduction 的正式语气。';
@@ -2777,32 +2782,51 @@ ${source.summary.slice(0, 9000)}
 External evaluations of this cited paper by other papers:
 ${formatWritingExternalEvaluations(source.externalEvaluations) || 'None found in Neo4j/cache.'}`)
     .join('\n\n---\n\n');
+  const articleBlocks = articleSources
+    .map((article, index) => `Article material ${index + 1}
+Topic: ${article.topic}
+Kind: ${article.kind ?? 'unknown'}
+Storage path: ${article.storagePath}
+
+Saved writing content:
+${article.content.slice(0, 12000)}`)
+    .join('\n\n---\n\n');
 
   return {
     system: `You are SCIReader writing mode, an academic Introduction drafting assistant.
 ${languageInstruction}
-Use only the provided saved reading notes and external evaluation records. Do not read or claim to have reread PDFs.
+Use only the provided saved reading notes, selected previous writing articles, and external evaluation records. Do not read or claim to have reread PDFs.
 Organize the selected literature according to Introduction conventions: background, existing approaches, research gap, motivation, and positioning.
 Every factual claim about a selected paper must cite that paper using its exact placeholder, for example {{cite:p1}}.
 Citation numbers will be assigned by the server in first-appearance order, so do not write numeric citations yourself.
+Selected previous writing articles are writing material, not bibliographic sources. Use them for structure, wording, argument flow, and reusable synthesis, but do not cite them as references unless they cite selected papers through placeholders.
 Integrate external evaluations naturally when useful, phrased as how other papers position, compare, or criticize the cited work. Do not overstate those evaluations as target-paper evidence.
 Return only the Introduction body. Do not include a References section, bibliography, title, outline, or explanatory notes.`,
     user: `Writing topic or direction:
 ${request.topic}
 
 Selected paper notes and external evaluations:
-${sourceBlocks}`,
+${sourceBlocks || 'No selected papers.'}
+
+Selected previous writing articles:
+${articleBlocks || 'None.'}`,
   };
 };
 
 const generateWritingIntroduction = async (userId: string, request: z.infer<typeof writingRequestSchema>) => {
   const sources = await prepareWritingSources(userId, request);
-  const prompt = buildWritingPrompt(request, sources);
+  const articleSources = await loadSelectedWritingArticles(userId, request.selectedArticles);
+  if (!sources.length && !articleSources.length) {
+    const error = new Error('No usable writing materials were found. Please select at least one uploaded paper with reading notes or one saved article.');
+    error.name = 'MissingWritingMaterialsError';
+    throw error;
+  }
+  const prompt = buildWritingPrompt(request, sources, articleSources);
   const result = await createExpensiveTextResponse(
     prompt.system,
     prompt.user,
     request.outputLanguage === 'english' ? 4500 : 5000,
-    { phase: 'writing-introduction', selectedPapers: sources.length, outputLanguage: request.outputLanguage },
+    { phase: 'writing-introduction', selectedPapers: sources.length, selectedArticles: articleSources.length, outputLanguage: request.outputLanguage },
     SUMMARY_FINAL_TIMEOUT_MS,
   );
   const numbered = numberWritingCitations(result.answer, sources);
@@ -2914,6 +2938,12 @@ For requests like "fix IEEE references", "modify reference format", or "renumber
 
 const generateWritingFollowUp = async (userId: string, request: z.infer<typeof writingFollowUpRequestSchema>) => {
   const sources = await prepareWritingSources(userId, request);
+  const articleSources = await loadSelectedWritingArticles(userId, request.selectedArticles);
+  if (!sources.length && !articleSources.length) {
+    const error = new Error('No usable writing materials were found. Please select at least one uploaded paper with reading notes or one saved article.');
+    error.name = 'MissingWritingMaterialsError';
+    throw error;
+  }
   const triage = await triageWritingFollowUp(request, sources);
 
   if (triage.needsSupplementalReading) {
@@ -2970,7 +3000,13 @@ ${sources.map((source) => `${source.citationKey}: ${source.paper.title}
 ${source.summary.slice(0, 7000)}
 
 External evaluations:
-${formatWritingExternalEvaluations(source.externalEvaluations) || 'None found.'}`).join('\n\n---\n\n')}`;
+${formatWritingExternalEvaluations(source.externalEvaluations) || 'None found.'}`).join('\n\n---\n\n')}
+
+Selected previous writing articles:
+${articleSources.map((article, index) => `Article material ${index + 1}
+Topic: ${article.topic}
+Kind: ${article.kind ?? 'unknown'}
+${article.content.slice(0, 10000)}`).join('\n\n---\n\n') || 'None.'}`;
   const result = await createExpensiveTextResponse(
     revisionSystem,
     revisionUserContent,
@@ -3762,7 +3798,7 @@ const app = new Hono()
         const jobs = await startMissingWritingSummaryJobs(userId, request);
         const missingTitles = jobs.map((job) => job.title);
         const draft = jobs.length
-          ? `## 正在自动生成读书笔记\n\n以下文献还没有已保存读书笔记，系统已经开始自动生成。读书笔记完成后，请再次点击“生成 Introduction”。\n\n${missingTitles.map((title, index) => `${index + 1}. ${title}`).join('\n')}\n\n生成过程会按普通论文摘要规则计费；本次还没有开始写作模式的 3 倍计费。`
+          ? `## 正在自动生成读书笔记\n\n以下文献还没有已保存读书笔记，系统已经开始自动生成。读书笔记完成后，请再次点击“生成 Introduction”。\n\n${missingTitles.map((title, index) => `${index + 1}. ${title}`).join('\n')}\n\n生成过程会按普通论文摘要规则计费；本次还没有开始写作模式的 1.5 倍计费。`
           : `## 正在等待读书笔记\n\n部分选中文献还没有已保存读书笔记。请稍后再次点击“生成 Introduction”。\n\n${message}`;
 
         return c.json({
@@ -3792,7 +3828,9 @@ const app = new Hono()
               ? 402
               : error instanceof Error && error.name === 'MissingWritingSummaryError'
                 ? 409
-                : 500;
+                : error instanceof Error && error.name === 'MissingWritingMaterialsError'
+                  ? 409
+                  : 500;
 
       console.error('[reader-agent:writing] request failed', {
         topic: request.topic,
@@ -3875,7 +3913,9 @@ const app = new Hono()
               ? 402
               : error instanceof Error && error.name === 'MissingWritingSummaryError'
                 ? 409
-                : 500;
+                : error instanceof Error && error.name === 'MissingWritingMaterialsError'
+                  ? 409
+                  : 500;
 
       console.error('[reader-agent:writing-follow-up] request failed', {
         topic: request.topic,
