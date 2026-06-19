@@ -1010,7 +1010,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
           <div className="ml-auto flex shrink-0 items-center gap-1">
             {exportableMessages.length ? (
               <button
-                className={isExportMode ? 'inline-flex items-center gap-1 rounded-lg border border-primary bg-primary/10 px-2 py-1.5 text-xs font-medium text-primary' : 'inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50'}
+                aria-label={isExportMode ? '退出匯出選擇' : '選擇回答匯出 PDF'}
+                className={`${isExportMode ? 'border-primary bg-primary/10 text-primary' : 'border text-slate-700 hover:bg-slate-50'} inline-flex h-9 items-center justify-center rounded-lg text-xs font-medium ${isMobileViewport ? 'w-9' : 'gap-1 px-2'}`}
                 onClick={(event) => {
                   event.stopPropagation();
                   setIsExportMode((current) => {
@@ -1023,12 +1024,13 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
                 type="button"
               >
                 {isExportMode ? <X className="size-4" /> : <Download className="size-4" />}
-                {isExportMode ? '取消' : '匯出'}
+                <span className={isMobileViewport ? 'sr-only' : ''}>{isExportMode ? '取消' : '匯出'}</span>
               </button>
             ) : null}
             {isMobileViewport ? (
               <button
-                className="inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                aria-label={isMobileChatExpanded ? '最小化聊天框' : '展開聊天框'}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border text-xs font-medium text-slate-700 hover:bg-slate-50"
                 onClick={(event) => {
                   event.stopPropagation();
                   setIsMobileChatExpanded((current) => !current);
@@ -1038,11 +1040,11 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
                 type="button"
               >
                 {isMobileChatExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-                {isMobileChatExpanded ? 'PDF' : 'Chat'}
               </button>
             ) : null}
             <button
-              className="inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+              aria-label="縮小聊天字體"
+              className={`inline-flex h-9 items-center justify-center rounded-lg border text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35 ${isMobileViewport ? 'w-9' : 'gap-1 px-2'}`}
               disabled={!canDecreaseFontSize}
               onClick={(event) => {
                 event.stopPropagation();
@@ -1053,13 +1055,14 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
               type="button"
             >
               <Type className="size-4" />
-              -
+              <span className={isMobileViewport ? 'sr-only' : ''}>-</span>
             </button>
-            <span className="min-w-5 text-center text-[11px] font-medium text-slate-500" title="目前字體檔位">
+            <span className={isMobileViewport ? 'sr-only' : 'min-w-5 text-center text-[11px] font-medium text-slate-500'} title="目前字體檔位">
               {fontSizeStyle.label}
             </span>
             <button
-              className="inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+              aria-label="放大聊天字體"
+              className={`inline-flex h-9 items-center justify-center rounded-lg border text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35 ${isMobileViewport ? 'w-9' : 'gap-1 px-2'}`}
               disabled={!canIncreaseFontSize}
               onClick={(event) => {
                 event.stopPropagation();
@@ -1070,7 +1073,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
               type="button"
             >
               <Type className="size-4" />
-              +
+              <span className={isMobileViewport ? 'sr-only' : ''}>+</span>
             </button>
           </div>
         </div>

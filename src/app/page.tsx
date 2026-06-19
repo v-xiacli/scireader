@@ -511,9 +511,9 @@ const HomePage = () => {
           </div>
         </div>
 
-        <section className="rounded-3xl bg-white p-6 shadow-sm">
+        <section className="rounded-3xl bg-white p-4 shadow-sm sm:p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-center">
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex max-w-full flex-wrap items-center gap-3">
               <input
                 accept="application/pdf"
                 className="hidden"
@@ -542,10 +542,10 @@ const HomePage = () => {
                 {isUploading ? <Loader2 className="size-4 animate-spin" /> : null}
                 {isUploading ? 'Uploading...' : isLoggedIn ? 'Upload paper' : 'Login to upload'}
               </button>
-              <div className="flex rounded-xl border p-1">
+              <div className="flex max-w-full rounded-xl border p-1">
                 {readingModes.map((mode) => (
                   <button
-                    className={`rounded-lg px-3 py-1.5 text-sm transition ${readingMode === mode.id ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
+                    className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-sm transition ${readingMode === mode.id ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
                     key={mode.id}
                     onClick={() => {
                       setReadingMode(mode.id);
@@ -559,7 +559,7 @@ const HomePage = () => {
                 ))}
               </div>
               <button
-                className={`rounded-xl border px-3 py-2 text-sm font-medium transition ${detailedReport ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
+                className={`whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-medium transition ${detailedReport ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
                 onClick={() => {
                   setDetailedReport((current) => {
                     const nextDetailedReport = !current;
