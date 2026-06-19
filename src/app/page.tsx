@@ -379,6 +379,7 @@ const HomePage = () => {
       if (!response.ok) throw new Error(result.message ?? result.error ?? 'Could not remove paper.');
 
       setUploadedPapers(result.papers);
+      setWritingSelectedPaperKeys((current) => current.filter((key) => key !== getWritingPaperKey(paper)));
       setUploadMessage('Removed.');
     } catch (error) {
       setUploadMessage(error instanceof Error ? error.message : 'Could not remove paper.');
@@ -654,7 +655,7 @@ const HomePage = () => {
             </p>
           </div>
 
-          <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
+          <div className="mt-5 grid gap-4">
             <div className="space-y-4">
               <label className="block">
                 <span className="text-sm font-medium">写作题目或方向</span>
@@ -685,6 +686,32 @@ const HomePage = () => {
                 </div>
               </div>
 
+              <div>
+                <p className="text-sm font-medium">已选文献</p>
+                <div className="mt-2 min-h-20 rounded-xl border p-3">
+                  {selectedWritingPapers.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedWritingPapers.map((paper) => (
+                        <button
+                          className="max-w-full rounded-lg border bg-slate-50 px-3 py-2 text-left text-sm transition hover:border-primary hover:bg-white"
+                          key={getWritingPaperKey(paper)}
+                          onClick={() => toggleWritingPaper(paper)}
+                          title="取消选择"
+                          type="button"
+                        >
+                          <span className="block truncate font-medium">{paper.title}</span>
+                          <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                            {[paper.journal, paper.year].filter(Boolean).join(' · ') || paper.authors}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">请在下面的 Your papers 列表里勾选要用于写作的文献。</p>
+                  )}
+                </div>
+              </div>
+
               <button
                 className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
                 disabled={isWriting || !isLoggedIn || !writingTopic.trim() || !selectedWritingPapers.length}
@@ -695,34 +722,6 @@ const HomePage = () => {
                 {isWriting ? '正在生成...' : '生成 Introduction'}
               </button>
               {writingMessage ? <p className="text-sm text-muted-foreground">{writingMessage}</p> : null}
-            </div>
-
-            <div>
-              <p className="text-sm font-medium">选择已读文件</p>
-              <div className="mt-2 max-h-72 space-y-2 overflow-auto rounded-xl border p-2">
-                {uploadedPapers.length ? uploadedPapers.map((paper) => {
-                  const checked = writingSelectedPaperKeys.includes(getWritingPaperKey(paper));
-
-                  return (
-                    <label className="flex cursor-pointer items-start gap-3 rounded-lg p-2 text-sm transition hover:bg-slate-50" key={getWritingPaperKey(paper)}>
-                      <input
-                        checked={checked}
-                        className="mt-1 size-4"
-                        onChange={() => toggleWritingPaper(paper)}
-                        type="checkbox"
-                      />
-                      <span className="min-w-0">
-                        <span className="block font-medium">{paper.title}</span>
-                        <span className="mt-1 block text-xs text-muted-foreground">
-                          {[paper.journal, paper.year].filter(Boolean).join(' · ') || paper.authors}
-                        </span>
-                      </span>
-                    </label>
-                  );
-                }) : (
-                  <p className="p-3 text-sm text-muted-foreground">上传并打开论文生成读书笔记后，就可以在这里选择。</p>
-                )}
-              </div>
             </div>
           </div>
 
@@ -834,6 +833,8 @@ const HomePage = () => {
               const paperHref = paper.filePath
                 ? `/papers/${encodeURIComponent(paper.id)}?pdfUrl=${encodeURIComponent(paper.pdfUrl)}&filePath=${encodeURIComponent(paper.filePath)}&title=${encodeURIComponent(paper.title)}&authors=${encodeURIComponent(paper.authors)}&journal=${encodeURIComponent(paper.journal ?? '')}&year=${encodeURIComponent(paper.year ?? '')}&readingMode=${readingMode}&detailedReport=${detailedReport ? '1' : '0'}`
                 : `/papers/${paper.id}?readingMode=${readingMode}&detailedReport=${detailedReport ? '1' : '0'}`;
+              const canSelectForWriting = Boolean(paper.filePath);
+              const isSelectedForWriting = writingSelectedPaperKeys.includes(getWritingPaperKey(paper));
               const content = (
                 <>
                   <div>
@@ -852,6 +853,21 @@ const HomePage = () => {
                   className="group flex items-center justify-between gap-3 rounded-2xl border p-4 transition hover:border-primary hover:bg-slate-50"
                   key={`${paper.id}-${paper.filePath ?? 'sample'}`}
                 >
+                  {canSelectForWriting ? (
+                    <label
+                      className="flex shrink-0 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm transition hover:border-primary hover:bg-white"
+                      onClick={(event) => event.stopPropagation()}
+                      title={isSelectedForWriting ? '取消加入写作模式' : '加入写作模式'}
+                    >
+                      <input
+                        checked={isSelectedForWriting}
+                        className="size-4"
+                        onChange={() => toggleWritingPaper(paper)}
+                        type="checkbox"
+                      />
+                      <span className="hidden sm:inline">写作</span>
+                    </label>
+                  ) : null}
                   <Link className="flex min-w-0 flex-1 items-center justify-between gap-3" href={paperHref}>
                     {content}
                   </Link>
