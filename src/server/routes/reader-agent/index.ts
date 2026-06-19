@@ -3430,6 +3430,53 @@ const startSummaryGenerationJob = (
   return { started: true, startedAt, jobId, job: getSummaryJobSnapshot(jobEntry) };
 };
 
+const startMissingWritingSummaryJobs = async (userId: string, request: z.infer<typeof writingRequestSchema>) => {
+  const uploadedPapers = await loadUploadedPapers(userId);
+  const jobs: Array<{ title: string; summaryStoragePath: string; jobStarted: boolean; jobId: string; job: ReturnType<typeof getSummaryJobSnapshot> }> = [];
+
+  for (const selectedPaper of request.selectedPapers) {
+    const ownedPaper = uploadedPapers.find((paper) =>
+      (selectedPaper.filePath && paper.filePath === selectedPaper.filePath) ||
+      (paper.id === selectedPaper.paperId && paper.title === selectedPaper.title),
+    );
+
+    if (!ownedPaper) continue;
+
+    const paper = {
+      paperId: ownedPaper.id,
+      title: ownedPaper.title,
+      authors: ownedPaper.authors,
+      journal: ownedPaper.journal,
+      year: ownedPaper.year,
+      pdfUrl: ownedPaper.pdfUrl,
+      filePath: ownedPaper.filePath,
+    };
+    const cached = await loadCachedSummaryForWriting(paper);
+
+    if (cached) continue;
+
+    const summaryRequest: z.infer<typeof readerRequestSchema> = {
+      ...getWritingPaperRequest(paper),
+      prompt: '请生成这篇论文的读书笔记，用于写作模式后续组织 Introduction。保留核心机制、关键数据、证据强度、局限和可引用贡献。',
+      modePrompt: 'Generate a compact saved reading note for writing mode. Preserve citable claims, key numbers, limitations, and methodology evidence.',
+      readingMode: 'reader',
+      detailedReport: false,
+    };
+    const summaryStoragePath = getPaperSummaryStoragePath(summaryRequest, paper.filePath ?? resolveUploadedPdfStoragePath(paper.pdfUrl));
+    const job = startSummaryGenerationJob(summaryRequest, summaryStoragePath, userId);
+
+    jobs.push({
+      title: paper.title,
+      summaryStoragePath,
+      jobStarted: job.started,
+      jobId: job.jobId,
+      job: job.job,
+    });
+  }
+
+  return jobs;
+};
+
 const app = new Hono()
   .get('/history', async (c) => {
     const paperId = c.req.query('paperId');
@@ -3594,6 +3641,31 @@ const app = new Hono()
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Writing mode failed.';
+      if (error instanceof Error && error.name === 'MissingWritingSummaryError') {
+        const jobs = await startMissingWritingSummaryJobs(user.id, request);
+        const missingTitles = jobs.map((job) => job.title);
+        const draft = jobs.length
+          ? `## 正在自动生成读书笔记\n\n以下文献还没有已保存读书笔记，系统已经开始自动生成。读书笔记完成后，请再次点击“生成 Introduction”。\n\n${missingTitles.map((title, index) => `${index + 1}. ${title}`).join('\n')}\n\n生成过程会按普通论文摘要规则计费；本次还没有开始写作模式的 3 倍计费。`
+          : `## 正在等待读书笔记\n\n部分选中文献还没有已保存读书笔记。请稍后再次点击“生成 Introduction”。\n\n${message}`;
+
+        return c.json({
+          draft,
+          references: [],
+          storagePath: '',
+          savedAt: new Date().toISOString(),
+          processing: true,
+          missingSummaries: missingTitles,
+          jobs,
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            baseBillableTokens: 0,
+            billableTokens: 0,
+            billingMultiplier: WRITING_BILLING_MULTIPLIER,
+          },
+          tokenAccount: await getUserTokenAccount(user.id),
+        }, 202);
+      }
       const status =
         message === 'Not authenticated.'
           ? 401
