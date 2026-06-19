@@ -3587,9 +3587,11 @@ const app = new Hono()
   })
   .post('/write-introduction', zValidator('json', writingRequestSchema), async (c) => {
     const request = c.req.valid('json');
+    let userId = '';
 
     try {
       const { user } = await requirePaperAccess(c);
+      userId = user.id;
       await ensurePositiveTokenBalance(user.id);
 
       const result = await generateWritingIntroduction(user.id, request);
@@ -3641,8 +3643,8 @@ const app = new Hono()
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Writing mode failed.';
-      if (error instanceof Error && error.name === 'MissingWritingSummaryError') {
-        const jobs = await startMissingWritingSummaryJobs(user.id, request);
+      if (userId && error instanceof Error && error.name === 'MissingWritingSummaryError') {
+        const jobs = await startMissingWritingSummaryJobs(userId, request);
         const missingTitles = jobs.map((job) => job.title);
         const draft = jobs.length
           ? `## 正在自动生成读书笔记\n\n以下文献还没有已保存读书笔记，系统已经开始自动生成。读书笔记完成后，请再次点击“生成 Introduction”。\n\n${missingTitles.map((title, index) => `${index + 1}. ${title}`).join('\n')}\n\n生成过程会按普通论文摘要规则计费；本次还没有开始写作模式的 3 倍计费。`
@@ -3663,7 +3665,7 @@ const app = new Hono()
             billableTokens: 0,
             billingMultiplier: WRITING_BILLING_MULTIPLIER,
           },
-          tokenAccount: await getUserTokenAccount(user.id),
+          tokenAccount: await getUserTokenAccount(userId),
         }, 202);
       }
       const status =

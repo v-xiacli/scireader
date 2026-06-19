@@ -18,6 +18,8 @@ type WritingResult = {
   storagePath: string;
   savedAt: string;
   article?: WritingArticle | null;
+  processing?: boolean;
+  missingSummaries?: string[];
   usage?: {
     inputTokens: number;
     outputTokens: number;
@@ -466,13 +468,28 @@ const HomePage = () => {
       });
       const result = await response.json();
 
-      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Writing mode failed.');
+      if (!response.ok) {
+        const message = result.message ?? result.error ?? 'Writing mode failed.';
+        setWritingResult({
+          draft: `## 写作模式暂时无法生成\n\n${message}`,
+          references: [],
+          storagePath: '',
+          savedAt: new Date().toISOString(),
+        });
+        throw new Error(message);
+      }
 
       setWritingResult(result);
       if (result.article) setWritingArticles((current) => [result.article, ...current.filter((article) => article.storagePath !== result.article.storagePath)]);
       if (result.tokenAccount) setTokenAccount(result.tokenAccount);
-      setWritingMessage(`已生成并保存：${result.storagePath}`);
+      setWritingMessage(result.processing ? '正在自动生成缺失的读书笔记，完成后请再次生成 Introduction。' : `已生成并保存：${result.storagePath}`);
     } catch (error) {
+      setWritingResult((current) => current ?? {
+        draft: `## 写作模式暂时无法生成\n\n${error instanceof Error ? error.message : 'Writing mode failed.'}`,
+        references: [],
+        storagePath: '',
+        savedAt: new Date().toISOString(),
+      });
       setWritingMessage(error instanceof Error ? error.message : 'Writing mode failed.');
     } finally {
       setIsWriting(false);
@@ -791,7 +808,7 @@ const HomePage = () => {
           {writingResult ? (
             <div className="mt-5 rounded-2xl border bg-slate-50 p-4">
               <div className="flex flex-col gap-1 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-                <span>Saved: {writingResult.storagePath}</span>
+                <span>{writingResult.storagePath ? `Saved: ${writingResult.storagePath}` : writingResult.processing ? 'Status: generating missing reading notes' : 'Status: not saved'}</span>
                 {writingResult.usage ? (
                   <span>
                     {writingResult.usage.billableTokens.toLocaleString()} billable · x{writingResult.usage.billingMultiplier}
@@ -801,7 +818,7 @@ const HomePage = () => {
               <div className="mt-4 max-h-[520px] overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-sm leading-7">
                 {writingResult.draft}
               </div>
-              <div className="mt-4 flex flex-col gap-2 md:flex-row">
+              {!writingResult.processing ? <div className="mt-4 flex flex-col gap-2 md:flex-row">
                 <input
                   className="min-w-0 flex-1 rounded-xl border px-4 py-2 text-sm outline-none transition focus:border-primary"
                   onChange={(event) => setWritingFollowUp(event.target.value)}
@@ -817,7 +834,7 @@ const HomePage = () => {
                   {isWritingFollowUp ? <Loader2 className="size-4 animate-spin" /> : null}
                   {isWritingFollowUp ? '处理中...' : '追问/修改'}
                 </button>
-              </div>
+              </div> : null}
             </div>
           ) : null}
         </section>
