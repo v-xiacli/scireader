@@ -856,7 +856,7 @@ const HomePage = () => {
                   className="inline-flex items-center justify-center gap-2 rounded-xl border p-2 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 sm:self-center"
                   disabled={deletingWritingPath === article.storagePath}
                   onClick={() => void handleRemoveWritingArticle(article)}
-                  title="Delete article"
+                  title="Remove from list"
                   type="button"
                 >
                   {deletingWritingPath === article.storagePath ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}

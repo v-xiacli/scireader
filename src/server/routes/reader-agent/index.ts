@@ -9,7 +9,7 @@ import { getCookie } from 'hono/cookie';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 
-import { deleteFileAsAdmin, downloadFileAsAdmin, downloadTextAsAdmin, uploadFileAsAdmin, uploadTextAsAdmin } from '@/lib/firebase/server/storage-admin';
+import { downloadFileAsAdmin, downloadTextAsAdmin, uploadFileAsAdmin, uploadTextAsAdmin } from '@/lib/firebase/server/storage-admin';
 import { readNeo4j, verifyNeo4jConnection, writeNeo4j } from '@/lib/neo4j';
 import { getUserStoragePrefix } from '@/lib/storage-paths';
 import { getUserTokenAccount, recordUserTokenUsage } from '@/server/db';
@@ -803,8 +803,6 @@ const removeWritingArticleRecord = async (userId: string, storagePath: string) =
   const normalizedPath = assertUserWritingStoragePath(userId, storagePath);
   const currentArticles = await loadWritingArticleRecords(userId);
   const nextArticles = currentArticles.filter((article) => article.storagePath !== normalizedPath);
-
-  await deleteFileAsAdmin(normalizedPath);
 
   return saveWritingArticleRecords(userId, nextArticles);
 };
