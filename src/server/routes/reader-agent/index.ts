@@ -2805,10 +2805,19 @@ ${numbered.draft}
 const isExplicitSupplementalReadingRequest = (question: string) =>
   /\b(reread|re-read|read again|search the pdf|inspect the pdf|full text|not summarized|unsummarized)\b|重新阅读|重读|再读|检索原文|查看原文|检查PDF|补充阅读|没有总结|未总结|全文检索|重新检索/i.test(question);
 
+type WritingFollowUpStrategy = 'local-revision' | 'full-regeneration' | 'supplemental-reading';
+
+const normalizeWritingFollowUpStrategy = (value: unknown): WritingFollowUpStrategy => {
+  if (value === 'full-regeneration' || value === 'supplemental-reading') return value;
+
+  return 'local-revision';
+};
+
 const triageWritingFollowUp = async (request: z.infer<typeof writingFollowUpRequestSchema>, sources: WritingSource[]) => {
   if (isExplicitSupplementalReadingRequest(request.question)) {
     return {
       needsSupplementalReading: true,
+      strategy: 'supplemental-reading' as const,
       reason: 'User explicitly requested rereading or searching content beyond saved notes.',
       model: 'explicit-supplemental-reading-request',
       inputTokens: 0,
@@ -2822,7 +2831,7 @@ const triageWritingFollowUp = async (request: z.infer<typeof writingFollowUpRequ
     model: modelSelection.model,
     max_tokens: 600,
     system:
-      'You are SCIReader writing follow-up router. Decide whether the user follow-up can be answered by the current draft plus saved paper notes, or whether it requires rereading/searching PDFs for content not present in notes. Output only JSON.',
+      'You are SCIReader writing follow-up router. Decide whether the user follow-up needs only a local revision of the current draft, a full regeneration from saved notes, or supplemental PDF reading. Output only JSON.',
     messages: [
       {
         role: 'user',
@@ -2835,18 +2844,23 @@ ${request.question}
 Current draft:
 ${request.currentDraft.slice(0, 12000)}
 
-Saved note excerpts:
-${sources.map((source) => `${source.citationKey}: ${source.paper.title}\n${source.summary.slice(0, 2500)}`).join('\n\n---\n\n')}
+Selected papers:
+${sources.map((source) => `${source.citationKey}: ${source.paper.title}; ${source.paper.authors ?? 'unknown'}; ${source.paper.journal ?? 'unknown'}; ${source.paper.year ?? 'unknown'}`).join('\n')}
 
-Return JSON exactly: {"needsSupplementalReading": boolean, "reason": string}.
-Set needsSupplementalReading=true only when the follow-up asks for evidence, data, equations, pages, methods, or claims not present in the current draft or saved notes, or asks to reread/search original PDFs. Otherwise false.`,
+Return JSON exactly: {"strategy": "local-revision" | "full-regeneration" | "supplemental-reading", "needsSupplementalReading": boolean, "reason": string}.
+Use local-revision for formatting changes, citation/reference style fixes, language polishing, shortening, expanding a paragraph, changing structure, or edits that can be done from the current draft.
+Use full-regeneration when the user asks to reorganize the whole Introduction, change the argument logic, rebalance all selected papers, or rewrite from the selected saved notes.
+Use supplemental-reading only when the user asks for evidence, data, equations, pages, methods, or claims not present in the current draft/saved notes, or asks to reread/search original PDFs.
+For requests like "fix IEEE references", "modify reference format", or "renumber citations", choose local-revision and needsSupplementalReading=false.`,
       },
     ],
   });
-  const parsed = extractJsonObject(textFromResponse(response).trim()) as Partial<{ needsSupplementalReading: boolean; reason: string }>;
+  const parsed = extractJsonObject(textFromResponse(response).trim()) as Partial<{ strategy: string; needsSupplementalReading: boolean; reason: string }>;
+  const strategy = normalizeWritingFollowUpStrategy(parsed.strategy);
 
   return {
-    needsSupplementalReading: parsed.needsSupplementalReading === true,
+    strategy,
+    needsSupplementalReading: strategy === 'supplemental-reading' || parsed.needsSupplementalReading === true,
     reason: typeof parsed.reason === 'string' ? parsed.reason : 'No reason returned.',
     model: modelSelection.model,
     inputTokens: response.usage.input_tokens,
@@ -2861,6 +2875,7 @@ const generateWritingFollowUp = async (userId: string, request: z.infer<typeof w
   if (triage.needsSupplementalReading) {
     return {
       needsSupplementalReading: true,
+      strategy: triage.strategy,
       answer: request.outputLanguage === 'english'
         ? `This follow-up requires supplemental reading or PDF search before I revise the draft. Reason: ${triage.reason}`
         : `这个追问需要先补充阅读或检索原文后再改写。原因：${triage.reason}`,
@@ -2876,11 +2891,28 @@ const generateWritingFollowUp = async (userId: string, request: z.infer<typeof w
   }
 
   const languageInstruction = request.outputLanguage === 'english' ? 'Write in polished academic English.' : '使用中文写作，保持学术论文 Introduction 的正式语气。';
-  const result = await createExpensiveTextResponse(
-    `You are SCIReader writing mode. ${languageInstruction}
-Revise or answer the user's follow-up using only the current draft, saved reading notes, and external evaluations. Do not reread PDFs.
-Use citation placeholders like {{cite:p1}} when adding or changing cited claims. Return the complete revised Introduction body only, without References.`,
-    `Writing topic:
+  const isLocalRevision = triage.strategy === 'local-revision';
+  const revisionSystem = isLocalRevision
+    ? `You are SCIReader writing mode. ${languageInstruction}
+Apply the user's requested local revision to the current draft. This is a local editing task, not a full literature synthesis.
+If the request is about citation or reference formatting, preserve the Introduction body as much as possible and fix citations/References to IEEE style.
+Use citation placeholders like {{cite:p1}} only where a cited claim should point to a selected paper. Return the complete revised Introduction body only, without References.`
+    : `You are SCIReader writing mode. ${languageInstruction}
+Regenerate the whole Introduction from the selected saved reading notes and external evaluations. Do not reread PDFs.
+Use citation placeholders like {{cite:p1}} when adding or changing cited claims. Return the complete revised Introduction body only, without References.`;
+  const revisionUserContent = isLocalRevision
+    ? `Writing topic:
+${request.topic}
+
+Follow-up request:
+${request.question}
+
+Current draft:
+${stripGeneratedReferences(request.currentDraft)}
+
+Available reference targets:
+${sources.map((source) => `${source.citationKey}: ${source.ieeeCitation}`).join('\n')}`
+    : `Writing topic:
 ${request.topic}
 
 Follow-up request:
@@ -2894,9 +2926,12 @@ ${sources.map((source) => `${source.citationKey}: ${source.paper.title}
 ${source.summary.slice(0, 7000)}
 
 External evaluations:
-${formatWritingExternalEvaluations(source.externalEvaluations) || 'None found.'}`).join('\n\n---\n\n')}`,
+${formatWritingExternalEvaluations(source.externalEvaluations) || 'None found.'}`).join('\n\n---\n\n')}`;
+  const result = await createExpensiveTextResponse(
+    revisionSystem,
+    revisionUserContent,
     request.outputLanguage === 'english' ? 4500 : 5000,
-    { phase: 'writing-follow-up', selectedPapers: sources.length, outputLanguage: request.outputLanguage },
+    { phase: 'writing-follow-up', strategy: triage.strategy, selectedPapers: sources.length, outputLanguage: request.outputLanguage },
     SUMMARY_FINAL_TIMEOUT_MS,
   );
   const numbered = numberWritingCitations(result.answer, sources);
@@ -2923,6 +2958,7 @@ ${numbered.draft}
 
   return {
     needsSupplementalReading: false,
+    strategy: triage.strategy,
     answer: numbered.draft,
     references: numbered.references,
     storagePath,
@@ -3748,6 +3784,7 @@ const app = new Hono()
           selectedPaperCount: result.sourceCount,
           storagePath: result.storagePath || undefined,
           needsSupplementalReading: result.needsSupplementalReading,
+          strategy: result.strategy,
           billingMultiplier: WRITING_BILLING_MULTIPLIER,
           baseBillableTokens,
         },
@@ -3773,6 +3810,7 @@ const app = new Hono()
         savedAt: result.savedAt,
         article,
         needsSupplementalReading: result.needsSupplementalReading,
+        strategy: result.strategy,
         usage: {
           inputTokens: result.inputTokens,
           outputTokens: result.outputTokens,
