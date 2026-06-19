@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
-import { mockPapers } from '@/features/papers/mock-data';
 import type { PaperReadingMode, PaperSummary } from '@/types/paper';
 
 type AuthMode = 'login' | 'signup';
@@ -18,6 +17,7 @@ type WritingResult = {
   references: string[];
   storagePath: string;
   savedAt: string;
+  article?: WritingArticle | null;
   usage?: {
     inputTokens: number;
     outputTokens: number;
@@ -25,6 +25,16 @@ type WritingResult = {
     billableTokens: number;
     billingMultiplier: number;
   };
+};
+type WritingArticle = {
+  id: string;
+  topic: string;
+  outputLanguage: WritingLanguage;
+  storagePath: string;
+  savedAt: string;
+  kind: 'introduction' | 'follow-up';
+  selectedPaperCount: number;
+  billableTokens?: number;
 };
 type ViewerPreferences = {
   readingMode?: PaperReadingMode;
@@ -64,6 +74,12 @@ const getBillingModeLabel = (model?: string) => {
   return 'normal';
 };
 
+const formatArticleDate = (value: string) => {
+  const date = new Date(value);
+
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+};
+
 const HomePage = () => {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -94,9 +110,11 @@ const HomePage = () => {
   const [writingResult, setWritingResult] = useState<WritingResult | null>(null);
   const [writingFollowUp, setWritingFollowUp] = useState('');
   const [isWritingFollowUp, setIsWritingFollowUp] = useState(false);
+  const [writingArticles, setWritingArticles] = useState<WritingArticle[]>([]);
+  const [deletingWritingPath, setDeletingWritingPath] = useState<string | null>(null);
 
   const isLoggedIn = Boolean(authUser);
-  const papers = [...uploadedPapers, ...mockPapers];
+  const papers = uploadedPapers;
   const getWritingPaperKey = (paper: PaperSummary) => paper.filePath ?? paper.id;
   const selectedWritingPapers = uploadedPapers.filter((paper) => writingSelectedPaperKeys.includes(getWritingPaperKey(paper)));
 
@@ -137,6 +155,17 @@ const HomePage = () => {
     }
   };
 
+  const loadWritingArticles = async () => {
+    try {
+      const response = await fetch('/api/reader-agent/writing-results');
+      const result = await response.json();
+
+      setWritingArticles(response.ok ? result.articles : []);
+    } catch {
+      setWritingArticles([]);
+    }
+  };
+
   const loadTokenAccount = async () => {
     try {
       const response = await fetch('/api/auth/token-account');
@@ -160,6 +189,7 @@ const HomePage = () => {
           if (result.tokenAccount) setTokenAccount(result.tokenAccount);
           await loadViewerPreferences();
           await loadUploadedPapers();
+          await loadWritingArticles();
         }
       } catch {
         setAuthUser(null);
@@ -206,6 +236,7 @@ const HomePage = () => {
       else await loadTokenAccount();
       await loadViewerPreferences();
       await loadUploadedPapers();
+      await loadWritingArticles();
       setAuthMessage(`${authMode === 'signup' ? 'Account created' : 'Logged in'} as ${result.user.email}.`);
       setPassword('');
       setVerificationCode('');
@@ -248,6 +279,8 @@ const HomePage = () => {
     setAuthUser(null);
     setTokenAccount(null);
     setUploadedPapers([]);
+    setWritingArticles([]);
+    setWritingSelectedPaperKeys([]);
     setAuthMessage('Logged out.');
   };
 
@@ -436,6 +469,7 @@ const HomePage = () => {
       if (!response.ok) throw new Error(result.message ?? result.error ?? 'Writing mode failed.');
 
       setWritingResult(result);
+      if (result.article) setWritingArticles((current) => [result.article, ...current.filter((article) => article.storagePath !== result.article.storagePath)]);
       if (result.tokenAccount) setTokenAccount(result.tokenAccount);
       setWritingMessage(`已生成并保存：${result.storagePath}`);
     } catch (error) {
@@ -475,7 +509,10 @@ const HomePage = () => {
 
       if (!response.ok) throw new Error(result.message ?? result.error ?? 'Writing follow-up failed.');
 
-      if (!result.needsSupplementalReading) setWritingResult(result);
+      if (!result.needsSupplementalReading) {
+        setWritingResult(result);
+        if (result.article) setWritingArticles((current) => [result.article, ...current.filter((article) => article.storagePath !== result.article.storagePath)]);
+      }
       if (result.tokenAccount) setTokenAccount(result.tokenAccount);
       setWritingFollowUp('');
       setWritingMessage(result.needsSupplementalReading ? result.draft : `已更新并保存：${result.storagePath}`);
@@ -483,6 +520,32 @@ const HomePage = () => {
       setWritingMessage(error instanceof Error ? error.message : 'Writing follow-up failed.');
     } finally {
       setIsWritingFollowUp(false);
+    }
+  };
+
+  const handleRemoveWritingArticle = async (article: WritingArticle) => {
+    if (deletingWritingPath) return;
+
+    setDeletingWritingPath(article.storagePath);
+    setWritingMessage(null);
+
+    try {
+      const response = await fetch('/api/reader-agent/writing-results', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storagePath: article.storagePath }),
+      });
+      const result = await response.json();
+
+      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Could not delete article.');
+
+      setWritingArticles(result.articles);
+      if (writingResult?.storagePath === article.storagePath) setWritingResult(null);
+      setWritingMessage('Article removed.');
+    } catch (error) {
+      setWritingMessage(error instanceof Error ? error.message : 'Could not delete article.');
+    } finally {
+      setDeletingWritingPath(null);
     }
   };
 
@@ -760,6 +823,54 @@ const HomePage = () => {
         </section>
 
         <section className="rounded-3xl bg-white p-4 shadow-sm sm:p-6">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-xl font-semibold">Your articles</h2>
+              <p className="mt-1 text-sm text-muted-foreground">写作模式生成的 Introduction 和修改稿会保存在这里。</p>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-3">
+            {writingArticles.length ? writingArticles.map((article) => (
+              <div
+                className="flex flex-col gap-3 rounded-2xl border p-4 transition hover:border-primary hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between"
+                key={article.storagePath}
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-semibold">{article.topic}</h3>
+                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
+                      {article.kind === 'follow-up' ? 'Follow-up' : 'Introduction'}
+                    </span>
+                    <span className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
+                      {article.outputLanguage === 'english' ? 'English' : '中文'}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {formatArticleDate(article.savedAt)} · {article.selectedPaperCount} papers
+                    {article.billableTokens ? ` · ${article.billableTokens.toLocaleString()} billable` : ''}
+                  </p>
+                  <p className="mt-2 truncate text-xs text-muted-foreground">{article.storagePath}</p>
+                </div>
+                <button
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border p-2 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 sm:self-center"
+                  disabled={deletingWritingPath === article.storagePath}
+                  onClick={() => void handleRemoveWritingArticle(article)}
+                  title="Delete article"
+                  type="button"
+                >
+                  {deletingWritingPath === article.storagePath ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                </button>
+              </div>
+            )) : (
+              <div className="rounded-2xl border bg-slate-50 p-4 text-sm text-muted-foreground">
+                还没有写作结果。生成 Introduction 后会自动出现在这里。
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="rounded-3xl bg-white p-4 shadow-sm sm:p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-center">
             <div className="flex max-w-full flex-wrap items-center gap-3">
               <input
@@ -833,8 +944,28 @@ const HomePage = () => {
               const paperHref = paper.filePath
                 ? `/papers/${encodeURIComponent(paper.id)}?pdfUrl=${encodeURIComponent(paper.pdfUrl)}&filePath=${encodeURIComponent(paper.filePath)}&title=${encodeURIComponent(paper.title)}&authors=${encodeURIComponent(paper.authors)}&journal=${encodeURIComponent(paper.journal ?? '')}&year=${encodeURIComponent(paper.year ?? '')}&readingMode=${readingMode}&detailedReport=${detailedReport ? '1' : '0'}`
                 : `/papers/${paper.id}?readingMode=${readingMode}&detailedReport=${detailedReport ? '1' : '0'}`;
-              const canSelectForWriting = Boolean(paper.filePath);
-              const isSelectedForWriting = writingSelectedPaperKeys.includes(getWritingPaperKey(paper));
+              const canSelectForWriting = Boolean(isLoggedIn && paper.filePath);
+              const isSelectedForWriting = canSelectForWriting && writingSelectedPaperKeys.includes(getWritingPaperKey(paper));
+              const writingSelectControl = (
+                <label
+                  className={`flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-sm transition ${
+                    canSelectForWriting ? 'cursor-pointer hover:border-primary hover:bg-white' : 'cursor-not-allowed bg-slate-50 text-slate-400'
+                  }`}
+                  onClick={(event) => event.stopPropagation()}
+                  title={canSelectForWriting ? (isSelectedForWriting ? '取消加入写作模式' : '加入写作模式') : '登录并上传论文后可加入写作模式'}
+                >
+                  <input
+                    checked={isSelectedForWriting}
+                    className="size-4"
+                    disabled={!canSelectForWriting}
+                    onChange={() => {
+                      if (canSelectForWriting) toggleWritingPaper(paper);
+                    }}
+                    type="checkbox"
+                  />
+                  <span className="hidden sm:inline">写作</span>
+                </label>
+              );
               const content = (
                 <>
                   <div>
@@ -853,21 +984,7 @@ const HomePage = () => {
                   className="group flex items-center justify-between gap-3 rounded-2xl border p-4 transition hover:border-primary hover:bg-slate-50"
                   key={`${paper.id}-${paper.filePath ?? 'sample'}`}
                 >
-                  {canSelectForWriting ? (
-                    <label
-                      className="flex shrink-0 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm transition hover:border-primary hover:bg-white"
-                      onClick={(event) => event.stopPropagation()}
-                      title={isSelectedForWriting ? '取消加入写作模式' : '加入写作模式'}
-                    >
-                      <input
-                        checked={isSelectedForWriting}
-                        className="size-4"
-                        onChange={() => toggleWritingPaper(paper)}
-                        type="checkbox"
-                      />
-                      <span className="hidden sm:inline">写作</span>
-                    </label>
-                  ) : null}
+                  {writingSelectControl}
                   <Link className="flex min-w-0 flex-1 items-center justify-between gap-3" href={paperHref}>
                     {content}
                   </Link>
@@ -889,6 +1006,7 @@ const HomePage = () => {
                   key={paper.id}
                   title="Log in to open papers"
                 >
+                  {writingSelectControl}
                   {content}
                 </div>
               );

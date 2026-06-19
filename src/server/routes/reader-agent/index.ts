@@ -9,7 +9,7 @@ import { getCookie } from 'hono/cookie';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 
-import { downloadFileAsAdmin, downloadTextAsAdmin, uploadFileAsAdmin, uploadTextAsAdmin } from '@/lib/firebase/server/storage-admin';
+import { deleteFileAsAdmin, downloadFileAsAdmin, downloadTextAsAdmin, uploadFileAsAdmin, uploadTextAsAdmin } from '@/lib/firebase/server/storage-admin';
 import { readNeo4j, verifyNeo4jConnection, writeNeo4j } from '@/lib/neo4j';
 import { getUserStoragePrefix } from '@/lib/storage-paths';
 import { getUserTokenAccount, recordUserTokenUsage } from '@/server/db';
@@ -182,6 +182,10 @@ const writingRequestSchema = z.object({
 const writingFollowUpRequestSchema = writingRequestSchema.extend({
   question: z.string().trim().min(1).max(1000),
   currentDraft: z.string().trim().min(1).max(60000),
+});
+
+const writingResultDeleteSchema = z.object({
+  storagePath: z.string().min(1),
 });
 
 const metadataRequestSchema = z.object({
@@ -696,6 +700,17 @@ type WritingSource = {
   externalEvaluations: ReferenceEvaluationRecord[];
 };
 
+type WritingArticleRecord = {
+  id: string;
+  topic: string;
+  outputLanguage: 'chinese' | 'english';
+  storagePath: string;
+  savedAt: string;
+  kind: 'introduction' | 'follow-up';
+  selectedPaperCount: number;
+  billableTokens?: number;
+};
+
 const sanitizeWritingTitle = (topic: string) => {
   const sanitized = topic
     .normalize('NFKC')
@@ -730,6 +745,69 @@ const formatWritingStorageTimestamp = (date = new Date()) => {
 
 const getWritingStoragePath = (userId: string, topic: string, date = new Date()) =>
   `user-writing/${userId}/${sanitizeWritingTitle(topic)}-${formatWritingStorageTimestamp(date)}.md`;
+
+const getWritingIndexPath = (userId: string) => `user-writing/${userId}/index.md`;
+
+const assertUserWritingStoragePath = (userId: string, storagePath: string) => {
+  const normalizedPath = storagePath.replace(/^\/+/, '');
+  const prefix = `user-writing/${userId}/`;
+
+  if (!normalizedPath.startsWith(prefix) || normalizedPath.endsWith('/index.md') || normalizedPath.includes('..')) {
+    const error = new Error('Invalid writing result path.');
+    error.name = 'InvalidWritingResultPathError';
+    throw error;
+  }
+
+  return normalizedPath;
+};
+
+const loadWritingArticleRecords = async (userId: string): Promise<WritingArticleRecord[]> => {
+  try {
+    const parsed = parseJsonBlock(await downloadTextAsAdmin(getWritingIndexPath(userId)));
+
+    return Array.isArray(parsed)
+      ? parsed.filter((record): record is WritingArticleRecord =>
+          Boolean(record) &&
+          typeof record === 'object' &&
+          typeof (record as WritingArticleRecord).id === 'string' &&
+          typeof (record as WritingArticleRecord).topic === 'string' &&
+          typeof (record as WritingArticleRecord).storagePath === 'string' &&
+          typeof (record as WritingArticleRecord).savedAt === 'string',
+        )
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveWritingArticleRecords = async (userId: string, articles: WritingArticleRecord[]) => {
+  const deduped = [...new Map(articles.map((article) => [article.storagePath, article])).values()]
+    .sort((left, right) => right.savedAt.localeCompare(left.savedAt))
+    .slice(0, 300);
+
+  await uploadTextAsAdmin(
+    `# Writing articles\n\n\`\`\`json\n${JSON.stringify(deduped, null, 2)}\n\`\`\`\n`,
+    getWritingIndexPath(userId),
+  );
+
+  return deduped;
+};
+
+const appendWritingArticleRecord = async (userId: string, article: WritingArticleRecord) => {
+  const currentArticles = await loadWritingArticleRecords(userId);
+
+  return saveWritingArticleRecords(userId, [article, ...currentArticles.filter((currentArticle) => currentArticle.storagePath !== article.storagePath)]);
+};
+
+const removeWritingArticleRecord = async (userId: string, storagePath: string) => {
+  const normalizedPath = assertUserWritingStoragePath(userId, storagePath);
+  const currentArticles = await loadWritingArticleRecords(userId);
+  const nextArticles = currentArticles.filter((article) => article.storagePath !== normalizedPath);
+
+  await deleteFileAsAdmin(normalizedPath);
+
+  return saveWritingArticleRecords(userId, nextArticles);
+};
 
 const getWritingPaperRequest = (paper: z.infer<typeof writingPaperSchema>) => ({
   paperId: paper.paperId,
@@ -3435,6 +3513,33 @@ const app = new Hono()
       return c.json({ error: 'Token estimate failed.', message }, status);
     }
   })
+  .get('/writing-results', async (c) => {
+    try {
+      const { user } = await requirePaperAccess(c);
+
+      return c.json({ articles: await loadWritingArticleRecords(user.id) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Writing results failed.';
+      const status = message === 'Not authenticated.' ? 401 : 500;
+
+      return c.json({ error: 'Writing results failed.', message }, status);
+    }
+  })
+  .delete('/writing-results', zValidator('json', writingResultDeleteSchema), async (c) => {
+    const request = c.req.valid('json');
+
+    try {
+      const { user } = await requirePaperAccess(c);
+      const articles = await removeWritingArticleRecord(user.id, request.storagePath);
+
+      return c.json({ articles });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not delete writing result.';
+      const status = message === 'Not authenticated.' ? 401 : error instanceof Error && error.name === 'InvalidWritingResultPathError' ? 400 : 500;
+
+      return c.json({ error: 'Could not delete writing result.', message }, status);
+    }
+  })
   .post('/write-introduction', zValidator('json', writingRequestSchema), async (c) => {
     const request = c.req.valid('json');
 
@@ -3462,12 +3567,24 @@ const app = new Hono()
           baseBillableTokens,
         },
       });
+      const article: WritingArticleRecord = {
+        id: result.storagePath,
+        topic: request.topic,
+        outputLanguage: request.outputLanguage,
+        storagePath: result.storagePath,
+        savedAt: result.savedAt,
+        kind: 'introduction',
+        selectedPaperCount: result.sourceCount,
+        billableTokens,
+      };
+      await appendWritingArticleRecord(user.id, article);
 
       return c.json({
         draft: result.draft,
         references: result.references,
         storagePath: result.storagePath,
         savedAt: result.savedAt,
+        article,
         usage: {
           inputTokens: result.inputTokens,
           outputTokens: result.outputTokens,
@@ -3528,12 +3645,26 @@ const app = new Hono()
           baseBillableTokens,
         },
       });
+      const article: WritingArticleRecord | null = result.storagePath
+        ? {
+            id: result.storagePath,
+            topic: request.topic,
+            outputLanguage: request.outputLanguage,
+            storagePath: result.storagePath,
+            savedAt: result.savedAt,
+            kind: 'follow-up',
+            selectedPaperCount: result.sourceCount,
+            billableTokens,
+          }
+        : null;
+      if (article) await appendWritingArticleRecord(user.id, article);
 
       return c.json({
         draft: result.answer,
         references: result.references,
         storagePath: result.storagePath,
         savedAt: result.savedAt,
+        article,
         needsSupplementalReading: result.needsSupplementalReading,
         usage: {
           inputTokens: result.inputTokens,

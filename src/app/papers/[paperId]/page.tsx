@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { PaperChatContextBridge } from '@/components/chat/paper-chat-context-bridge';
 import { PdfReader } from '@/components/paper/pdf-reader';
-import { getMockPaper } from '@/features/papers/mock-data';
 import type { PaperReadingMode, PaperSelection } from '@/types/paper';
 
 interface PaperPageProps {
@@ -44,7 +43,6 @@ const normalizeReadingMode = (mode?: string): PaperReadingMode => (mode === 'rea
 const normalizeDetailedReport = (value?: string) => value !== '0' && value !== 'false';
 
 const PaperPage = ({ params, searchParams }: PaperPageProps) => {
-  const mockPaper = getMockPaper(params.paperId);
   const [selectedText, setSelectedText] = useState<PaperSelection | null>(null);
   const [preferences, setPreferences] = useState<ViewerPreferences | null>(null);
   const readingMode = searchParams?.readingMode ? normalizeReadingMode(searchParams.readingMode) : preferences?.readingMode ?? 'reviewer';
@@ -53,12 +51,12 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
     () =>
       searchParams?.pdfUrl
         ? {
-            ...mockPaper,
             id: params.paperId,
-            title: searchParams.title ?? mockPaper.title,
+            title: searchParams.title ?? params.paperId,
             authors: searchParams.authors ?? 'Uploaded paper',
             pages: 0,
             status: 'uploaded' as const,
+            abstract: 'Uploaded PDF ready for reading and chat.',
             pdfUrl: normalizePdfUrl(searchParams.pdfUrl),
             filePath: searchParams.filePath,
             journal: searchParams.journal,
@@ -66,8 +64,8 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
             readingMode,
             detailedReport,
           }
-        : { ...mockPaper, readingMode, detailedReport },
-    [mockPaper, params.paperId, readingMode, detailedReport, searchParams?.authors, searchParams?.filePath, searchParams?.journal, searchParams?.pdfUrl, searchParams?.title, searchParams?.year],
+        : null,
+    [params.paperId, readingMode, detailedReport, searchParams?.authors, searchParams?.filePath, searchParams?.journal, searchParams?.pdfUrl, searchParams?.title, searchParams?.year],
   );
 
   useEffect(() => {
@@ -102,10 +100,22 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
         <div className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">{readingMode === 'reviewer' ? '審稿人模式' : '讀者模式'}</div>
         <div className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{detailedReport ? '詳細報告' : '極簡速覽'}</div>
       </nav>
-      <div className="flex h-full min-h-0 justify-center overflow-hidden">
-        <PdfReader initialZoom={preferences?.pdfZoom} onSelectionChange={setSelectedText} onZoomChange={saveZoom} paper={paper} />
-        <PaperChatContextBridge paper={paper} selectedText={selectedText} />
-      </div>
+      {paper ? (
+        <div className="flex h-full min-h-0 justify-center overflow-hidden">
+          <PdfReader initialZoom={preferences?.pdfZoom} onSelectionChange={setSelectedText} onZoomChange={saveZoom} paper={paper} />
+          <PaperChatContextBridge paper={paper} selectedText={selectedText} />
+        </div>
+      ) : (
+        <div className="flex h-full items-center justify-center px-6">
+          <div className="max-w-md rounded-2xl border bg-white p-6 text-center shadow-sm">
+            <h1 className="text-xl font-semibold">请从已上传论文打开</h1>
+            <p className="mt-2 text-sm text-muted-foreground">默认样例论文已关闭。请回到论文库，打开你上传后的对应论文。</p>
+            <Link className="mt-4 inline-flex rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground" href="/">
+              返回论文库
+            </Link>
+          </div>
+        </div>
+      )}
     </main>
   );
 };
