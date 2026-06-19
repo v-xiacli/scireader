@@ -617,11 +617,25 @@ const parseAuthors = (value?: string) =>
 
 const cleanCitationAuthor = (author: string) => author.replace(/\d+|\*|†|‡|§/g, '').replace(/\s+/g, ' ').trim();
 
+const isInvalidCitationAuthor = (author: string) => {
+  const normalized = author.toLowerCase();
+  const initialCount = author.match(/\b[A-Z]\./g)?.length ?? 0;
+  const wordCount = author.split(/\s+/).filter(Boolean).length;
+
+  return (
+    !author ||
+    /\b(fig(?:ure)?|table|abstract|keywords?|journal|homepage|conference|proceedings|transactions|vol\.?|university|department|institute|school|supported|grant|received|accepted|revised|corresponding|email|doi|www|http|ieee|nips|neurips)\b/i.test(author) ||
+    (initialCount >= 4 && wordCount >= 5) ||
+    (wordCount > 6 && !/[\u3400-\u9fff]/.test(author)) ||
+    normalized === 'uploaded paper'
+  );
+};
+
 const parseCitationAuthors = (value?: string) => {
   const normalized = normalizeMetadataText(value);
   if (!normalized) return [];
 
-  const normalizeList = (authors: string[]) => authors.map(cleanCitationAuthor).filter(Boolean);
+  const normalizeList = (authors: string[]) => authors.map(cleanCitationAuthor).filter((author) => Boolean(author) && !isInvalidCitationAuthor(author));
   if (/;|\band\b|&/i.test(normalized)) return normalizeList(normalized.split(/\s*(?:;|\band\b|&)\s*/i));
 
   const commaParts = normalized.split(/\s*,\s*/).filter(Boolean);
@@ -657,9 +671,9 @@ const formatIeeeAuthorName = (author: string) => {
 };
 
 const joinIeeeAuthors = (authors: string[]) => {
-  if (!authors.length) return 'Unknown author';
+  if (!authors.length) return '';
   const formattedAuthors = authors.map(formatIeeeAuthorName).filter(Boolean);
-  if (!formattedAuthors.length) return 'Unknown author';
+  if (!formattedAuthors.length) return '';
   if (formattedAuthors.length > 6) return `${formattedAuthors[0]} et al.`;
   if (formattedAuthors.length === 1) return formattedAuthors[0];
   if (formattedAuthors.length === 2) return `${formattedAuthors[0]} and ${formattedAuthors[1]}`;
@@ -669,14 +683,30 @@ const joinIeeeAuthors = (authors: string[]) => {
 
 const trimCitationField = (value?: string) => normalizeMetadataText(value)?.replace(/[.。]+$/, '');
 
+const cleanCitationVenue = (value?: string) => {
+  const venue = trimCitationField(value);
+  if (!venue) return undefined;
+  if (/^(ieee|acm|journal homepage:?|homepage:?)$/i.test(venue)) return undefined;
+  if (/\b(journal homepage|available online|www\.|https?:\/\/|doi:|copyright|all rights reserved)\b/i.test(venue)) return undefined;
+  if (/^(this work was supported|manuscript received|received|accepted|revised|corresponding author)\b/i.test(venue)) return undefined;
+  if (venue.length > 180) return undefined;
+
+  return venue;
+};
+
+const isConferenceVenue = (venue: string) => /\b(conference|proceedings|symposium|workshop|congress|nips|neurips|icml|cvpr|acl|emnlp|proc\.)\b/i.test(venue);
+
 const buildIeeeCitation = (request: Pick<z.infer<typeof readerRequestSchema>, 'paperId' | 'title' | 'authors' | 'journal' | 'year'>) => {
   const authors = joinIeeeAuthors(parseCitationAuthors(request.authors));
   const title = trimCitationField(request.title) || trimCitationField(request.paperId) || 'Untitled paper';
-  const journal = trimCitationField(request.journal);
+  const venue = cleanCitationVenue(request.journal);
   const year = trimCitationField(request.year);
-  const publicationParts = [journal ? `*${journal}*` : null, year].filter(Boolean);
+  const publication = venue
+    ? `${isConferenceVenue(venue) ? `in Proc. ${venue}` : `*${venue}*`}${year ? `, ${year}` : ''}`
+    : year;
+  const authorPrefix = authors ? `${authors}, ` : '';
 
-  return `${authors}, "${title},"${publicationParts.length ? ` ${publicationParts.join(', ')}` : ''}.`;
+  return `${authorPrefix}"${title},"${publication ? ` ${publication}` : ''}.`;
 };
 
 const hasIeeeCitationPreface = (summary: string) => /^##\s*(?:IEEE规范引用格式|IEEE Citation)\b/i.test(summary.trim());
@@ -686,9 +716,14 @@ const withIeeeCitationPreface = (
   request: Pick<z.infer<typeof readerRequestSchema>, 'paperId' | 'title' | 'authors' | 'journal' | 'year'>,
 ) => {
   const trimmedSummary = summary.trim();
-  if (!trimmedSummary || hasIeeeCitationPreface(trimmedSummary)) return trimmedSummary;
+  if (!trimmedSummary) return trimmedSummary;
 
-  return `## IEEE规范引用格式\n\n${buildIeeeCitation(request)}\n\n---\n\n${trimmedSummary}`;
+  const citationPreface = `## IEEE规范引用格式\n\n${buildIeeeCitation(request)}`;
+  if (hasIeeeCitationPreface(trimmedSummary)) {
+    return trimmedSummary.replace(/^##\s*(?:IEEE规范引用格式|IEEE Citation)\b[\s\S]*?(?=\n---\n)/i, citationPreface);
+  }
+
+  return `${citationPreface}\n\n---\n\n${trimmedSummary}`;
 };
 
 type WritingSource = {
