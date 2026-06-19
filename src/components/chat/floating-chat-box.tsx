@@ -294,6 +294,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const [isThinking, setIsThinking] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [isMobileChatExpanded, setIsMobileChatExpanded] = useState(false);
+  const [isDesktopChatCollapsed, setIsDesktopChatCollapsed] = useState(false);
   const [isMobilePortrait, setIsMobilePortrait] = useState(false);
   const [isPortraitHintDismissed, setIsPortraitHintDismissed] = useState(false);
   const [isExportMode, setIsExportMode] = useState(false);
@@ -322,6 +323,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const selectedExportCount = selectedExportIds.size;
   const viewportWidth = typeof window === 'undefined' ? 390 : window.innerWidth;
   const viewportHeight = typeof window === 'undefined' ? 720 : window.innerHeight;
+  const isChatCollapsed = isMobileViewport ? !isMobileChatExpanded : isDesktopChatCollapsed;
   const mobileLayout = isMobileViewport
     ? {
         x: edgePadding,
@@ -990,7 +992,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
         left: mobileLayout?.x ?? position.x,
         top: mobileLayout?.y ?? position.y,
         width: mobileLayout?.width ?? size.width,
-        height: mobileLayout?.height ?? size.height,
+        height: mobileLayout?.height ?? (isDesktopChatCollapsed ? mobileCollapsedHeight : size.height),
       }}
     >
       <header
@@ -1027,21 +1029,21 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
                 <span className={isMobileViewport ? 'sr-only' : ''}>{isExportMode ? '取消' : '匯出'}</span>
               </button>
             ) : null}
-            {isMobileViewport ? (
-              <button
-                aria-label={isMobileChatExpanded ? '最小化聊天框' : '展開聊天框'}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border text-xs font-medium text-slate-700 hover:bg-slate-50"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setIsMobileChatExpanded((current) => !current);
-                }}
-                onPointerDown={(event) => event.stopPropagation()}
-                title={isMobileChatExpanded ? '最小化聊天框' : '展開聊天框'}
-                type="button"
-              >
-                {isMobileChatExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-              </button>
-            ) : null}
+            <button
+              aria-label={isChatCollapsed ? '展開聊天框' : '最小化聊天框'}
+              className={`inline-flex h-9 items-center justify-center rounded-lg border text-xs font-medium text-slate-700 hover:bg-slate-50 ${isMobileViewport ? 'w-9' : 'gap-1 px-2'}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (isMobileViewport) setIsMobileChatExpanded((current) => !current);
+                else setIsDesktopChatCollapsed((current) => !current);
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+              title={isChatCollapsed ? '展開聊天框' : '最小化聊天框'}
+              type="button"
+            >
+              {isChatCollapsed ? <Maximize2 className="size-4" /> : <Minimize2 className="size-4" />}
+              <span className={isMobileViewport ? 'sr-only' : ''}>{isChatCollapsed ? '展開' : '收起'}</span>
+            </button>
             <button
               aria-label="縮小聊天字體"
               className={`inline-flex h-9 items-center justify-center rounded-lg border text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35 ${isMobileViewport ? 'w-9' : 'gap-1 px-2'}`}
@@ -1079,7 +1081,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
         </div>
       </header>
 
-      {isMobilePortrait && !isPortraitHintDismissed ? (
+      {isMobilePortrait && !isPortraitHintDismissed && !isChatCollapsed ? (
         <div className="absolute inset-x-3 top-16 z-30 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 shadow-lg">
           <p className="font-semibold">建議橫屏閱讀</p>
           <p className="mt-1 text-xs leading-5 text-amber-800">手機豎屏空間太窄，橫屏更適合一邊看 PDF、一邊展開聊天。</p>
@@ -1093,7 +1095,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
         </div>
       ) : null}
 
-      {isExportMode && !(isMobileViewport && !isMobileChatExpanded) ? (
+      {isExportMode && !isChatCollapsed ? (
         <div className="flex items-center gap-2 border-b bg-slate-50 px-3 py-2 text-xs">
           <span className="text-slate-600">已選 {selectedExportCount} 條回答</span>
           <button
@@ -1121,7 +1123,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
         </div>
       ) : null}
 
-      {isMobileViewport && !isMobileChatExpanded ? null : largeSummaryWarning ? (
+      {isChatCollapsed ? null : largeSummaryWarning ? (
         <div className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
           <div className="flex flex-wrap items-center gap-2">
             <div className="min-w-0 flex-1">
@@ -1150,7 +1152,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
         </div>
       ) : null}
 
-      {isMobileViewport && !isMobileChatExpanded ? null : summaryProgress ? (
+      {isChatCollapsed ? null : summaryProgress ? (
         <div className="border-b bg-amber-50 px-3 py-2 text-xs text-amber-900">
           <div className="flex items-center justify-between gap-3">
             <span className="font-medium">{summaryProgress.label}</span>
@@ -1163,14 +1165,14 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
         </div>
       ) : null}
 
-      {isMobileViewport && !isMobileChatExpanded ? null : selectedText ? (
+      {isChatCollapsed ? null : selectedText ? (
         <div className="border-b bg-blue-50 p-3 text-xs">
           <p className="font-medium text-blue-900">Selected text context</p>
           <p className="mt-1 line-clamp-3 text-blue-800">{selectedText.text}</p>
         </div>
       ) : null}
 
-      <div className={isMobileViewport && !isMobileChatExpanded ? 'hidden' : 'min-h-0 flex-1 space-y-2 overflow-auto p-3'}>
+      <div className={isChatCollapsed ? 'hidden' : 'min-h-0 flex-1 space-y-2 overflow-auto p-3'}>
         {messages.map((message) => {
           const canExportMessage = isExportableAssistantMessage(message);
           const isSelectedForExport = selectedExportIds.has(message.id);
@@ -1228,7 +1230,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
         })}
       </div>
 
-      <footer className={isMobileViewport && !isMobileChatExpanded ? 'hidden' : 'border-t p-3'}>
+      <footer className={isChatCollapsed ? 'hidden' : 'border-t p-3'}>
         <textarea
           className={`max-h-48 min-h-20 w-full resize-y rounded-xl border bg-slate-50 p-2.5 outline-none focus:border-primary ${fontSizeStyle.textarea}`}
           disabled={isThinking}
@@ -1249,7 +1251,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
           {isThinking ? 'Reader agent is working...' : 'Send to reader agent'}
         </button>
       </footer>
-      {!isMobileViewport && (
+      {!isMobileViewport && !isDesktopChatCollapsed && (
         [
           ['top', 'left-6 right-6 top-0 h-3 cursor-ns-resize'],
           ['right', 'bottom-6 right-0 top-6 w-3 cursor-ew-resize'],
