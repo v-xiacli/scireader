@@ -116,6 +116,7 @@ const READER_RETRIEVAL_TOP_PAGES = 10;
 const MAX_FIGURE_CAPTIONS = 40;
 const MAX_PAGE_IMAGES = 6;
 const PDF_RENDER_SCALE = 2;
+const WRITING_BILLING_MULTIPLIER = 3;
 
 const readerRequestSchema = z.object({
   paperId: z.string().min(1),
@@ -160,6 +161,27 @@ const tokenEstimateRequestSchema = z.object({
   year: z.string().optional(),
   prompt: z.string().optional(),
   model: z.string().optional(),
+});
+
+const writingPaperSchema = z.object({
+  paperId: z.string().min(1),
+  title: z.string().min(1),
+  authors: z.string().optional(),
+  journal: z.string().optional(),
+  year: z.string().optional(),
+  pdfUrl: z.string().optional(),
+  filePath: z.string().optional(),
+});
+
+const writingRequestSchema = z.object({
+  topic: z.string().trim().min(2).max(500),
+  outputLanguage: z.enum(['chinese', 'english']),
+  selectedPapers: z.array(writingPaperSchema).min(1).max(20),
+});
+
+const writingFollowUpRequestSchema = writingRequestSchema.extend({
+  question: z.string().trim().min(1).max(1000),
+  currentDraft: z.string().trim().min(1).max(60000),
 });
 
 const metadataRequestSchema = z.object({
@@ -664,6 +686,123 @@ const withIeeeCitationPreface = (
 
   return `## IEEE规范引用格式\n\n${buildIeeeCitation(request)}\n\n---\n\n${trimmedSummary}`;
 };
+
+type WritingSource = {
+  citationKey: string;
+  paperKey: string;
+  paper: z.infer<typeof writingPaperSchema>;
+  summary: string;
+  ieeeCitation: string;
+  externalEvaluations: ReferenceEvaluationRecord[];
+};
+
+const sanitizeWritingTitle = (topic: string) => {
+  const sanitized = topic
+    .normalize('NFKC')
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80);
+
+  return sanitized || 'writing';
+};
+
+const formatWritingStorageTimestamp = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+    .formatToParts(date)
+    .reduce<Record<string, string>>((acc, part) => {
+      if (part.type !== 'literal') acc[part.type] = part.value;
+
+      return acc;
+    }, {});
+
+  return `${parts.year}${parts.month}${parts.day}-${parts.hour}${parts.minute}`;
+};
+
+const getWritingStoragePath = (userId: string, topic: string, date = new Date()) =>
+  `user-writing/${userId}/${sanitizeWritingTitle(topic)}-${formatWritingStorageTimestamp(date)}.md`;
+
+const getWritingPaperRequest = (paper: z.infer<typeof writingPaperSchema>) => ({
+  paperId: paper.paperId,
+  prompt: 'writing-mode-summary-lookup',
+  scope: 'whole-paper' as const,
+  pdfUrl: paper.pdfUrl,
+  title: paper.title,
+  authors: paper.authors,
+  journal: paper.journal,
+  year: paper.year,
+});
+
+const getWritingSummaryCandidates = (paper: z.infer<typeof writingPaperSchema>) => {
+  const storagePath = paper.filePath ?? resolveUploadedPdfStoragePath(paper.pdfUrl);
+  const baseRequest = getWritingPaperRequest(paper);
+  const candidates: string[] = [];
+
+  for (const readingMode of ['reviewer', 'reader'] as const) {
+    for (const detailedReport of [false, true]) {
+      candidates.push(getPaperSummaryStoragePath({ ...baseRequest, readingMode, detailedReport }, storagePath));
+    }
+  }
+
+  return [...new Set(candidates)];
+};
+
+const loadCachedSummaryForWriting = async (paper: z.infer<typeof writingPaperSchema>) => {
+  for (const summaryPath of getWritingSummaryCandidates(paper)) {
+    const summary = await downloadTextIfExists(summaryPath);
+
+    if (summary?.trim()) return { summary: withIeeeCitationPreface(summary, getWritingPaperRequest(paper)), summaryPath };
+  }
+
+  return null;
+};
+
+const stripGeneratedReferences = (draft: string) => draft.split(/\n#{1,3}\s*(?:References|参考文献|引用文献)\b/i)[0]?.trim() || draft.trim();
+
+const numberWritingCitations = (draft: string, sources: WritingSource[]) => {
+  const sourceByKey = new Map(sources.map((source) => [source.citationKey, source]));
+  const orderedSources: WritingSource[] = [];
+  const seenKeys = new Set<string>();
+  const body = stripGeneratedReferences(draft).replace(/\{\{cite:([a-zA-Z0-9_-]+)\}\}/g, (_match, citationKey: string) => {
+    const source = sourceByKey.get(citationKey);
+    if (!source) return '';
+
+    if (!seenKeys.has(citationKey)) {
+      seenKeys.add(citationKey);
+      orderedSources.push(source);
+    }
+
+    return `[${orderedSources.findIndex((item) => item.citationKey === citationKey) + 1}]`;
+  });
+  const referenceSources = orderedSources.length ? orderedSources : sources;
+  const references = referenceSources.map((source, index) => `[${index + 1}] ${source.ieeeCitation}`);
+
+  return {
+    draft: `${body.trim()}\n\n## References\n\n${references.join('\n')}`,
+    references,
+    citedPaperKeys: referenceSources.map((source) => source.paperKey),
+  };
+};
+
+const formatWritingExternalEvaluations = (records: ReferenceEvaluationRecord[]) =>
+  records
+    .slice(0, 8)
+    .map((record, index) => {
+      const source = [record.sourceTitle, record.sourceJournal, record.sourceYear].filter(Boolean).join(', ') || record.sourcePaperKey;
+      const evidence = record.evidenceText ? ` Evidence: ${record.evidenceText}` : '';
+
+      return `${index + 1}. From ${source}: ${record.evaluation}${evidence}`;
+    })
+    .join('\n');
 
 const extractYear = (text: string) => text.match(/(?:19|20)\d{2}/)?.[0];
 
@@ -2400,6 +2539,291 @@ const createExpensiveTextResponse = async (system: string, userContent: string, 
   };
 };
 
+const prepareWritingSources = async (userId: string, request: z.infer<typeof writingRequestSchema>) => {
+  const uploadedPapers = await loadUploadedPapers(userId);
+  const sources: WritingSource[] = [];
+  const missingSummaries: string[] = [];
+
+  for (const [index, selectedPaper] of request.selectedPapers.entries()) {
+    const ownedPaper = uploadedPapers.find((paper) =>
+      (selectedPaper.filePath && paper.filePath === selectedPaper.filePath) ||
+      (paper.id === selectedPaper.paperId && paper.title === selectedPaper.title),
+    );
+
+    if (!ownedPaper) {
+      const error = new Error(`You do not have access to selected paper: ${selectedPaper.title}.`);
+      error.name = 'ForbiddenWritingPaperError';
+      throw error;
+    }
+
+    const paper = {
+      paperId: ownedPaper.id,
+      title: ownedPaper.title,
+      authors: ownedPaper.authors,
+      journal: ownedPaper.journal,
+      year: ownedPaper.year,
+      pdfUrl: ownedPaper.pdfUrl,
+      filePath: ownedPaper.filePath,
+    };
+    const cached = await loadCachedSummaryForWriting(paper);
+
+    if (!cached) {
+      missingSummaries.push(paper.title);
+      continue;
+    }
+
+    const paperKey = getPaperIdentitySlug(getWritingPaperRequest(paper));
+    const [neo4jExternalEvaluations, blobExternalEvaluations] = await Promise.all([
+      loadExternalReferenceEvaluationsFromNeo4j(paperKey),
+      loadReferenceEvaluationRecords(getReferenceExternalEvaluationsPath(paperKey)),
+    ]);
+
+    sources.push({
+      citationKey: `p${index + 1}`,
+      paperKey,
+      paper,
+      summary: cached.summary,
+      ieeeCitation: buildIeeeCitation(getWritingPaperRequest(paper)),
+      externalEvaluations: mergeReferenceEvaluationRecords(neo4jExternalEvaluations, blobExternalEvaluations),
+    });
+  }
+
+  if (missingSummaries.length) {
+    const error = new Error(`以下文献还没有已保存读书笔记，请先打开论文生成摘要：${missingSummaries.join('；')}`);
+    error.name = 'MissingWritingSummaryError';
+    throw error;
+  }
+
+  if (!sources.length) {
+    const error = new Error('No usable reading notes were found for the selected papers.');
+    error.name = 'MissingWritingSummaryError';
+    throw error;
+  }
+
+  return sources;
+};
+
+const buildWritingPrompt = (request: z.infer<typeof writingRequestSchema>, sources: WritingSource[]) => {
+  const languageInstruction = request.outputLanguage === 'english'
+    ? 'Write in polished academic English.'
+    : '使用中文写作，保持学术论文 Introduction 的正式语气。';
+  const sourceBlocks = sources
+    .map((source, index) => `Source ${index + 1}
+Citation placeholder: {{cite:${source.citationKey}}}
+Title: ${source.paper.title}
+Authors: ${source.paper.authors ?? 'unknown'}
+Venue/journal/conference: ${source.paper.journal ?? 'unknown'}
+Year: ${source.paper.year ?? 'unknown'}
+IEEE reference: ${source.ieeeCitation}
+
+Saved reading note:
+${source.summary.slice(0, 9000)}
+
+External evaluations of this cited paper by other papers:
+${formatWritingExternalEvaluations(source.externalEvaluations) || 'None found in Neo4j/cache.'}`)
+    .join('\n\n---\n\n');
+
+  return {
+    system: `You are SCIReader writing mode, an academic Introduction drafting assistant.
+${languageInstruction}
+Use only the provided saved reading notes and external evaluation records. Do not read or claim to have reread PDFs.
+Organize the selected literature according to Introduction conventions: background, existing approaches, research gap, motivation, and positioning.
+Every factual claim about a selected paper must cite that paper using its exact placeholder, for example {{cite:p1}}.
+Citation numbers will be assigned by the server in first-appearance order, so do not write numeric citations yourself.
+Integrate external evaluations naturally when useful, phrased as how other papers position, compare, or criticize the cited work. Do not overstate those evaluations as target-paper evidence.
+Return only the Introduction body. Do not include a References section, bibliography, title, outline, or explanatory notes.`,
+    user: `Writing topic or direction:
+${request.topic}
+
+Selected paper notes and external evaluations:
+${sourceBlocks}`,
+  };
+};
+
+const generateWritingIntroduction = async (userId: string, request: z.infer<typeof writingRequestSchema>) => {
+  const sources = await prepareWritingSources(userId, request);
+  const prompt = buildWritingPrompt(request, sources);
+  const result = await createExpensiveTextResponse(
+    prompt.system,
+    prompt.user,
+    request.outputLanguage === 'english' ? 4500 : 5000,
+    { phase: 'writing-introduction', selectedPapers: sources.length, outputLanguage: request.outputLanguage },
+    SUMMARY_FINAL_TIMEOUT_MS,
+  );
+  const numbered = numberWritingCitations(result.answer, sources);
+  const storagePath = getWritingStoragePath(userId, request.topic);
+  const savedAt = new Date().toISOString();
+  const savedContent = `# Writing mode result
+
+\`\`\`json
+${JSON.stringify({
+  topic: request.topic,
+  outputLanguage: request.outputLanguage,
+  selectedPapers: sources.map((source) => ({
+    paperKey: source.paperKey,
+    title: source.paper.title,
+    authors: source.paper.authors,
+    journal: source.paper.journal,
+    year: source.paper.year,
+    citationKey: source.citationKey,
+  })),
+  references: numbered.references,
+  citedPaperKeys: numbered.citedPaperKeys,
+  model: result.model,
+  savedAt,
+}, null, 2)}
+\`\`\`
+
+${numbered.draft}
+`;
+
+  await uploadTextAsAdmin(savedContent, storagePath);
+
+  return {
+    draft: numbered.draft,
+    references: numbered.references,
+    storagePath,
+    savedAt,
+    model: result.model,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+    sourceCount: sources.length,
+  };
+};
+
+const isExplicitSupplementalReadingRequest = (question: string) =>
+  /\b(reread|re-read|read again|search the pdf|inspect the pdf|full text|not summarized|unsummarized)\b|重新阅读|重读|再读|检索原文|查看原文|检查PDF|补充阅读|没有总结|未总结|全文检索|重新检索/i.test(question);
+
+const triageWritingFollowUp = async (request: z.infer<typeof writingFollowUpRequestSchema>, sources: WritingSource[]) => {
+  if (isExplicitSupplementalReadingRequest(request.question)) {
+    return {
+      needsSupplementalReading: true,
+      reason: 'User explicitly requested rereading or searching content beyond saved notes.',
+      model: 'explicit-supplemental-reading-request',
+      inputTokens: 0,
+      outputTokens: 0,
+    };
+  }
+
+  const modelSelection = selectCheapTriageModel();
+  const client = createAnthropicClient(modelSelection.target);
+  const response = await client.messages.create({
+    model: modelSelection.model,
+    max_tokens: 600,
+    system:
+      'You are SCIReader writing follow-up router. Decide whether the user follow-up can be answered by the current draft plus saved paper notes, or whether it requires rereading/searching PDFs for content not present in notes. Output only JSON.',
+    messages: [
+      {
+        role: 'user',
+        content: `Writing topic:
+${request.topic}
+
+Follow-up request:
+${request.question}
+
+Current draft:
+${request.currentDraft.slice(0, 12000)}
+
+Saved note excerpts:
+${sources.map((source) => `${source.citationKey}: ${source.paper.title}\n${source.summary.slice(0, 2500)}`).join('\n\n---\n\n')}
+
+Return JSON exactly: {"needsSupplementalReading": boolean, "reason": string}.
+Set needsSupplementalReading=true only when the follow-up asks for evidence, data, equations, pages, methods, or claims not present in the current draft or saved notes, or asks to reread/search original PDFs. Otherwise false.`,
+      },
+    ],
+  });
+  const parsed = extractJsonObject(textFromResponse(response).trim()) as Partial<{ needsSupplementalReading: boolean; reason: string }>;
+
+  return {
+    needsSupplementalReading: parsed.needsSupplementalReading === true,
+    reason: typeof parsed.reason === 'string' ? parsed.reason : 'No reason returned.',
+    model: modelSelection.model,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+  };
+};
+
+const generateWritingFollowUp = async (userId: string, request: z.infer<typeof writingFollowUpRequestSchema>) => {
+  const sources = await prepareWritingSources(userId, request);
+  const triage = await triageWritingFollowUp(request, sources);
+
+  if (triage.needsSupplementalReading) {
+    return {
+      needsSupplementalReading: true,
+      answer: request.outputLanguage === 'english'
+        ? `This follow-up requires supplemental reading or PDF search before I revise the draft. Reason: ${triage.reason}`
+        : `这个追问需要先补充阅读或检索原文后再改写。原因：${triage.reason}`,
+      storagePath: '',
+      savedAt: '',
+      references: [],
+      model: triage.model,
+      inputTokens: triage.inputTokens,
+      outputTokens: triage.outputTokens,
+      sourceCount: sources.length,
+      baseBillableTokens: getBillableTokens(triage.inputTokens, triage.outputTokens, triage.model),
+    };
+  }
+
+  const languageInstruction = request.outputLanguage === 'english' ? 'Write in polished academic English.' : '使用中文写作，保持学术论文 Introduction 的正式语气。';
+  const result = await createExpensiveTextResponse(
+    `You are SCIReader writing mode. ${languageInstruction}
+Revise or answer the user's follow-up using only the current draft, saved reading notes, and external evaluations. Do not reread PDFs.
+Use citation placeholders like {{cite:p1}} when adding or changing cited claims. Return the complete revised Introduction body only, without References.`,
+    `Writing topic:
+${request.topic}
+
+Follow-up request:
+${request.question}
+
+Current draft:
+${stripGeneratedReferences(request.currentDraft)}
+
+Saved paper notes:
+${sources.map((source) => `${source.citationKey}: ${source.paper.title}
+${source.summary.slice(0, 7000)}
+
+External evaluations:
+${formatWritingExternalEvaluations(source.externalEvaluations) || 'None found.'}`).join('\n\n---\n\n')}`,
+    request.outputLanguage === 'english' ? 4500 : 5000,
+    { phase: 'writing-follow-up', selectedPapers: sources.length, outputLanguage: request.outputLanguage },
+    SUMMARY_FINAL_TIMEOUT_MS,
+  );
+  const numbered = numberWritingCitations(result.answer, sources);
+  const storagePath = getWritingStoragePath(userId, request.topic);
+  const savedAt = new Date().toISOString();
+  const savedContent = `# Writing mode follow-up result
+
+\`\`\`json
+${JSON.stringify({
+  topic: request.topic,
+  followUpQuestion: request.question,
+  outputLanguage: request.outputLanguage,
+  references: numbered.references,
+  citedPaperKeys: numbered.citedPaperKeys,
+  model: `${triage.model} -> ${result.model}`,
+  savedAt,
+}, null, 2)}
+\`\`\`
+
+${numbered.draft}
+`;
+
+  await uploadTextAsAdmin(savedContent, storagePath);
+
+  return {
+    needsSupplementalReading: false,
+    answer: numbered.draft,
+    references: numbered.references,
+    storagePath,
+    savedAt,
+    model: `${triage.model} -> ${result.model}`,
+    inputTokens: triage.inputTokens + result.inputTokens,
+    outputTokens: triage.outputTokens + result.outputTokens,
+    sourceCount: sources.length,
+    baseBillableTokens: getBillableTokens(triage.inputTokens, triage.outputTokens, triage.model) + getBillableTokens(result.inputTokens, result.outputTokens, result.model),
+  };
+};
+
 const generateChunkedEnglishSummary = async (
   request: z.infer<typeof readerRequestSchema>,
   jobId: string,
@@ -3009,6 +3433,138 @@ const app = new Hono()
       });
 
       return c.json({ error: 'Token estimate failed.', message }, status);
+    }
+  })
+  .post('/write-introduction', zValidator('json', writingRequestSchema), async (c) => {
+    const request = c.req.valid('json');
+
+    try {
+      const { user } = await requirePaperAccess(c);
+      await ensurePositiveTokenBalance(user.id);
+
+      const result = await generateWritingIntroduction(user.id, request);
+      const baseBillableTokens = getBillableTokens(result.inputTokens, result.outputTokens, result.model);
+      const billableTokens = baseBillableTokens * WRITING_BILLING_MULTIPLIER;
+      const tokenAccount = await recordUserTokenUsage({
+        userId: user.id,
+        paperId: `writing:${sanitizeWritingTitle(request.topic)}`,
+        action: 'writing:introduction',
+        model: result.model,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        billableTokens,
+        metadata: {
+          topic: request.topic,
+          outputLanguage: request.outputLanguage,
+          selectedPaperCount: result.sourceCount,
+          storagePath: result.storagePath,
+          billingMultiplier: WRITING_BILLING_MULTIPLIER,
+          baseBillableTokens,
+        },
+      });
+
+      return c.json({
+        draft: result.draft,
+        references: result.references,
+        storagePath: result.storagePath,
+        savedAt: result.savedAt,
+        usage: {
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          baseBillableTokens,
+          billableTokens,
+          billingMultiplier: WRITING_BILLING_MULTIPLIER,
+        },
+        tokenAccount,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Writing mode failed.';
+      const status =
+        message === 'Not authenticated.'
+          ? 401
+          : error instanceof Error && error.name === 'ForbiddenWritingPaperError'
+            ? 403
+            : isInsufficientTokenBalanceError(error)
+              ? 402
+              : error instanceof Error && error.name === 'MissingWritingSummaryError'
+                ? 409
+                : 500;
+
+      console.error('[reader-agent:writing] request failed', {
+        topic: request.topic,
+        selectedPapers: request.selectedPapers.length,
+        status,
+        message,
+      });
+
+      return c.json({ error: 'Writing mode failed.', message }, status);
+    }
+  })
+  .post('/write-introduction/follow-up', zValidator('json', writingFollowUpRequestSchema), async (c) => {
+    const request = c.req.valid('json');
+
+    try {
+      const { user } = await requirePaperAccess(c);
+      await ensurePositiveTokenBalance(user.id);
+
+      const result = await generateWritingFollowUp(user.id, request);
+      const baseBillableTokens = result.baseBillableTokens ?? getBillableTokens(result.inputTokens, result.outputTokens, result.model);
+      const billableTokens = baseBillableTokens * WRITING_BILLING_MULTIPLIER;
+      const tokenAccount = await recordUserTokenUsage({
+        userId: user.id,
+        paperId: `writing:${sanitizeWritingTitle(request.topic)}`,
+        action: result.needsSupplementalReading ? 'writing:follow-up-triage' : 'writing:follow-up',
+        model: result.model,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        billableTokens,
+        metadata: {
+          topic: request.topic,
+          outputLanguage: request.outputLanguage,
+          selectedPaperCount: result.sourceCount,
+          storagePath: result.storagePath || undefined,
+          needsSupplementalReading: result.needsSupplementalReading,
+          billingMultiplier: WRITING_BILLING_MULTIPLIER,
+          baseBillableTokens,
+        },
+      });
+
+      return c.json({
+        draft: result.answer,
+        references: result.references,
+        storagePath: result.storagePath,
+        savedAt: result.savedAt,
+        needsSupplementalReading: result.needsSupplementalReading,
+        usage: {
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          baseBillableTokens,
+          billableTokens,
+          billingMultiplier: WRITING_BILLING_MULTIPLIER,
+        },
+        tokenAccount,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Writing follow-up failed.';
+      const status =
+        message === 'Not authenticated.'
+          ? 401
+          : error instanceof Error && error.name === 'ForbiddenWritingPaperError'
+            ? 403
+            : isInsufficientTokenBalanceError(error)
+              ? 402
+              : error instanceof Error && error.name === 'MissingWritingSummaryError'
+                ? 409
+                : 500;
+
+      console.error('[reader-agent:writing-follow-up] request failed', {
+        topic: request.topic,
+        selectedPapers: request.selectedPapers.length,
+        status,
+        message,
+      });
+
+      return c.json({ error: 'Writing follow-up failed.', message }, status);
     }
   })
   .post('/ask', zValidator('json', readerRequestSchema), async (c) => {

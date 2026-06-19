@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { ArrowRight, FileText, Loader2, MessageSquareText, Trash2, WalletCards } from 'lucide-react';
+import { ArrowRight, FileText, Loader2, MessageSquareText, PenLine, Trash2, WalletCards } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
@@ -12,6 +12,20 @@ type AuthMode = 'login' | 'signup';
 type AuthUser = { id: string; email: string };
 type TokenEstimate = { inputTokens: number; billableTokens?: number; tokenWeight?: number; model: string };
 type TokenAccount = { tokenBalance: number; tokenUsed: number; tokenAvailable: number };
+type WritingLanguage = 'chinese' | 'english';
+type WritingResult = {
+  draft: string;
+  references: string[];
+  storagePath: string;
+  savedAt: string;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    baseBillableTokens: number;
+    billableTokens: number;
+    billingMultiplier: number;
+  };
+};
 type ViewerPreferences = {
   readingMode?: PaperReadingMode;
   detailedReport?: boolean;
@@ -72,9 +86,19 @@ const HomePage = () => {
   const [tokenAccount, setTokenAccount] = useState<TokenAccount | null>(null);
   const [readingMode, setReadingMode] = useState<PaperReadingMode>('reviewer');
   const [detailedReport, setDetailedReport] = useState(false);
+  const [writingTopic, setWritingTopic] = useState('');
+  const [writingLanguage, setWritingLanguage] = useState<WritingLanguage>('chinese');
+  const [writingSelectedPaperKeys, setWritingSelectedPaperKeys] = useState<string[]>([]);
+  const [isWriting, setIsWriting] = useState(false);
+  const [writingMessage, setWritingMessage] = useState<string | null>(null);
+  const [writingResult, setWritingResult] = useState<WritingResult | null>(null);
+  const [writingFollowUp, setWritingFollowUp] = useState('');
+  const [isWritingFollowUp, setIsWritingFollowUp] = useState(false);
 
   const isLoggedIn = Boolean(authUser);
   const papers = [...uploadedPapers, ...mockPapers];
+  const getWritingPaperKey = (paper: PaperSummary) => paper.filePath ?? paper.id;
+  const selectedWritingPapers = uploadedPapers.filter((paper) => writingSelectedPaperKeys.includes(getWritingPaperKey(paper)));
 
   const applyViewerPreferences = (preferences?: ViewerPreferences | null) => {
     if (preferences?.readingMode) setReadingMode(preferences.readingMode);
@@ -363,6 +387,104 @@ const HomePage = () => {
     }
   };
 
+  const toggleWritingPaper = (paper: PaperSummary) => {
+    const key = getWritingPaperKey(paper);
+
+    setWritingSelectedPaperKeys((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]);
+  };
+
+  const handleGenerateWriting = async () => {
+    if (!isLoggedIn) {
+      setWritingMessage('Please log in before using writing mode.');
+      return;
+    }
+
+    if (!writingTopic.trim()) {
+      setWritingMessage('请输入写作题目或方向。');
+      return;
+    }
+
+    if (!selectedWritingPapers.length) {
+      setWritingMessage('请选择至少一篇已读文件。');
+      return;
+    }
+
+    setIsWriting(true);
+    setWritingMessage(null);
+
+    try {
+      const response = await fetch('/api/reader-agent/write-introduction', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: writingTopic.trim(),
+          outputLanguage: writingLanguage,
+          selectedPapers: selectedWritingPapers.map((paper) => ({
+            paperId: paper.id,
+            title: paper.title,
+            authors: paper.authors,
+            journal: paper.journal,
+            year: paper.year,
+            pdfUrl: paper.pdfUrl,
+            filePath: paper.filePath,
+          })),
+        }),
+      });
+      const result = await response.json();
+
+      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Writing mode failed.');
+
+      setWritingResult(result);
+      if (result.tokenAccount) setTokenAccount(result.tokenAccount);
+      setWritingMessage(`已生成并保存：${result.storagePath}`);
+    } catch (error) {
+      setWritingMessage(error instanceof Error ? error.message : 'Writing mode failed.');
+    } finally {
+      setIsWriting(false);
+    }
+  };
+
+  const handleWritingFollowUp = async () => {
+    if (!writingResult || !writingFollowUp.trim()) return;
+
+    setIsWritingFollowUp(true);
+    setWritingMessage(null);
+
+    try {
+      const response = await fetch('/api/reader-agent/write-introduction/follow-up', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: writingTopic.trim(),
+          outputLanguage: writingLanguage,
+          question: writingFollowUp.trim(),
+          currentDraft: writingResult.draft,
+          selectedPapers: selectedWritingPapers.map((paper) => ({
+            paperId: paper.id,
+            title: paper.title,
+            authors: paper.authors,
+            journal: paper.journal,
+            year: paper.year,
+            pdfUrl: paper.pdfUrl,
+            filePath: paper.filePath,
+          })),
+        }),
+      });
+      const result = await response.json();
+
+      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Writing follow-up failed.');
+
+      if (!result.needsSupplementalReading) setWritingResult(result);
+      if (result.tokenAccount) setTokenAccount(result.tokenAccount);
+      setWritingFollowUp('');
+      setWritingMessage(result.needsSupplementalReading ? result.draft : `已更新并保存：${result.storagePath}`);
+    } catch (error) {
+      setWritingMessage(error instanceof Error ? error.message : 'Writing follow-up failed.');
+    } finally {
+      setIsWritingFollowUp(false);
+    }
+  };
+
   return (
     <main className="min-h-screen px-8 py-6">
       <section className="mx-auto flex max-w-7xl flex-col gap-8">
@@ -520,6 +642,123 @@ const HomePage = () => {
             <p className="mt-2 text-sm text-muted-foreground">Check your credits before using AI features.</p>
           </div>
         </div>
+
+        <section className="rounded-3xl bg-white p-4 shadow-sm sm:p-6">
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <PenLine className="size-5 text-primary" />
+              <h2 className="text-xl font-semibold">写作模式</h2>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              基于已保存的读书笔记组织 Introduction，并按首次出现顺序生成引用编号；写作模式按 3 倍 token 计费。
+            </p>
+          </div>
+
+          <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
+            <div className="space-y-4">
+              <label className="block">
+                <span className="text-sm font-medium">写作题目或方向</span>
+                <textarea
+                  className="mt-2 min-h-24 w-full rounded-xl border px-4 py-3 text-sm outline-none transition focus:border-primary"
+                  onChange={(event) => setWritingTopic(event.target.value)}
+                  placeholder="例如：面向复杂环境感知的多模态融合方法研究"
+                  value={writingTopic}
+                />
+              </label>
+
+              <div>
+                <p className="text-sm font-medium">输出语言</p>
+                <div className="mt-2 inline-flex rounded-xl border p-1">
+                  {([
+                    ['chinese', '中文'],
+                    ['english', 'English'],
+                  ] as const).map(([id, label]) => (
+                    <button
+                      className={`rounded-lg px-3 py-1.5 text-sm transition ${writingLanguage === id ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
+                      key={id}
+                      onClick={() => setWritingLanguage(id)}
+                      type="button"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <button
+                className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
+                disabled={isWriting || !isLoggedIn || !writingTopic.trim() || !selectedWritingPapers.length}
+                onClick={() => void handleGenerateWriting()}
+                type="button"
+              >
+                {isWriting ? <Loader2 className="size-4 animate-spin" /> : <PenLine className="size-4" />}
+                {isWriting ? '正在生成...' : '生成 Introduction'}
+              </button>
+              {writingMessage ? <p className="text-sm text-muted-foreground">{writingMessage}</p> : null}
+            </div>
+
+            <div>
+              <p className="text-sm font-medium">选择已读文件</p>
+              <div className="mt-2 max-h-72 space-y-2 overflow-auto rounded-xl border p-2">
+                {uploadedPapers.length ? uploadedPapers.map((paper) => {
+                  const checked = writingSelectedPaperKeys.includes(getWritingPaperKey(paper));
+
+                  return (
+                    <label className="flex cursor-pointer items-start gap-3 rounded-lg p-2 text-sm transition hover:bg-slate-50" key={getWritingPaperKey(paper)}>
+                      <input
+                        checked={checked}
+                        className="mt-1 size-4"
+                        onChange={() => toggleWritingPaper(paper)}
+                        type="checkbox"
+                      />
+                      <span className="min-w-0">
+                        <span className="block font-medium">{paper.title}</span>
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          {[paper.journal, paper.year].filter(Boolean).join(' · ') || paper.authors}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                }) : (
+                  <p className="p-3 text-sm text-muted-foreground">上传并打开论文生成读书笔记后，就可以在这里选择。</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {writingResult ? (
+            <div className="mt-5 rounded-2xl border bg-slate-50 p-4">
+              <div className="flex flex-col gap-1 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                <span>Saved: {writingResult.storagePath}</span>
+                {writingResult.usage ? (
+                  <span>
+                    {writingResult.usage.billableTokens.toLocaleString()} billable · x{writingResult.usage.billingMultiplier}
+                  </span>
+                ) : null}
+              </div>
+              <div className="mt-4 max-h-[520px] overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-sm leading-7">
+                {writingResult.draft}
+              </div>
+              <div className="mt-4 flex flex-col gap-2 md:flex-row">
+                <input
+                  className="min-w-0 flex-1 rounded-xl border px-4 py-2 text-sm outline-none transition focus:border-primary"
+                  onChange={(event) => setWritingFollowUp(event.target.value)}
+                  placeholder="继续追问或提出修改要求；需要补读时会先判断，不会自动重读"
+                  value={writingFollowUp}
+                />
+                <button
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-70"
+                  disabled={isWritingFollowUp || !writingFollowUp.trim() || !selectedWritingPapers.length}
+                  onClick={() => void handleWritingFollowUp()}
+                  type="button"
+                >
+                  {isWritingFollowUp ? <Loader2 className="size-4 animate-spin" /> : null}
+                  {isWritingFollowUp ? '处理中...' : '追问/修改'}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </section>
 
         <section className="rounded-3xl bg-white p-4 shadow-sm sm:p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-center">
