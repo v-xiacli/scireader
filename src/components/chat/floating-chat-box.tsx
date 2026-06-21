@@ -283,6 +283,12 @@ const buildLargeSummaryWarning = (summaryKey: string, paper: PaperSummary | null
 const isImageReadingPrompt = (prompt: string) =>
   /(?:读取|阅读|读|分析|查看|看看).*(?:图片|图像|截图|图表)|(?:read|analy[sz]e|inspect|view).*(?:image|figure|screenshot)/i.test(prompt);
 
+const isImageReadingConfirmation = (prompt: string) =>
+  /^(继续|继续吧|继续读图|确认|确认继续|是|是的|好的|好|可以|开始|开始吧|开始读图|读图|yes|y|ok|go|sure)$/i.test(prompt.replace(/\s+/g, '').trim());
+
+const isImageReadingCancellation = (prompt: string) =>
+  /^(取消|算了|不用|不读了|先不读|否|不要|no|n|cancel|stop)$/i.test(prompt.replace(/\s+/g, '').trim());
+
 const parseImagePageRange = (prompt: string, totalPages?: number): ImagePageRange | null => {
   if (!isImageReadingPrompt(prompt)) return null;
 
@@ -1082,7 +1088,9 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
       id: crypto.randomUUID(),
       role: 'user',
       content: trimmed,
-      contextLabel: imagePageRange
+      contextLabel: pendingImageReading && (isImageReadingConfirmation(trimmed) || isImageReadingCancellation(trimmed))
+        ? 'Confirm image reading'
+        : imagePageRange
         ? `Page screenshots ${imagePageRange.startPage}-${imagePageRange.endPage}`
         : selectedText
           ? `Selection on page ${selectedText.pageNumber ?? '?'}`
@@ -1090,6 +1098,31 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
             ? 'Whole paper'
             : 'General chat',
     };
+
+    if (pendingImageReading && isImageReadingConfirmation(trimmed)) {
+      const pending = pendingImageReading;
+
+      setInput('');
+      setMessages((current) => [...current, userMessage]);
+      await runConfirmedImageReading(pending);
+      return;
+    }
+
+    if (pendingImageReading && isImageReadingCancellation(trimmed)) {
+      setPendingImageReading(null);
+      setInput('');
+      setMessages((current) => [
+        ...current,
+        userMessage,
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: '已取消本次读图。',
+          contextLabel: 'Image reading',
+        },
+      ]);
+      return;
+    }
 
     if (wantsImageReading && !imagePageRange) {
       setMessages((current) => [
@@ -1121,8 +1154,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
             id: crypto.randomUUID(),
             role: 'assistant',
             content: estimate.cached
-              ? `第 ${estimate.startPage} 页到第 ${estimate.endPage} 页已有保存的读图结果，可直接读取，不会重复消耗视觉模型 token。是否继续？`
-              : `本次读图从第 ${estimate.startPage} 页到第 ${estimate.endPage} 页，预计消耗约 ${formatTokenCount(estimate.billableTokens)}。是否继续？`,
+              ? `第 ${estimate.startPage} 页到第 ${estimate.endPage} 页已有保存的读图结果，可直接读取，不会重复消耗视觉模型 token。请点击“继续读图”，或回复“继续”。`
+              : `本次读图从第 ${estimate.startPage} 页到第 ${estimate.endPage} 页，预计消耗约 ${formatTokenCount(estimate.billableTokens)}。请点击“继续读图”，或回复“继续”。`,
             contextLabel: 'Confirm image reading',
           },
         ]);
@@ -1371,6 +1404,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
                 {pendingImageReading.estimate.cached
                   ? ' 已有保存结果，可直接读取。'
                   : ` 预计消耗约 ${formatTokenCount(pendingImageReading.estimate.billableTokens)}。`}
+                {' '}点击继续读图，或回复“继续”。
               </p>
             </div>
             <button
