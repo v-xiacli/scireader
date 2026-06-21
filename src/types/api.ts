@@ -13,6 +13,7 @@ export interface ReaderAgentRequest {
   scope: 'whole-paper' | 'current-page' | 'selected-text' | 'figure';
   selectedText?: string;
   pageNumber?: number;
+  pageNumbers?: number[];
   figureId?: string;
   model?: string;
 }

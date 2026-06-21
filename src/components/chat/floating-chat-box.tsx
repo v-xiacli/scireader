@@ -84,6 +84,15 @@ type LargeSummaryWarning = {
 };
 
 const largeSummaryBillableTokenThreshold = 500_000;
+const imageReadingPromptTemplate = '读取第x页到第y页的图片';
+const maxImageReadingPagesPerRequest = 6;
+
+type ImagePageRange = {
+  startPage: number;
+  endPage: number;
+  pageNumbers: number[];
+  wasLimited: boolean;
+};
 
 const paperReadingPrompts: Record<PaperReadingMode, string> = {
   reviewer: `You are a cross-disciplinary engineering and applied-science paper reviewer. Be skeptical, concise, and evidence-based.
@@ -251,6 +260,37 @@ const buildLargeSummaryWarning = (summaryKey: string, paper: PaperSummary | null
     model: estimate.model,
     pages: estimate.pages ?? paper?.pages,
     reason,
+  };
+};
+
+const isImageReadingPrompt = (prompt: string) =>
+  /(?:读取|阅读|读|分析|查看|看看).*(?:图片|图像|截图|图表)|(?:read|analy[sz]e|inspect|view).*(?:image|figure|screenshot)/i.test(prompt);
+
+const parseImagePageRange = (prompt: string, totalPages?: number): ImagePageRange | null => {
+  if (!isImageReadingPrompt(prompt)) return null;
+
+  const normalized = prompt.replace(/\s+/g, '');
+  const rangeMatch = normalized.match(/第?(\d+)页?(?:到|至|-|~|～)第?(\d+)页?/);
+  const singlePageMatch = normalized.match(/第?(\d+)页/);
+
+  const rawStart = rangeMatch ? Number(rangeMatch[1]) : singlePageMatch ? Number(singlePageMatch[1]) : NaN;
+  const rawEnd = rangeMatch ? Number(rangeMatch[2]) : rawStart;
+
+  if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd)) return null;
+
+  const orderedStart = Math.max(1, Math.min(rawStart, rawEnd));
+  const orderedEnd = Math.max(1, Math.max(rawStart, rawEnd));
+  const boundedEnd = totalPages ? Math.min(orderedEnd, totalPages) : orderedEnd;
+  const pageNumbers = Array.from({ length: Math.max(0, boundedEnd - orderedStart + 1) }, (_, index) => orderedStart + index);
+  const limitedPageNumbers = pageNumbers.slice(0, maxImageReadingPagesPerRequest);
+
+  if (!limitedPageNumbers.length) return null;
+
+  return {
+    startPage: limitedPageNumbers[0],
+    endPage: limitedPageNumbers[limitedPageNumbers.length - 1],
+    pageNumbers: limitedPageNumbers,
+    wasLimited: limitedPageNumbers.length < pageNumbers.length,
   };
 };
 
@@ -441,7 +481,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   }, [initialPosition]);
 
   const askReaderAgent = useCallback(
-    async (prompt: string, scope: 'whole-paper' | 'selected-text' = 'whole-paper') => {
+    async (prompt: string, scope: 'whole-paper' | 'selected-text' | 'figure' = 'whole-paper', pageNumbers?: number[]) => {
       const response = await fetch('/api/reader-agent/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -456,8 +496,9 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
           readingMode,
           modePrompt: readingModePrompt,
           scope,
-          selectedText: selectedText?.text,
-          pageNumber: selectedText?.pageNumber,
+          selectedText: scope === 'selected-text' ? selectedText?.text : undefined,
+          pageNumber: pageNumbers?.[0] ?? (scope === 'selected-text' ? selectedText?.pageNumber : undefined),
+          pageNumbers,
           paperContextSummary,
           conversationHistory: buildConversationHistory(messages),
         }),
@@ -676,6 +717,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
       if (!isActive) return;
 
       setPaperContextSummary(summary);
+      setInput((current) => (current.trim() ? current : imageReadingPromptTemplate));
       setMessages([
         {
           id: loadingId,
@@ -691,6 +733,12 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
             ? `${turn.routedBy === 'cheap-context' ? 'Saved answer · cheap context' : 'Saved answer · expensive reader'}${turn.inputTokens ? ` · ${turn.inputTokens.toLocaleString()} in / ${(turn.outputTokens ?? 0).toLocaleString()} out` : ''}`
             : 'Saved question',
         })),
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: `是否需要我继续阅读文献中所有图片？你可以说：${imageReadingPromptTemplate}`,
+          contextLabel: 'Image reading',
+        },
       ]);
     };
 
@@ -941,12 +989,36 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     const trimmed = input.trim();
     if (!trimmed || isThinking) return;
 
+    const wantsImageReading = hasPaper && isImageReadingPrompt(trimmed);
+    const imagePageRange = wantsImageReading ? parseImagePageRange(trimmed, paper?.pages) : null;
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'user',
       content: trimmed,
-      contextLabel: selectedText ? `Selection on page ${selectedText.pageNumber ?? '?'}` : hasPaper ? 'Whole paper' : 'General chat',
+      contextLabel: imagePageRange
+        ? `Page screenshots ${imagePageRange.startPage}-${imagePageRange.endPage}`
+        : selectedText
+          ? `Selection on page ${selectedText.pageNumber ?? '?'}`
+          : hasPaper
+            ? 'Whole paper'
+            : 'General chat',
     };
+
+    if (wantsImageReading && !imagePageRange) {
+      setMessages((current) => [
+        ...current,
+        userMessage,
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: `请把页码写成具体数字，例如：${imageReadingPromptTemplate}`,
+          contextLabel: 'Image reading',
+        },
+      ]);
+      setInput(imageReadingPromptTemplate);
+      return;
+    }
+
     const loadingId = crypto.randomUUID();
 
     if (isSummarizing && hasPaper) {
@@ -969,7 +1041,14 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     setIsThinking(true);
 
     try {
-      const result = await askReaderAgent(trimmed, selectedText ? 'selected-text' : 'whole-paper');
+      const readerPrompt = imagePageRange?.wasLimited
+        ? `${trimmed}\n\n系统提示：本次只附上第 ${imagePageRange.startPage} 页到第 ${imagePageRange.endPage} 页的页面截图；一次最多读取 ${maxImageReadingPagesPerRequest} 页。请明确说明你只分析了这些页面。`
+        : trimmed;
+      const result = await askReaderAgent(
+        readerPrompt,
+        imagePageRange ? 'figure' : selectedText ? 'selected-text' : 'whole-paper',
+        imagePageRange?.pageNumbers,
+      );
       const usageLabel = result.usage?.inputTokens ? ` · ${result.usage.inputTokens.toLocaleString()} in / ${(result.usage.outputTokens ?? 0).toLocaleString()} out` : '';
       const contextLabel = result.routedBy === 'cheap-context' ? `Cheap context${usageLabel}` : result.routedBy === 'expensive-reader' ? `Expensive reader${usageLabel}` : undefined;
 

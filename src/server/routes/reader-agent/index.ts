@@ -124,6 +124,7 @@ const readerRequestSchema = z.object({
   scope: z.enum(['whole-paper', 'current-page', 'selected-text', 'figure']),
   selectedText: z.string().optional(),
   pageNumber: z.number().optional(),
+  pageNumbers: z.array(z.number().int().positive()).max(MAX_PAGE_IMAGES).optional(),
   figureId: z.string().optional(),
   model: z.string().optional(),
   pdfUrl: z.string().optional(),
@@ -1581,10 +1582,15 @@ const askClaude = async (request: z.infer<typeof readerRequestSchema>, forcedMod
     const hasWebSearch = webSearchResults.length > 0;
     let pageImages: PdfPageImage[] = [];
     const shouldRenderPageImages = request.scope === 'current-page' || request.scope === 'figure' || (request.scope === 'selected-text' && Boolean(request.pageNumber));
+    const requestedPageNumbers = request.pageNumbers?.length
+      ? request.pageNumbers
+      : request.pageNumber
+        ? [request.pageNumber]
+        : undefined;
 
     if (localPdfPath && shouldRenderPageImages) {
       try {
-        pageImages = await renderPdfPageImages(localPdfPath, request.scope === 'current-page' && request.pageNumber ? [request.pageNumber] : undefined);
+        pageImages = await renderPdfPageImages(localPdfPath, requestedPageNumbers);
       } catch (error) {
         console.error('PDF page rendering failed.', error);
       }
@@ -4020,6 +4026,92 @@ const app = new Hono()
       const summaryStoragePath = getPaperSummaryStoragePath(request, resolveUploadedPdfStoragePath(request.pdfUrl));
       const cachedSummary = (await downloadTextIfExists(summaryStoragePath)) ?? '';
       const storedHistory = await loadDialogHistory(user.id, paperKey);
+
+      if (request.scope === 'figure') {
+        const now = new Date().toISOString();
+        const result = await askClaude(
+          {
+            ...request,
+            paperContextSummary: [cachedSummary, request.paperContextSummary].filter(Boolean).join('\n\n'),
+            conversationHistory: storedHistory.slice(-8).map((turn) => ({ role: turn.role, content: turn.content })),
+          },
+          selectReaderModel(request),
+          'chinese',
+        );
+        const billableTokens = getBillableTokens(result.inputTokens, result.outputTokens, result.model);
+        const tokenAccount = await recordUserTokenUsage({
+          userId: user.id,
+          paperId: request.paperId,
+          action: 'ask:figure-reader',
+          model: result.model,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          billableTokens,
+          metadata: {
+            routedBy: 'expensive-reader',
+            readingMode: getReadingMode(request),
+            pageNumber: request.pageNumber,
+            pageNumbers: request.pageNumbers,
+          },
+        });
+
+        await appendDialogTurns(user.id, paperKey, [
+          { role: 'user', content: request.prompt, createdAt: now, readingMode: getReadingMode(request) },
+          {
+            role: 'assistant',
+            content: result.answer,
+            createdAt: now,
+            model: result.model,
+            routedBy: 'expensive-reader',
+            inputTokens: result.inputTokens,
+            outputTokens: result.outputTokens,
+            readingMode: getReadingMode(request),
+            modePrompt: request.modePrompt,
+            answerChinese: result.answer,
+          },
+        ]);
+        await appendSharedPaperDialogTurns(paperKey, [
+          {
+            role: 'user',
+            content: request.prompt,
+            createdAt: now,
+            readingMode: getReadingMode(request),
+            modePrompt: request.modePrompt,
+          },
+          {
+            role: 'assistant',
+            content: result.answer,
+            createdAt: now,
+            model: result.model,
+            routedBy: 'expensive-reader',
+            inputTokens: result.inputTokens,
+            outputTokens: result.outputTokens,
+            readingMode: getReadingMode(request),
+            modePrompt: request.modePrompt,
+            answerChinese: result.answer,
+          },
+        ]);
+
+        return c.json({
+          answer: result.answer,
+          citations: [],
+          sources: result.webSearchResults.map((item) => ({
+            title: item.title,
+            url: item.url,
+            publishedDate: item.publishedDate,
+          })),
+          scope: request.scope,
+          paperId: request.paperId,
+          routedBy: 'expensive-reader',
+          usage: {
+            inputTokens: result.inputTokens,
+            outputTokens: result.outputTokens,
+            billableTokens,
+          },
+          tokenAccount,
+        });
+      }
+
       const sharedHistory = await loadSharedPaperDialogHistory(paperKey);
       const [neo4jExternalEvaluations, blobExternalEvaluations] = await Promise.all([
         loadExternalReferenceEvaluationsFromNeo4j(paperKey),
