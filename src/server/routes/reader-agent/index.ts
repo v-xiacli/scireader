@@ -74,6 +74,15 @@ type StoredDialogTurn = {
   answerChinese?: string;
 };
 
+type StoredFigureReading = {
+  answer: string;
+  createdAt: string;
+  model?: string;
+  pageNumbers: number[];
+  inputTokens?: number;
+  outputTokens?: number;
+};
+
 type CheapTriageResult = {
   sufficient: boolean;
   contextSummary: string;
@@ -116,6 +125,7 @@ const READER_RETRIEVAL_TOP_PAGES = 10;
 const MAX_FIGURE_CAPTIONS = 40;
 const MAX_PAGE_IMAGES = 6;
 const PDF_RENDER_SCALE = 2;
+const ESTIMATED_IMAGE_TOKENS_PER_RENDERED_PAGE = 2500;
 const WRITING_BILLING_MULTIPLIER = 1.5;
 
 const readerRequestSchema = z.object({
@@ -472,6 +482,18 @@ const getSummaryDetailMode = (request: Pick<z.infer<typeof readerRequestSchema>,
 const getPaperSummaryStoragePath = (request: z.infer<typeof readerRequestSchema>, pdfStoragePath?: string | null) =>
   `paper-cache/${getPaperIdentitySlug(request)}/${pdfStoragePath ? 'uploaded' : 'sample'}.reader-summary.${getReadingMode(request)}.${getSummaryDetailMode(request)}.review-v5.md`;
 
+const normalizeRequestedPageNumbers = (pageNumbers?: number[], pageNumber?: number) =>
+  Array.from(new Set((pageNumbers?.length ? pageNumbers : pageNumber ? [pageNumber] : []).filter((value) => Number.isInteger(value) && value > 0)))
+    .sort((left, right) => left - right)
+    .slice(0, MAX_PAGE_IMAGES);
+
+const getFigureReadingStoragePath = (request: z.infer<typeof readerRequestSchema>) => {
+  const pageNumbers = normalizeRequestedPageNumbers(request.pageNumbers, request.pageNumber);
+  const pageKey = pageNumbers.length ? pageNumbers.join('-') : 'auto';
+
+  return `paper-cache/${getPaperIdentitySlug(request)}/figure-reading.pages-${pageKey}.${getReadingMode(request)}.${getSummaryDetailMode(request)}.v1.md`;
+};
+
 const getPaperDialogHistoryPath = (userId: string, paperKey: string) => `user-paper-history/${userId}/${paperKey}.md`;
 
 const getSharedPaperDialogHistoryPath = (paperKey: string) => `paper-cache/${paperKey}/reader-dialog.shared-v1.md`;
@@ -535,6 +557,38 @@ const downloadTextIfExists = async (filePath: string) => {
   } catch {
     return null;
   }
+};
+
+const loadFigureReadingIfExists = async (filePath: string): Promise<StoredFigureReading | null> => {
+  const content = await downloadTextIfExists(filePath);
+  if (!content) return null;
+
+  try {
+    const parsed = parseJsonBlock(content);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      typeof parsed.answer === 'string' &&
+      Array.isArray(parsed.pageNumbers)
+    ) {
+      return parsed as StoredFigureReading;
+    }
+  } catch {
+    // Fall back to the raw markdown body below.
+  }
+
+  return {
+    answer: content,
+    createdAt: '',
+    pageNumbers: [],
+  };
+};
+
+const saveFigureReading = async (filePath: string, reading: StoredFigureReading) => {
+  await uploadTextAsAdmin(
+    `# Figure reading result\n\n\`\`\`json\n${JSON.stringify(reading, null, 2)}\n\`\`\`\n`,
+    filePath,
+  );
 };
 
 const loadDialogHistory = async (userId: string, paperKey: string): Promise<StoredDialogTurn[]> => {
@@ -1379,6 +1433,39 @@ const scorePdfPageForPrompt = (prompt: string, pageText: string, terms: string[]
 
 const formatPdfPageText = (page: ExtractedPdfPage) => `[Page ${page.pageNumber}]\n${page.text}`;
 
+const extractVisualNotesFromSummary = (summary?: string, pageNumbers: number[] = []) => {
+  const trimmedSummary = summary?.trim();
+  if (!trimmedSummary) return '';
+
+  const pagePatterns = pageNumbers.flatMap((pageNumber) => [
+    new RegExp(`(?:page|p\\.?|第)\\s*${pageNumber}\\s*(?:页)?`, 'i'),
+    new RegExp(`(?:pages|pp\\.?)\\s*${Math.max(1, pageNumber - 1)}\\s*[-–—~～]\\s*${pageNumber + 1}`, 'i'),
+  ]);
+  const visualPattern = /(?:\bfig(?:ure)?s?\.?\s*\d*|\btable?s?\.?\s*\d*|图\s*\d*|表\s*\d*|图像|图片|截图|曲线|柱状图|热图|流程图|架构图|结构图|示意图|实验结果|消融|对比|可视化|caption|legend|axis|plot|chart|diagram|schematic|visuali[sz]ation|ablation|qualitative)/i;
+  const chunks = trimmedSummary
+    .split(/\n{2,}|(?<=。)|(?<=；)|(?<=\.)\s+(?=[A-Z])/)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
+  const selected: string[] = [];
+  let chars = 0;
+
+  for (const chunk of chunks) {
+    const isVisual = visualPattern.test(chunk);
+    const isPageRelated = pagePatterns.some((pattern) => pattern.test(chunk));
+
+    if (!isVisual && !isPageRelated) continue;
+    if (selected.includes(chunk)) continue;
+
+    const remainingChars = 6000 - chars;
+    if (remainingChars <= 0) break;
+
+    selected.push(chunk.length > remainingChars ? `${chunk.slice(0, remainingChars)}...` : chunk);
+    chars += Math.min(chunk.length, remainingChars);
+  }
+
+  return selected.length ? selected.join('\n') : trimmedSummary.slice(0, 2000);
+};
+
 const selectRetrievedPdfPages = (prompt: string, pages: ExtractedPdfPage[]) => {
   const terms = extractReaderRetrievalTerms(prompt);
   const scoredPages = pages
@@ -1435,6 +1522,38 @@ const selectRetrievedPdfPages = (prompt: string, pages: ExtractedPdfPage[]) => {
 const selectReaderPdfContext = (request: z.infer<typeof readerRequestSchema>, extractedPdf?: ExtractedPdf) => {
   if (!extractedPdf?.text.trim()) return null;
 
+  if (request.scope === 'figure' && request.pageNumbers?.length) {
+    const requestedPageNumbers = new Set(request.pageNumbers);
+    const selectedPages = extractedPdf.pages.filter((page) => requestedPageNumbers.has(page.pageNumber) && page.text.trim());
+    const pageTexts: string[] = [];
+    let chars = 0;
+
+    for (const page of selectedPages) {
+      const text = formatPdfPageText(page);
+      const remainingChars = MAX_RETRIEVED_READER_TEXT_CHARS - chars;
+
+      if (remainingChars <= 0) break;
+
+      if (text.length > remainingChars) {
+        pageTexts.push(`${text.slice(0, remainingChars)}\n[Page excerpt truncated to fit the visual-reading budget.]`);
+        chars = MAX_RETRIEVED_READER_TEXT_CHARS;
+        break;
+      }
+
+      pageTexts.push(text);
+      chars += text.length;
+    }
+
+    if (pageTexts.length) {
+      return {
+        text: `Extracted PDF text from the same pages as the attached screenshots. Use this as textual figure/table description and cross-check it against the images:\n${pageTexts.join('\n\n')}`,
+        strategy: `figure-pages-${selectedPages.map((page) => page.pageNumber).join('-')}`,
+        pageNumbers: selectedPages.map((page) => page.pageNumber),
+        cacheable: chars >= MIN_PROMPT_CACHE_TEXT_CHARS,
+      };
+    }
+  }
+
   const pageText = request.pageNumber ? extractedPdf.pages.find((page) => page.pageNumber === request.pageNumber) : undefined;
 
   if ((request.scope === 'current-page' || request.scope === 'figure' || request.scope === 'selected-text') && pageText?.text.trim()) {
@@ -1476,15 +1595,26 @@ const formatConversationHistoryForReaderPrompt = (history?: Array<{ role: 'user'
 const buildReaderPromptContent = (request: z.infer<typeof readerRequestSchema>, extractedPdf?: ExtractedPdf, webSearchResults: TavilySearchResult[] = []) => {
   const blocks: ReaderMessageContent = [];
   const pdfContext = selectReaderPdfContext(request, extractedPdf);
+  const visualSummaryNotes = request.scope === 'figure'
+    ? extractVisualNotesFromSummary(request.paperContextSummary, normalizeRequestedPageNumbers(request.pageNumbers, request.pageNumber))
+    : '';
   const paperContextSummary = request.paperContextSummary?.trim()
     ? `Known paper notes:\n${request.paperContextSummary.trim().slice(0, 12000)}`
+    : '';
+  const visualNotes = visualSummaryNotes
+    ? `Figure/table notes extracted from the previous paper summary:\n${visualSummaryNotes}`
     : '';
   const figureCaptions = extractedPdf?.figureCaptions.length
     ? `Figure/table caption candidates:\n${extractedPdf.figureCaptions.map((caption, index) => `${index + 1}. ${caption}`).join('\n')}`
     : '';
+  const visualReadingInstruction = request.scope === 'figure'
+    ? 'Visual reading instruction: combine the known paper notes, figure/table captions, same-page extracted text, and the attached page screenshots. Use the text to identify what each figure/table is about, then verify details against the image. If text and image disagree or the screenshot is unclear, say so explicitly.'
+    : '';
   const stableHeader = [
     `Paper title: ${request.title ?? request.paperId}`,
     `Request scope: ${request.scope}`,
+    visualReadingInstruction,
+    visualNotes,
     paperContextSummary,
     figureCaptions,
   ]
@@ -2628,6 +2758,73 @@ const estimateTokenConsumption = async (request: z.infer<typeof tokenEstimateReq
   }
 };
 
+const estimateFigureReadingConsumption = async (request: z.infer<typeof readerRequestSchema>) => {
+  const storagePath = resolveUploadedPdfStoragePath(request.pdfUrl);
+  const pageNumbers = normalizeRequestedPageNumbers(request.pageNumbers, request.pageNumber);
+
+  if (!storagePath) throw new Error('Only uploaded PDFs can be estimated.');
+  if (!pageNumbers.length) throw new Error('Please specify the PDF pages to read as images.');
+
+  const cachePath = getFigureReadingStoragePath({ ...request, pageNumbers, pageNumber: pageNumbers[0] });
+  const cachedReading = await loadFigureReadingIfExists(cachePath);
+  const modelSelection = selectReaderModel({ ...request, scope: 'figure' });
+
+  if (cachedReading?.answer.trim()) {
+    return {
+      startPage: pageNumbers[0],
+      endPage: pageNumbers[pageNumbers.length - 1],
+      pageNumbers,
+      inputTokens: 0,
+      billableTokens: 0,
+      model: modelSelection.model,
+      cached: true,
+      cachePath,
+      method: 'cached-figure-reading',
+    };
+  }
+
+  const tempPdf = await materializePdfToTempFile(storagePath);
+
+  try {
+    const extractedPdf = await extractPdfText(tempPdf.localPdfPath);
+    const requestedPages = new Set(pageNumbers);
+    const samePageText = extractedPdf.pages
+      .filter((page) => requestedPages.has(page.pageNumber))
+      .map(formatPdfPageText)
+      .join('\n\n');
+    const visualSummaryNotes = extractVisualNotesFromSummary(request.paperContextSummary, pageNumbers);
+    const textualContext = [
+      request.prompt,
+      visualSummaryNotes,
+      request.paperContextSummary?.slice(0, 4000),
+      extractedPdf.figureCaptions.join('\n'),
+      samePageText,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+    const textTokens = estimateTextTokensLocally(textualContext);
+    const imageTokens = pageNumbers.length * ESTIMATED_IMAGE_TOKENS_PER_RENDERED_PAGE;
+    const inputTokens = textTokens + imageTokens;
+
+    return {
+      startPage: pageNumbers[0],
+      endPage: pageNumbers[pageNumbers.length - 1],
+      pageNumbers,
+      inputTokens,
+      billableTokens: getBillableTokens(inputTokens, 0, modelSelection.model),
+      model: modelSelection.model,
+      cached: false,
+      cachePath,
+      method: 'local-figure-estimate',
+      textTokens,
+      imageTokens,
+      imageTokensPerPage: ESTIMATED_IMAGE_TOKENS_PER_RENDERED_PAGE,
+    };
+  } finally {
+    await fs.rm(tempPdf.outputDir, { recursive: true, force: true });
+  }
+};
+
 const chunkExtractedPdfPages = (pages: ExtractedPdfPage[]) => {
   const chunks: Array<{ pageNumbers: number[]; text: string }> = [];
   let currentPages: number[] = [];
@@ -3721,6 +3918,27 @@ const app = new Hono()
       return c.json({ error: 'Token estimate failed.', message }, status);
     }
   })
+  .post('/figure-estimate', zValidator('json', readerRequestSchema), async (c) => {
+    const request = c.req.valid('json');
+
+    try {
+      await requirePaperAccess(c, request.pdfUrl);
+
+      return c.json(await estimateFigureReadingConsumption({ ...request, scope: 'figure' }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Figure reading estimate failed.';
+      const status = message === 'Not authenticated.' ? 401 : message === 'You do not have access to this PDF.' ? 403 : 500;
+
+      console.error('[reader-agent:figure-estimate] failed', {
+        paperId: request.paperId,
+        pageNumbers: request.pageNumbers,
+        status,
+        message,
+      });
+
+      return c.json({ error: 'Figure reading estimate failed.', message }, status);
+    }
+  })
   .get('/writing-results', async (c) => {
     try {
       const { user } = await requirePaperAccess(c);
@@ -4028,10 +4246,53 @@ const app = new Hono()
       const storedHistory = await loadDialogHistory(user.id, paperKey);
 
       if (request.scope === 'figure') {
+        const pageNumbers = normalizeRequestedPageNumbers(request.pageNumbers, request.pageNumber);
+        const figureCachePath = getFigureReadingStoragePath({ ...request, pageNumbers, pageNumber: pageNumbers[0] });
+        const cachedFigureReading = await loadFigureReadingIfExists(figureCachePath);
+
+        if (cachedFigureReading?.answer.trim()) {
+          const now = new Date().toISOString();
+
+          await appendDialogTurns(user.id, paperKey, [
+            { role: 'user', content: request.prompt, createdAt: now, readingMode: getReadingMode(request) },
+            {
+              role: 'assistant',
+              content: cachedFigureReading.answer,
+              createdAt: now,
+              model: cachedFigureReading.model ?? 'saved-figure-reading',
+              routedBy: 'expensive-reader',
+              inputTokens: 0,
+              outputTokens: 0,
+              readingMode: getReadingMode(request),
+              modePrompt: request.modePrompt,
+              answerChinese: cachedFigureReading.answer,
+            },
+          ]);
+
+          return c.json({
+            answer: cachedFigureReading.answer,
+            citations: [],
+            sources: [],
+            scope: request.scope,
+            paperId: request.paperId,
+            routedBy: 'expensive-reader',
+            cached: true,
+            cachePath: figureCachePath,
+            usage: {
+              inputTokens: 0,
+              outputTokens: 0,
+              billableTokens: 0,
+            },
+            tokenAccount: await getUserTokenAccount(user.id),
+          });
+        }
+
         const now = new Date().toISOString();
         const result = await askClaude(
           {
             ...request,
+            pageNumber: pageNumbers[0] ?? request.pageNumber,
+            pageNumbers,
             paperContextSummary: [cachedSummary, request.paperContextSummary].filter(Boolean).join('\n\n'),
             conversationHistory: storedHistory.slice(-8).map((turn) => ({ role: turn.role, content: turn.content })),
           },
@@ -4091,6 +4352,14 @@ const app = new Hono()
             answerChinese: result.answer,
           },
         ]);
+        await saveFigureReading(figureCachePath, {
+          answer: result.answer,
+          createdAt: now,
+          model: result.model,
+          pageNumbers,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+        });
 
         return c.json({
           answer: result.answer,
@@ -4103,6 +4372,8 @@ const app = new Hono()
           scope: request.scope,
           paperId: request.paperId,
           routedBy: 'expensive-reader',
+          cached: false,
+          cachePath: figureCachePath,
           usage: {
             inputTokens: result.inputTokens,
             outputTokens: result.outputTokens,

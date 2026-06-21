@@ -74,6 +74,17 @@ type TokenEstimateResponse = {
   warning?: string;
 };
 
+type FigureReadingEstimateResponse = {
+  startPage: number;
+  endPage: number;
+  pageNumbers: number[];
+  inputTokens: number;
+  billableTokens: number;
+  model: string;
+  cached: boolean;
+  cachePath?: string;
+};
+
 type LargeSummaryWarning = {
   summaryKey: string;
   inputTokens: number;
@@ -81,6 +92,12 @@ type LargeSummaryWarning = {
   model?: string;
   pages?: number;
   reason: string;
+};
+
+type PendingImageReading = {
+  prompt: string;
+  range: ImagePageRange;
+  estimate: FigureReadingEstimateResponse;
 };
 
 const largeSummaryBillableTokenThreshold = 500_000;
@@ -344,6 +361,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const [summaryProgress, setSummaryProgress] = useState<SummaryProgress | null>(null);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [largeSummaryWarning, setLargeSummaryWarning] = useState<LargeSummaryWarning | null>(null);
+  const [pendingImageReading, setPendingImageReading] = useState<PendingImageReading | null>(null);
   const [confirmedLargeSummaryKey, setConfirmedLargeSummaryKey] = useState('');
   const [isCheckingSummaryCost, setIsCheckingSummaryCost] = useState(false);
   const hasPaper = Boolean(paper);
@@ -507,7 +525,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
 
       if (!response.ok) throw new Error(result.message ?? result.error ?? 'Reader agent failed.');
 
-      return result as { answer: string; usage?: { inputTokens?: number; outputTokens?: number }; routedBy?: string };
+      return result as { answer: string; usage?: { inputTokens?: number; outputTokens?: number }; routedBy?: string; cached?: boolean; cachePath?: string };
     },
     [messages, paperId, paperPdfUrl, paperTitle, paperContextSummary, readingMode, readingModePrompt, selectedText, paper?.authors, paper?.journal, paper?.year],
   );
@@ -559,6 +577,37 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
 
     return result;
   }, [paperId, paperPdfUrl, paperTitle, paper?.authors, paper?.journal, paper?.year, readingModePrompt, readingMode, detailedReport]);
+
+  const estimateFigureReadingCost = useCallback(
+    async (prompt: string, pageNumbers: number[]): Promise<FigureReadingEstimateResponse> => {
+      const response = await fetch('/api/reader-agent/figure-estimate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paperId: paperId ?? 'general-chat',
+          pdfUrl: paperPdfUrl,
+          title: paperTitle ?? 'SCIReader',
+          authors: paper?.authors,
+          journal: paper?.journal,
+          year: paper?.year,
+          prompt,
+          readingMode,
+          modePrompt: readingModePrompt,
+          detailedReport,
+          scope: 'figure',
+          pageNumber: pageNumbers[0],
+          pageNumbers,
+          paperContextSummary,
+        }),
+      });
+      const result = (await response.json()) as FigureReadingEstimateResponse & { message?: string; error?: string };
+
+      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Figure reading estimate failed.');
+
+      return result;
+    },
+    [paperId, paperPdfUrl, paperTitle, paper?.authors, paper?.journal, paper?.year, readingMode, readingModePrompt, detailedReport, paperContextSummary],
+  );
 
   const summarizePaper = useCallback(async (signal?: AbortSignal) => {
     if (!paperId || !paperPdfUrl) return '';
@@ -985,6 +1034,44 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     };
   }, [isResizing]);
 
+  const runConfirmedImageReading = async (pending: PendingImageReading) => {
+    if (isThinking) return;
+
+    const loadingId = crypto.randomUUID();
+    setPendingImageReading(null);
+    setMessages((current) => [
+      ...current,
+      {
+        id: loadingId,
+        role: 'assistant',
+        content: pending.estimate.cached ? '正在读取已保存的读图结果...' : '正在读取页面截图并综合文字描述...',
+        contextLabel: `Image reading ${pending.range.startPage}-${pending.range.endPage}`,
+      },
+    ]);
+    setIsThinking(true);
+
+    try {
+      const visualReadingInstruction = '请优先参考系统从前面文献简介中提取出的图表相关描述，再结合这些页面的文字/图注和页面截图读图；如果文字描述和图片细节不一致，请明确指出。';
+      const readerPrompt = pending.range.wasLimited
+        ? `${pending.prompt}\n\n${visualReadingInstruction}\n\n系统提示：本次只附上第 ${pending.range.startPage} 页到第 ${pending.range.endPage} 页的页面截图；一次最多读取 ${maxImageReadingPagesPerRequest} 页。请明确说明你只分析了这些页面。`
+        : `${pending.prompt}\n\n${visualReadingInstruction}`;
+      const result = await askReaderAgent(readerPrompt, 'figure', pending.range.pageNumbers);
+      const usageLabel = result.usage?.inputTokens ? ` · ${result.usage.inputTokens.toLocaleString()} in / ${(result.usage.outputTokens ?? 0).toLocaleString()} out` : '';
+      const cacheLabel = result.cached ? 'Saved image reading' : 'Image reading saved';
+      const contextLabel = `${cacheLabel}${usageLabel}`;
+
+      setMessages((current) => current.map((message) => (message.id === loadingId ? { ...message, content: result.answer, contextLabel } : message)));
+    } catch (error) {
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === loadingId ? { ...message, content: error instanceof Error ? error.message : 'Reader agent failed.' } : message,
+        ),
+      );
+    } finally {
+      setIsThinking(false);
+    }
+  };
+
   const sendMessage = async () => {
     const trimmed = input.trim();
     if (!trimmed || isThinking) return;
@@ -1019,6 +1106,43 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
       return;
     }
 
+    if (imagePageRange) {
+      setMessages((current) => [...current, userMessage, { id: crypto.randomUUID(), role: 'assistant', content: '正在估算本次读图 token 消耗...', contextLabel: 'Image reading estimate' }]);
+      setInput('');
+      setIsThinking(true);
+
+      try {
+        const estimate = await estimateFigureReadingCost(trimmed, imagePageRange.pageNumbers);
+
+        setPendingImageReading({ prompt: trimmed, range: imagePageRange, estimate });
+        setMessages((current) => [
+          ...current.filter((message) => message.content !== '正在估算本次读图 token 消耗...'),
+          {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: estimate.cached
+              ? `第 ${estimate.startPage} 页到第 ${estimate.endPage} 页已有保存的读图结果，可直接读取，不会重复消耗视觉模型 token。是否继续？`
+              : `本次读图从第 ${estimate.startPage} 页到第 ${estimate.endPage} 页，预计消耗约 ${formatTokenCount(estimate.billableTokens)}。是否继续？`,
+            contextLabel: 'Confirm image reading',
+          },
+        ]);
+      } catch (error) {
+        setMessages((current) => [
+          ...current.filter((message) => message.content !== '正在估算本次读图 token 消耗...'),
+          {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: error instanceof Error ? error.message : 'Figure reading estimate failed.',
+            contextLabel: 'Image reading estimate',
+          },
+        ]);
+      } finally {
+        setIsThinking(false);
+      }
+
+      return;
+    }
+
     const loadingId = crypto.randomUUID();
 
     if (isSummarizing && hasPaper) {
@@ -1041,14 +1165,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     setIsThinking(true);
 
     try {
-      const readerPrompt = imagePageRange?.wasLimited
-        ? `${trimmed}\n\n系统提示：本次只附上第 ${imagePageRange.startPage} 页到第 ${imagePageRange.endPage} 页的页面截图；一次最多读取 ${maxImageReadingPagesPerRequest} 页。请明确说明你只分析了这些页面。`
-        : trimmed;
-      const result = await askReaderAgent(
-        readerPrompt,
-        imagePageRange ? 'figure' : selectedText ? 'selected-text' : 'whole-paper',
-        imagePageRange?.pageNumbers,
-      );
+      const result = await askReaderAgent(trimmed, selectedText ? 'selected-text' : 'whole-paper');
       const usageLabel = result.usage?.inputTokens ? ` · ${result.usage.inputTokens.toLocaleString()} in / ${(result.usage.outputTokens ?? 0).toLocaleString()} out` : '';
       const contextLabel = result.routedBy === 'cheap-context' ? `Cheap context${usageLabel}` : result.routedBy === 'expensive-reader' ? `Expensive reader${usageLabel}` : undefined;
 
@@ -1241,6 +1358,38 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
             <div className="h-full rounded-full bg-amber-500 transition-all duration-500" style={{ width: `${summaryProgress.percent}%` }} />
           </div>
           <p className="mt-1 text-[11px] text-amber-700">{summaryProgress.elapsedSeconds}s elapsed</p>
+        </div>
+      ) : null}
+
+      {isChatCollapsed ? null : pendingImageReading ? (
+        <div className="border-b border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-950">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">确认读图</p>
+              <p className="mt-1 leading-5 text-blue-800">
+                第 {pendingImageReading.estimate.startPage} 页到第 {pendingImageReading.estimate.endPage} 页
+                {pendingImageReading.estimate.cached
+                  ? ' 已有保存结果，可直接读取。'
+                  : ` 预计消耗约 ${formatTokenCount(pendingImageReading.estimate.billableTokens)}。`}
+              </p>
+            </div>
+            <button
+              className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isThinking}
+              onClick={() => setPendingImageReading(null)}
+              type="button"
+            >
+              取消
+            </button>
+            <button
+              className="rounded-lg bg-primary px-3 py-1.5 font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isThinking}
+              onClick={() => void runConfirmedImageReading(pendingImageReading)}
+              type="button"
+            >
+              继续读图
+            </button>
+          </div>
         </div>
       ) : null}
 
