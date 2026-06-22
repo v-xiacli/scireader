@@ -21,7 +21,9 @@ type FinancialAnalysisResult = {
     outputTokens: number;
     cacheCreationInputTokens?: number;
     cacheReadInputTokens?: number;
+    baseBillableTokens?: number;
     billableTokens: number;
+    billingMultiplier?: number;
   };
 };
 
@@ -93,8 +95,10 @@ const FinancialAnalysisPage = () => {
   const [isQuotesLoading, setIsQuotesLoading] = useState(false);
   const [isWatchlistEditing, setIsWatchlistEditing] = useState(false);
   const [quotesUpdatedAt, setQuotesUpdatedAt] = useState<string | null>(null);
+  const [selectedStockKey, setSelectedStockKey] = useState('');
 
   const isLoggedIn = Boolean(authUser);
+  const selectedStock = stockWatchlist.find((stock) => `${stock.market ?? 'A'}:${stock.code}` === selectedStockKey) ?? stockWatchlist[0] ?? null;
 
   const refreshStockQuotes = async (watchlist = stockWatchlist) => {
     if (!watchlist.length) return;
@@ -129,6 +133,7 @@ const FinancialAnalysisPage = () => {
 
       setStockWatchlist(watchlist);
       setStockWatchlistText(formatStockWatchlistText(watchlist));
+      if (watchlist.length) setSelectedStockKey((current) => current || `${watchlist[0].market ?? 'A'}:${watchlist[0].code}`);
       if (watchlist.length) void refreshStockQuotes(watchlist);
     } catch {
       setStockWatchlist([]);
@@ -155,6 +160,7 @@ const FinancialAnalysisPage = () => {
 
       setStockWatchlist(result.watchlist);
       setStockWatchlistText(formatStockWatchlistText(result.watchlist));
+      if (result.watchlist.length) setSelectedStockKey(`${result.watchlist[0].market ?? 'A'}:${result.watchlist[0].code}`);
       setIsWatchlistEditing(false);
       void refreshStockQuotes(result.watchlist);
     } catch (error) {
@@ -266,10 +272,15 @@ const FinancialAnalysisPage = () => {
       return;
     }
 
+    if (!selectedStock) {
+      setMessage('请先在自选股里选择本次要分析的股票。');
+      return;
+    }
+
     const userMessage: FinancialChatMessage = {
       id: `user-${Date.now()}`,
       role: 'user',
-      content: topic,
+      content: `【${selectedStock.name} ${selectedStock.code}】${topic}`,
     };
 
     setMessages((current) => [...current, userMessage]);
@@ -281,7 +292,7 @@ const FinancialAnalysisPage = () => {
       const response = await fetch('/api/reader-agent/financial-analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic, files: materials }),
+        body: JSON.stringify({ topic, files: materials, stock: selectedStock }),
       });
       const result = await response.json();
 
@@ -319,6 +330,7 @@ const FinancialAnalysisPage = () => {
               <p className="mt-1 text-sm text-muted-foreground">
                 {authUser ? `当前账户：${authUser.email}` : isSessionLoading ? '正在检查登录状态...' : '请先回到主页登录后使用。'}
               </p>
+              <p className="mt-1 text-xs font-medium text-amber-700">该功能需要单独开通；token 使用费按正常分析的 3 倍计算。</p>
             </div>
           </div>
           <button
@@ -340,7 +352,21 @@ const FinancialAnalysisPage = () => {
                 {quotesUpdatedAt ? `最近更新 ${formatDate(quotesUpdatedAt)}` : '进入页面后自动刷新；每 60 秒更新一次。'}
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                className="rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-primary"
+                disabled={!stockWatchlist.length}
+                onChange={(event) => setSelectedStockKey(event.target.value)}
+                value={selectedStockKey}
+              >
+                {stockWatchlist.length ? stockWatchlist.map((stock) => (
+                  <option key={`${stock.market ?? 'A'}:${stock.code}`} value={`${stock.market ?? 'A'}:${stock.code}`}>
+                    分析：{stock.name} {stock.code}
+                  </option>
+                )) : (
+                  <option value="">请选择股票</option>
+                )}
+              </select>
               <button
                 className="rounded-xl border px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-70"
                 disabled={isQuotesLoading || !stockWatchlist.length}
@@ -386,9 +412,16 @@ const FinancialAnalysisPage = () => {
             {stockQuotes.length ? stockQuotes.map((quote) => {
               const colorClass = quote.changePct > 0 ? 'text-red-600' : quote.changePct < 0 ? 'text-emerald-600' : 'text-slate-600';
               const sign = quote.changePct > 0 ? '+' : '';
+              const quoteKey = `${quote.market ?? 'A'}:${quote.code}`;
+              const isSelected = quoteKey === selectedStockKey;
 
               return (
-                <div className="min-w-44 rounded-xl border bg-slate-50 px-3 py-2" key={`${quote.market}-${quote.code}`}>
+                <button
+                  className={`min-w-44 rounded-xl border px-3 py-2 text-left transition ${isSelected ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'bg-slate-50 hover:border-primary/40'}`}
+                  key={`${quote.market}-${quote.code}`}
+                  onClick={() => setSelectedStockKey(quoteKey)}
+                  type="button"
+                >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold">{quote.name}</p>
@@ -402,7 +435,7 @@ const FinancialAnalysisPage = () => {
                   <p className={`text-xs font-medium ${colorClass}`}>
                     {sign}{quote.change.toFixed(2)} / {sign}{quote.changePct.toFixed(2)}%
                   </p>
-                </div>
+                </button>
               );
             }) : (
               <p className="text-sm text-muted-foreground">{isLoggedIn ? '暂无行情。请刷新或编辑自选股列表。' : '登录后显示你的自选股实时价格。'}</p>
@@ -471,6 +504,8 @@ const FinancialAnalysisPage = () => {
                       {item.usage ? (
                         <p className={`mt-3 text-xs ${item.role === 'user' ? 'text-primary-foreground/75' : 'text-muted-foreground'}`}>
                           input {item.usage.inputTokens.toLocaleString()} / output {item.usage.outputTokens.toLocaleString()} / billable {item.usage.billableTokens.toLocaleString()}
+                          {item.usage.billingMultiplier ? ` / ${item.usage.billingMultiplier}x` : ''}
+                          {item.usage.baseBillableTokens ? ` / base ${item.usage.baseBillableTokens.toLocaleString()}` : ''}
                           {item.usage.cacheReadInputTokens ? ` / cache read ${item.usage.cacheReadInputTokens.toLocaleString()}` : ''}
                         </p>
                       ) : null}
@@ -516,7 +551,7 @@ const FinancialAnalysisPage = () => {
                 />
                 <button
                   className="inline-flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
-                  disabled={isAnalyzing || !isLoggedIn || !materials.length || !prompt.trim()}
+                  disabled={isAnalyzing || !isLoggedIn || !materials.length || !prompt.trim() || !selectedStock}
                   onClick={() => void handleSend()}
                   title="发送"
                   type="button"

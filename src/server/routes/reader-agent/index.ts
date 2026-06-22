@@ -122,6 +122,22 @@ type ReferenceEvaluationRecord = {
   createdAt: string;
 };
 
+type FinancialStockArchiveEntry = {
+  id: string;
+  createdAt: string;
+  question: string;
+  answer: string;
+  model: string;
+  materialNames: string[];
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    baseBillableTokens: number;
+    billableTokens: number;
+    billingMultiplier: number;
+  };
+};
+
 type PaperReadingMode = 'reviewer' | 'reader';
 
 const MAX_EXTRACTED_TEXT_CHARS = 600_000;
@@ -134,6 +150,7 @@ const MAX_PAGE_IMAGES = 6;
 const PDF_RENDER_SCALE = 2;
 const ESTIMATED_IMAGE_TOKENS_PER_RENDERED_PAGE = 2500;
 const WRITING_BILLING_MULTIPLIER = 1.5;
+const FINANCIAL_ANALYSIS_BILLING_MULTIPLIER = 3;
 
 const readerRequestSchema = z.object({
   paperId: z.string().min(1),
@@ -181,6 +198,11 @@ const financialAnalysisFileSchema = z.object({
 const financialAnalysisRequestSchema = z.object({
   topic: z.string().trim().max(1000).optional(),
   files: z.array(financialAnalysisFileSchema).min(1).max(12),
+  stock: z.object({
+    name: z.string().trim().min(1).max(80),
+    code: z.string().trim().min(1).max(24),
+    market: z.enum(['A', 'US', 'HK', 'FX']).optional(),
+  }),
   model: z.string().optional(),
 });
 
@@ -538,6 +560,19 @@ const getReferenceExternalEvaluationsPath = (referenceKey: string) => `paper-cac
 
 const getSourcePaperReferenceEvaluationsPath = (sourcePaperKey: string) => `paper-cache/${sourcePaperKey}/reference-evaluations.introduction.v1.md`;
 
+const cleanFinancialStockKey = (value: string) =>
+  value
+    .trim()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 120);
+
+const getFinancialStockArchivePath = (userId: string, stock: { name: string; code: string }) => {
+  const stockKey = cleanFinancialStockKey(`${stock.name}-${stock.code}`) || cleanFinancialStockKey(stock.code) || 'stock';
+
+  return `user-financial-analysis/${userId}/${stockKey}.md`;
+};
+
 type SummaryJobPhase = 'queued' | 'materializing-pdf' | 'extracting-text' | 'brief-synthesis' | 'chunk' | 'chunk-retry' | 'final-synthesis' | 'final-synthesis-retry' | 'translating' | 'uploading' | 'finished' | 'failed';
 
 type SummaryJobEntry = {
@@ -594,6 +629,54 @@ const downloadTextIfExists = async (filePath: string) => {
     return null;
   }
 };
+
+const loadFinancialStockArchive = async (userId: string, stock: { name: string; code: string }): Promise<FinancialStockArchiveEntry[]> => {
+  const content = await downloadTextIfExists(getFinancialStockArchivePath(userId, stock));
+  if (!content) return [];
+
+  try {
+    const parsed = parseJsonBlock(content);
+
+    return Array.isArray(parsed)
+      ? parsed
+          .filter((entry): entry is FinancialStockArchiveEntry =>
+            typeof entry === 'object' &&
+            entry !== null &&
+            typeof entry.id === 'string' &&
+            typeof entry.createdAt === 'string' &&
+            typeof entry.question === 'string' &&
+            typeof entry.answer === 'string',
+          )
+          .slice(-30)
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveFinancialStockArchive = async (userId: string, stock: { name: string; code: string }, entries: FinancialStockArchiveEntry[]) => {
+  const nextEntries = entries.slice(-60);
+  const title = `${stock.name} ${stock.code}`.trim();
+
+  await uploadTextAsAdmin(
+    `# Financial analysis archive: ${title}\n\n\`\`\`json\n${JSON.stringify(nextEntries, null, 2)}\n\`\`\`\n`,
+    getFinancialStockArchivePath(userId, stock),
+  );
+
+  return nextEntries;
+};
+
+const appendFinancialStockArchive = async (userId: string, stock: { name: string; code: string }, entry: FinancialStockArchiveEntry) => {
+  const currentEntries = await loadFinancialStockArchive(userId, stock);
+
+  return saveFinancialStockArchive(userId, stock, [...currentEntries, entry]);
+};
+
+const formatFinancialStockArchiveContext = (entries: FinancialStockArchiveEntry[]) =>
+  entries
+    .slice(-8)
+    .map((entry, index) => `历史分析 ${index + 1}（${entry.createdAt}）\n问题：${entry.question}\n回答摘录：${entry.answer.slice(0, 5000)}`)
+    .join('\n\n');
 
 const loadFigureReadingIfExists = async (filePath: string): Promise<StoredFigureReading | null> => {
   const content = await downloadTextIfExists(filePath);
@@ -1246,6 +1329,18 @@ const getUsageBillableTokens = (usage: ModelUsage, model?: string) =>
     cacheCreationInputTokens: usage.cacheCreationInputTokens,
     cacheReadInputTokens: usage.cacheReadInputTokens,
   });
+
+const parseCsvEnv = (value?: string) =>
+  new Set((value ?? '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean));
+
+const isFinancialAnalysisEnabled = (user: { id: string; email: string }) => {
+  if (process.env.FINANCIAL_ANALYSIS_ENABLED === 'true') return true;
+
+  const enabledUserIds = parseCsvEnv(process.env.FINANCIAL_ANALYSIS_ENABLED_USER_IDS);
+  const enabledEmails = parseCsvEnv(process.env.FINANCIAL_ANALYSIS_ENABLED_EMAILS);
+
+  return enabledUserIds.has(user.id.toLowerCase()) || enabledEmails.has(user.email.toLowerCase());
+};
 
 const insufficientTokenMessage = 'token余额不足，请充值';
 
@@ -2041,18 +2136,25 @@ const financialAnalystSystemPrompt = `你是一个在北京金融界头部证券
 const buildFinancialAnalysis = async (user: { id: string; email: string }, request: z.infer<typeof financialAnalysisRequestSchema>) => {
   const modelSelection = selectExpensiveReaderModel();
   const client = createAnthropicClient(modelSelection.target);
+  const stockArchive = await loadFinancialStockArchive(user.id, request.stock);
+  const stockArchiveContext = formatFinancialStockArchiveContext(stockArchive);
   const content: ReaderMessageContent = [
     {
       type: 'text',
-      text: `分析主题或问题：${request.topic?.trim() || '请综合分析上传的财务报告、走势图、K线和盘口材料。'}
+      text: `本次分析股票：${request.stock.name}（${request.stock.code}，${request.stock.market ?? 'A'}）
+分析主题或问题：${request.topic?.trim() || '请综合分析上传的财务报告、走势图、K线和盘口材料。'}
+
+该股票历史 AI 分析档案：
+${stockArchiveContext || '暂无历史档案，这是该股票第一次财务/股价分析。'}
 
 请按以下结构输出中文分析：
 1. 核心结论：用交易员语言给出多空判断、确定性强弱、关键触发条件。
 2. 基本面：收入、利润、现金流、负债、经营质量、估值或行业对比，明确哪些来自材料、哪些是推断。
 3. 技术面和盘口：趋势、量价、K线形态、支撑压力、筹码/资金行为、可能的量化或游资痕迹。
 4. A股语境：结合国家队、机构、游资、量化、政策窗口、财报披露期等常见交易习惯分析，但不要阴谋化。
-5. 风险和反证：列出可能推翻判断的信号。
-6. 后续观察清单：给出需要继续跟踪的指标、价量条件和公告事件。
+5. 和历史档案的关系：说明本次新材料/新行情相较历史判断，是增强、削弱还是反转，并点名原因。
+6. 风险和反证：列出可能推翻判断的信号。
+7. 后续观察清单：给出需要继续跟踪的指标、价量条件和公告事件。
 
 风险提示：以下仅为研究分析，不构成投资建议。`,
     },
@@ -2123,6 +2225,7 @@ const buildFinancialAnalysis = async (user: { id: string; email: string }, reque
     outputTokens: response.usage.output_tokens,
     cacheCreationInputTokens: usageWithCache.cache_creation_input_tokens ?? 0,
     cacheReadInputTokens: usageWithCache.cache_read_input_tokens ?? 0,
+    archiveEntryCount: stockArchive.length,
   };
 };
 
@@ -5017,14 +5120,16 @@ const app = new Hono()
     try {
       const user = await getCurrentUser(getCookie(c, sessionCookieName));
       if (!user) return c.json({ error: 'Not authenticated.' }, 401);
+      if (!isFinancialAnalysisEnabled(user)) return c.json({ error: 'Financial analysis is not enabled.', message: '财务分析功能需要单独开通。' }, 403);
 
       await ensurePositiveTokenBalance(user.id);
 
       const result = await buildFinancialAnalysis(user, request);
-      const billableTokens = getUsageBillableTokens(result, result.model);
+      const baseBillableTokens = getUsageBillableTokens(result, result.model);
+      const billableTokens = baseBillableTokens * FINANCIAL_ANALYSIS_BILLING_MULTIPLIER;
       const tokenAccount = await recordUserTokenUsage({
         userId: user.id,
-        paperId: `financial:${Date.now()}`,
+        paperId: `financial:${request.stock.code}:${Date.now()}`,
         action: 'financial:analysis',
         model: result.model,
         inputTokens: result.inputTokens,
@@ -5032,9 +5137,27 @@ const app = new Hono()
         billableTokens,
         metadata: {
           topic: request.topic,
+          stock: request.stock,
           files: result.files.map((file) => ({ name: file.name, contentType: file.contentType, storagePath: file.storagePath })),
           cacheCreationInputTokens: result.cacheCreationInputTokens,
           cacheReadInputTokens: result.cacheReadInputTokens,
+          baseBillableTokens,
+          billingMultiplier: FINANCIAL_ANALYSIS_BILLING_MULTIPLIER,
+        },
+      });
+      await appendFinancialStockArchive(user.id, request.stock, {
+        id: randomUUID(),
+        createdAt: new Date().toISOString(),
+        question: request.topic?.trim() || '请综合分析上传的财务报告、走势图、K线和盘口材料。',
+        answer: result.answer,
+        model: result.model,
+        materialNames: result.files.map((file) => file.name),
+        usage: {
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          baseBillableTokens,
+          billableTokens,
+          billingMultiplier: FINANCIAL_ANALYSIS_BILLING_MULTIPLIER,
         },
       });
 
@@ -5042,18 +5165,22 @@ const app = new Hono()
         answer: result.answer,
         model: result.model,
         files: result.files,
+        stock: request.stock,
+        archiveEntryCount: result.archiveEntryCount + 1,
         usage: {
           inputTokens: result.inputTokens,
           outputTokens: result.outputTokens,
           cacheCreationInputTokens: result.cacheCreationInputTokens,
           cacheReadInputTokens: result.cacheReadInputTokens,
+          baseBillableTokens,
           billableTokens,
+          billingMultiplier: FINANCIAL_ANALYSIS_BILLING_MULTIPLIER,
         },
         tokenAccount,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Financial analysis failed.';
-      const status = message === 'Not authenticated.' ? 401 : isInsufficientTokenBalanceError(error) ? 402 : 500;
+      const status = message === 'Not authenticated.' ? 401 : message === '财务分析功能需要单独开通。' ? 403 : isInsufficientTokenBalanceError(error) ? 402 : 500;
 
       console.error('[reader-agent:financial-analysis] request failed', { message });
       return c.json({ error: 'Financial analysis failed.', message }, status);
