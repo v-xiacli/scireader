@@ -38,35 +38,6 @@ type WritingArticle = {
   selectedPaperCount: number;
   billableTokens?: number;
 };
-type FinancialMaterial = {
-  name: string;
-  storagePath: string;
-  contentType: string;
-  size: number;
-};
-type FinancialAnalysisResult = {
-  answer: string;
-  model: string;
-  usage?: {
-    inputTokens: number;
-    outputTokens: number;
-    cacheCreationInputTokens?: number;
-    cacheReadInputTokens?: number;
-    billableTokens: number;
-  };
-};
-type StockWatchlistItem = {
-  name: string;
-  code: string;
-  market?: 'A' | 'US' | 'HK' | 'FX';
-};
-type StockQuote = StockWatchlistItem & {
-  price: number | null;
-  prevClose: number | null;
-  change: number;
-  changePct: number;
-  currency: string;
-};
 type ViewerPreferences = {
   readingMode?: PaperReadingMode;
   detailedReport?: boolean;
@@ -111,28 +82,10 @@ const formatArticleDate = (value: string) => {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 };
 
-const formatStockWatchlistText = (watchlist: StockWatchlistItem[]) =>
-  watchlist.map((item) => `${item.name},${item.code},${item.market ?? 'A'}`).join('\n');
-
-const parseStockWatchlistText = (text: string): StockWatchlistItem[] =>
-  text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [name = '', code = '', market = 'A'] = line.split(/[,\s，]+/).map((part) => part.trim()).filter(Boolean);
-      const normalizedMarket = ['A', 'US', 'HK', 'FX'].includes(market.toUpperCase()) ? (market.toUpperCase() as StockWatchlistItem['market']) : 'A';
-
-      return { name, code: code.toUpperCase(), market: normalizedMarket };
-    })
-    .filter((item) => item.name && item.code)
-    .slice(0, 80);
-
 const HomePage = () => {
   const router = useRouter();
   const isSignupVerificationEnabled = true;
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const financialInputRef = useRef<HTMLInputElement>(null);
   const estimatedPaperIdRef = useRef<string | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
@@ -164,19 +117,6 @@ const HomePage = () => {
   const [writingSelectedArticlePaths, setWritingSelectedArticlePaths] = useState<string[]>([]);
   const [deletingWritingPath, setDeletingWritingPath] = useState<string | null>(null);
   const [loadingWritingPath, setLoadingWritingPath] = useState<string | null>(null);
-  const [financialTopic, setFinancialTopic] = useState('');
-  const [financialMaterials, setFinancialMaterials] = useState<FinancialMaterial[]>([]);
-  const [isFinancialUploading, setIsFinancialUploading] = useState(false);
-  const [isFinancialAnalyzing, setIsFinancialAnalyzing] = useState(false);
-  const [financialMessage, setFinancialMessage] = useState<string | null>(null);
-  const [financialResult, setFinancialResult] = useState<FinancialAnalysisResult | null>(null);
-  const [stockWatchlist, setStockWatchlist] = useState<StockWatchlistItem[]>([]);
-  const [stockWatchlistText, setStockWatchlistText] = useState('');
-  const [stockQuotes, setStockQuotes] = useState<StockQuote[]>([]);
-  const [stockQuoteMessage, setStockQuoteMessage] = useState<string | null>(null);
-  const [isStockQuotesLoading, setIsStockQuotesLoading] = useState(false);
-  const [isStockWatchlistEditing, setIsStockWatchlistEditing] = useState(false);
-  const [stockQuotesUpdatedAt, setStockQuotesUpdatedAt] = useState<string | null>(null);
 
   const isLoggedIn = Boolean(authUser);
   const papers = uploadedPapers;
@@ -233,72 +173,6 @@ const HomePage = () => {
     }
   };
 
-  const loadStockWatchlist = async () => {
-    try {
-      const response = await fetch('/api/auth/stock-watchlist');
-      const result = await response.json();
-      const watchlist = response.ok ? result.watchlist as StockWatchlistItem[] : [];
-
-      setStockWatchlist(watchlist);
-      setStockWatchlistText(formatStockWatchlistText(watchlist));
-      if (watchlist.length) void refreshStockQuotes(watchlist);
-    } catch {
-      setStockWatchlist([]);
-      setStockWatchlistText('');
-    }
-  };
-
-  const refreshStockQuotes = async (watchlist = stockWatchlist) => {
-    if (!watchlist.length) return;
-
-    setIsStockQuotesLoading(true);
-    setStockQuoteMessage(null);
-
-    try {
-      const response = await fetch('/api/reader-agent/stock-quotes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ watchlist }),
-      });
-      const result = await response.json();
-
-      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Stock quotes failed.');
-
-      setStockQuotes(result.quotes ?? []);
-      setStockQuotesUpdatedAt(result.updatedAt ?? new Date().toISOString());
-    } catch (error) {
-      setStockQuoteMessage(error instanceof Error ? error.message : 'Stock quotes failed.');
-    } finally {
-      setIsStockQuotesLoading(false);
-    }
-  };
-
-  const saveStockWatchlist = async () => {
-    const watchlist = parseStockWatchlistText(stockWatchlistText);
-    if (!watchlist.length) {
-      setStockQuoteMessage('请至少保留一只自选股。');
-      return;
-    }
-
-    try {
-      const response = await fetch('/api/auth/stock-watchlist', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ watchlist }),
-      });
-      const result = await response.json();
-
-      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Could not save watchlist.');
-
-      setStockWatchlist(result.watchlist);
-      setStockWatchlistText(formatStockWatchlistText(result.watchlist));
-      setIsStockWatchlistEditing(false);
-      void refreshStockQuotes(result.watchlist);
-    } catch (error) {
-      setStockQuoteMessage(error instanceof Error ? error.message : 'Could not save watchlist.');
-    }
-  };
-
   const loadTokenAccount = async () => {
     try {
       const response = await fetch('/api/auth/token-account');
@@ -323,7 +197,6 @@ const HomePage = () => {
           await loadViewerPreferences();
           await loadUploadedPapers();
           await loadWritingArticles();
-          await loadStockWatchlist();
         }
       } catch {
         setAuthUser(null);
@@ -334,18 +207,6 @@ const HomePage = () => {
 
     void loadSession();
   }, []);
-
-  useEffect(() => {
-    if (!isLoggedIn || !stockWatchlist.length) return;
-
-    void refreshStockQuotes(stockWatchlist);
-
-    const timer = window.setInterval(() => {
-      void refreshStockQuotes(stockWatchlist);
-    }, 60_000);
-
-    return () => window.clearInterval(timer);
-  }, [isLoggedIn, stockWatchlist]);
 
   useEffect(() => {
     const newestUploadedPaper = uploadedPapers.find((paper) => paper.filePath);
@@ -539,93 +400,6 @@ const HomePage = () => {
       setUploadMessage(error instanceof Error ? error.message : 'Upload failed.');
     } finally {
       setIsUploading(false);
-    }
-  };
-
-  const handleFinancialUpload = async (files: FileList | File[]) => {
-    const nextFiles = Array.from(files);
-    if (!nextFiles.length) return;
-    if (!isLoggedIn) {
-      setFinancialMessage('Please log in before uploading financial materials.');
-      return;
-    }
-
-    const unsupported = nextFiles.find((file) => file.type !== 'application/pdf' && !file.type.startsWith('image/'));
-    if (unsupported) {
-      setFinancialMessage(`Unsupported file type: ${unsupported.name}`);
-      return;
-    }
-
-    setIsFinancialUploading(true);
-    setFinancialMessage(null);
-
-    try {
-      const uploaded: FinancialMaterial[] = [];
-
-      for (const file of nextFiles) {
-        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '-');
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('filePath', `financial/${Date.now()}-${safeName}`);
-
-        const response = await fetch('/api/storage/upload/private', {
-          method: 'POST',
-          body: formData,
-        });
-        const result = await response.json();
-
-        if (!response.ok) throw new Error(result.message ?? result.error ?? `Upload failed: ${file.name}`);
-
-        uploaded.push({
-          name: file.name,
-          storagePath: result.filePath,
-          contentType: file.type || 'application/octet-stream',
-          size: file.size,
-        });
-      }
-
-      setFinancialMaterials((current) => [...current, ...uploaded].slice(-12));
-      setFinancialMessage(`已上传 ${uploaded.length} 个财务材料。`);
-    } catch (error) {
-      setFinancialMessage(error instanceof Error ? error.message : 'Financial material upload failed.');
-    } finally {
-      setIsFinancialUploading(false);
-    }
-  };
-
-  const handleFinancialAnalysis = async () => {
-    if (!isLoggedIn) {
-      setFinancialMessage('Please log in before using financial analysis.');
-      return;
-    }
-    if (!financialMaterials.length) {
-      setFinancialMessage('请先上传财务报告、走势图或盘口图片。');
-      return;
-    }
-
-    setIsFinancialAnalyzing(true);
-    setFinancialMessage(null);
-
-    try {
-      const response = await fetch('/api/reader-agent/financial-analysis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          topic: financialTopic,
-          files: financialMaterials,
-        }),
-      });
-      const result = await response.json();
-
-      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Financial analysis failed.');
-
-      setFinancialResult({ answer: result.answer, model: result.model, usage: result.usage });
-      if (result.tokenAccount) setTokenAccount(result.tokenAccount);
-      setFinancialMessage('财务分析已生成。');
-    } catch (error) {
-      setFinancialMessage(error instanceof Error ? error.message : 'Financial analysis failed.');
-    } finally {
-      setIsFinancialAnalyzing(false);
     }
   };
 
@@ -1014,209 +788,25 @@ const HomePage = () => {
         </div>
 
         <section className="rounded-3xl bg-white p-4 shadow-sm sm:p-6">
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <BarChart3 className="size-5 text-primary" />
-              <h2 className="text-xl font-semibold">财务分析</h2>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              上传财报 PDF、走势图、K线和盘口截图，生成面向 A 股交易场景的综合分析。
-            </p>
-          </div>
-
-          <div className="mt-5 rounded-2xl border bg-slate-50 p-3">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="rounded-2xl bg-primary/10 p-3 text-primary">
+                <BarChart3 className="size-6" />
+              </div>
               <div>
-                <p className="text-sm font-medium">自选股实时价格</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {stockQuotesUpdatedAt ? `最近更新 ${formatArticleDate(stockQuotesUpdatedAt)}` : '进入财务分析后自动刷新；每 60 秒更新一次。'}
+                <h2 className="text-xl font-semibold">财务分析</h2>
+                <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+                  单独页面，支持上传多个财报 PDF、K线图、盘口截图和走势图图片，并以对话方式分析。
                 </p>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  className="rounded-xl border px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-70"
-                  disabled={isStockQuotesLoading || !stockWatchlist.length}
-                  onClick={() => void refreshStockQuotes()}
-                  type="button"
-                >
-                  {isStockQuotesLoading ? '刷新中...' : '刷新'}
-                </button>
-                <button
-                  className="rounded-xl border px-3 py-2 text-sm font-medium text-slate-600 hover:bg-white"
-                  onClick={() => setIsStockWatchlistEditing((current) => !current)}
-                  type="button"
-                >
-                  {isStockWatchlistEditing ? '收起编辑' : '编辑自选股'}
-                </button>
-              </div>
             </div>
-
-            {isStockWatchlistEditing ? (
-              <div className="mt-3 grid gap-2">
-                <textarea
-                  className="min-h-32 w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none transition focus:border-primary"
-                  onChange={(event) => setStockWatchlistText(event.target.value)}
-                  placeholder={'每行一只：名称,代码,市场\n例如：北方华创,002371,A\n英伟达,NVDA,US'}
-                  value={stockWatchlistText}
-                />
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-                    onClick={() => void saveStockWatchlist()}
-                    type="button"
-                  >
-                    保存自选股
-                  </button>
-                  <span className="self-center text-xs text-muted-foreground">市场支持 A / US / HK / FX。</span>
-                </div>
-              </div>
-            ) : null}
-
-            {stockQuoteMessage ? <p className="mt-2 text-sm text-red-600">{stockQuoteMessage}</p> : null}
-
-            <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              {stockQuotes.length ? stockQuotes.map((quote) => {
-                const direction = quote.changePct > 0 ? 'up' : quote.changePct < 0 ? 'down' : 'flat';
-                const colorClass = direction === 'up' ? 'text-red-600' : direction === 'down' ? 'text-emerald-600' : 'text-slate-600';
-                const sign = quote.changePct > 0 ? '+' : '';
-
-                return (
-                  <div className="rounded-xl border bg-white p-3" key={`${quote.market}-${quote.code}`}>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">{quote.name}</p>
-                        <p className="text-xs text-muted-foreground">{quote.code} · {quote.market ?? 'A'}</p>
-                      </div>
-                      <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] text-slate-500">{quote.currency}</span>
-                    </div>
-                    <p className={`mt-3 text-2xl font-semibold ${colorClass}`}>
-                      {quote.price === null ? '--' : `${quote.currency}${quote.price.toFixed(2)}`}
-                    </p>
-                    <p className={`mt-1 text-sm font-medium ${colorClass}`}>
-                      {sign}{quote.change.toFixed(2)} / {sign}{quote.changePct.toFixed(2)}%
-                    </p>
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      昨收 {quote.prevClose === null ? '--' : `${quote.currency}${quote.prevClose.toFixed(2)}`}
-                    </p>
-                  </div>
-                );
-              }) : (
-                <div className="rounded-xl border bg-white p-3 text-sm text-muted-foreground sm:col-span-2 xl:col-span-4">
-                  {isLoggedIn ? '暂无行情。请刷新或编辑自选股列表。' : '登录后显示你的自选股实时价格。'}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
-            <div className="space-y-4">
-              <label className="block">
-                <span className="text-sm font-medium">分析主题或问题</span>
-                <textarea
-                  className="mt-2 min-h-24 w-full rounded-xl border px-4 py-3 text-sm outline-none transition focus:border-primary"
-                  onChange={(event) => setFinancialTopic(event.target.value)}
-                  placeholder="例如：结合财报和盘口截图，判断这只票短线是否有资金异动，以及中线基本面风险。"
-                  value={financialTopic}
-                />
-              </label>
-
-              <div>
-                <input
-                  accept="application/pdf,image/*"
-                  className="hidden"
-                  disabled={isFinancialUploading || !isLoggedIn}
-                  multiple
-                  onChange={(event) => {
-                    const files = event.target.files;
-                    if (files) void handleFinancialUpload(files);
-                    event.target.value = '';
-                  }}
-                  ref={financialInputRef}
-                  type="file"
-                />
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
-                    disabled={isFinancialUploading || !isLoggedIn}
-                    onClick={() => {
-                      if (!isLoggedIn) {
-                        setFinancialMessage('Please log in before uploading financial materials.');
-                        return;
-                      }
-                      financialInputRef.current?.click();
-                    }}
-                    type="button"
-                  >
-                    {isFinancialUploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
-                    {isFinancialUploading ? 'Uploading...' : 'Upload reports/images'}
-                  </button>
-                  <button
-                    className="inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-70"
-                    disabled={isFinancialAnalyzing || !isLoggedIn || !financialMaterials.length}
-                    onClick={() => void handleFinancialAnalysis()}
-                    type="button"
-                  >
-                    {isFinancialAnalyzing ? <Loader2 className="size-4 animate-spin" /> : <BarChart3 className="size-4" />}
-                    {isFinancialAnalyzing ? 'Analyzing...' : 'Generate analysis'}
-                  </button>
-                  {financialMaterials.length ? (
-                    <button
-                      className="rounded-xl border px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
-                      onClick={() => {
-                        setFinancialMaterials([]);
-                        setFinancialResult(null);
-                      }}
-                      type="button"
-                    >
-                      Clear
-                    </button>
-                  ) : null}
-                </div>
-                {financialMessage ? <p className="mt-2 text-sm text-muted-foreground">{financialMessage}</p> : null}
-              </div>
-
-              <div className="rounded-2xl border bg-slate-50 p-3">
-                <p className="text-sm font-medium">已上传材料</p>
-                <div className="mt-3 grid gap-2">
-                  {financialMaterials.length ? financialMaterials.map((file) => (
-                    <div className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2 text-sm" key={file.storagePath}>
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">{file.name}</p>
-                        <p className="text-xs text-muted-foreground">{file.contentType} · {(file.size / 1024 / 1024).toFixed(2)} MB</p>
-                      </div>
-                      <button
-                        className="rounded-lg border p-2 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
-                        onClick={() => setFinancialMaterials((current) => current.filter((item) => item.storagePath !== file.storagePath))}
-                        title="Remove material"
-                        type="button"
-                      >
-                        <Trash2 className="size-4" />
-                      </button>
-                    </div>
-                  )) : (
-                    <p className="text-sm text-muted-foreground">还没有上传材料。支持多个 PDF、K线图、盘口截图和走势图图片。</p>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border bg-slate-50 p-4">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="font-semibold">分析结果</h3>
-                {financialResult?.usage ? (
-                  <span className="text-xs text-muted-foreground">{financialResult.usage.billableTokens.toLocaleString()} billable</span>
-                ) : null}
-              </div>
-              <div className="mt-3 max-h-[520px] overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-sm leading-7">
-                {financialResult?.answer ?? '上传材料并点击 Generate analysis 后，结果会显示在这里。'}
-              </div>
-              {financialResult?.usage ? (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  input {financialResult.usage.inputTokens.toLocaleString()} / output {financialResult.usage.outputTokens.toLocaleString()}
-                  {financialResult.usage.cacheReadInputTokens ? ` / cache read ${financialResult.usage.cacheReadInputTokens.toLocaleString()}` : ''}
-                </p>
-              ) : null}
-            </div>
+            <Link
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+              href="/financial-analysis"
+            >
+              进入财务分析
+              <ArrowRight className="size-4" />
+            </Link>
           </div>
         </section>
 
