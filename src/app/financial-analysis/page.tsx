@@ -268,7 +268,7 @@ const FinancialAnalysisPage = () => {
             <div>
               <p className="text-sm font-medium">自選股即時價格</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {quotesUpdatedAt ? `最近更新 ${formatDate(quotesUpdatedAt)}` : '進入頁面後自動刷新；每 60 秒更新一次。'}
+                {quotesUpdatedAt ? `最近更新 ${formatDate(quotesUpdatedAt)}` : '進入頁面後自動重新整理；每 60 秒更新一次。'}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -292,7 +292,7 @@ const FinancialAnalysisPage = () => {
                 onClick={() => void refreshStockQuotes()}
                 type="button"
               >
-                {isQuotesLoading ? '刷新中...' : '刷新'}
+                {isQuotesLoading ? '重新整理中...' : '重新整理'}
               </button>
               <button
                 className="rounded-xl border px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
@@ -318,7 +318,7 @@ const FinancialAnalysisPage = () => {
                   onClick={() => void saveStockWatchlist()}
                   type="button"
                 >
-                  保存自選股
+                  儲存自選股
                 </button>
                 <span className="self-center text-xs text-muted-foreground">市場支援 A / US / HK / FX。</span>
               </div>
@@ -357,7 +357,7 @@ const FinancialAnalysisPage = () => {
                 </button>
               );
             }) : (
-              <p className="text-sm text-muted-foreground">{isLoggedIn ? '暫無行情。請刷新或編輯自選股列表。' : '登入後顯示你的自選股即時價格。'}</p>
+              <p className="text-sm text-muted-foreground">{isLoggedIn ? '暫無行情。請重新整理或編輯自選股列表。' : '登入後顯示你的自選股即時價格。'}</p>
             )}
           </div>
         </section>

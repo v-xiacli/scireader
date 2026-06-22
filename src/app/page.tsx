@@ -51,7 +51,7 @@ type ExtractedPaperMetadata = {
 };
 
 const readingModes: Array<{ id: PaperReadingMode; label: string; description: string }> = [
-  { id: 'reviewer', label: '審稿人模式', description: '重點檢查創新性、證據強度、可信度和局限。' },
+  { id: 'reviewer', label: '審稿人模式', description: '重點檢查創新性、證據強度、可信度和侷限。' },
   { id: 'reader', label: '讀者模式', description: '重點提煉思路、可複用方法、文獻定位和後續問題。' },
 ];
 
@@ -455,7 +455,7 @@ const HomePage = () => {
     }
 
     if (!selectedWritingMaterialCount) {
-      setWritingMessage('請選擇至少一篇已讀文件或已生成文章。');
+      setWritingMessage('請選擇至少一篇已讀檔案或已生成文章。');
       return;
     }
 
@@ -502,7 +502,7 @@ const HomePage = () => {
       setWritingResult(result);
       if (result.article) setWritingArticles((current) => [result.article, ...current.filter((article) => article.storagePath !== result.article.storagePath)]);
       if (result.tokenAccount) setTokenAccount(result.tokenAccount);
-      setWritingMessage(result.processing ? '正在自動生成缺失的讀書筆記，完成後請再次生成 Introduction。' : `已生成並保存：${result.storagePath}`);
+      setWritingMessage(result.processing ? '正在自動生成缺失的讀書筆記，完成後請再次生成 Introduction。' : `已生成並儲存：${result.storagePath}`);
     } catch (error) {
       setWritingResult((current) => current ?? {
         draft: `## 寫作模式暫時無法生成\n\n${error instanceof Error ? error.message : 'Writing mode failed.'}`,
@@ -558,7 +558,7 @@ const HomePage = () => {
       }
       if (result.tokenAccount) setTokenAccount(result.tokenAccount);
       setWritingFollowUp('');
-      setWritingMessage(result.needsSupplementalReading ? result.draft : `已更新並保存：${result.storagePath}`);
+      setWritingMessage(result.needsSupplementalReading ? result.draft : `已更新並儲存：${result.storagePath}`);
     } catch (error) {
       setWritingMessage(error instanceof Error ? error.message : 'Writing follow-up failed.');
     } finally {
@@ -817,7 +817,7 @@ const HomePage = () => {
               <h2 className="text-xl font-semibold">寫作模式</h2>
             </div>
             <p className="text-sm text-muted-foreground">
-              基於已保存的讀書筆記組織 Introduction，並按首次出現順序生成引用編號；寫作模式按 1.5 倍 token 計費。
+              基於已儲存的讀書筆記組織 Introduction，並按首次出現順序生成引用編號；寫作模式按 1.5 倍 token 計費。
             </p>
           </div>
 
@@ -943,7 +943,7 @@ const HomePage = () => {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-xl font-semibold">Your articles</h2>
-              <p className="mt-1 text-sm text-muted-foreground">寫作模式生成的 Introduction 和修改稿會保存在這裡。</p>
+              <p className="mt-1 text-sm text-muted-foreground">寫作模式生成的 Introduction 和修改稿會儲存在這裡。</p>
             </div>
           </div>
 
