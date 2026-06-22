@@ -84,6 +84,7 @@ const formatArticleDate = (value: string) => {
 
 const HomePage = () => {
   const router = useRouter();
+  const isSignupVerificationEnabled = false;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const estimatedPaperIdRef = useRef<string | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>('login');
@@ -231,7 +232,7 @@ const HomePage = () => {
       const response = await fetch(`/api/auth/${authMode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(authMode === 'signup' ? { email, password, verificationCode } : { email, password }),
+        body: JSON.stringify(authMode === 'signup' && isSignupVerificationEnabled ? { email, password, verificationCode } : { email, password }),
       });
       const result = await response.json();
 
@@ -270,7 +271,7 @@ const HomePage = () => {
       });
       const result = await response.json();
 
-      if (!response.ok) throw new Error(result.error ?? result.message ?? 'Could not send verification code.');
+      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Could not send verification code.');
 
       setAuthMessage('Verification code sent. Please check your email.');
     } catch (error) {
@@ -724,7 +725,7 @@ const HomePage = () => {
                   type="password"
                   value={password}
                 />
-                {authMode === 'signup' ? (
+                {authMode === 'signup' && isSignupVerificationEnabled ? (
                   <>
                     <div className="flex gap-2 md:w-64">
                       <input
@@ -748,7 +749,7 @@ const HomePage = () => {
                 ) : null}
                 <button
                   className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
-                  disabled={isAuthLoading || !email || !password || (authMode === 'signup' && verificationCode.length !== 6)}
+                  disabled={isAuthLoading || !email || !password || (authMode === 'signup' && isSignupVerificationEnabled && verificationCode.length !== 6)}
                   onClick={() => void handleAuth()}
                   type="button"
                 >

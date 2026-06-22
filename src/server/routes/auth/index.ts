@@ -26,9 +26,7 @@ const credentialsSchema = z.object({
   password: z.string().min(8).max(128),
 });
 
-const signupSchema = credentialsSchema.extend({
-  verificationCode: z.string().trim().regex(/^\d{6}$/),
-});
+const signupSchema = credentialsSchema;
 
 const emailVerificationRequestSchema = z.object({
   email: z.string().trim().email().max(254),
@@ -90,7 +88,8 @@ const verificationCodeMaxAttempts = 5;
 
 const sendVerificationEmail = async (email: string, code: string) => {
   const resendApiKey = process.env.RESEND_API_KEY?.trim();
-  const from = process.env.EMAIL_FROM?.trim() || process.env.RESEND_FROM_EMAIL?.trim() || 'SCIReader <onboarding@resend.dev>';
+  const configuredFrom = process.env.EMAIL_FROM?.trim() || process.env.RESEND_FROM_EMAIL?.trim();
+  const from = configuredFrom || 'SCIReader <onboarding@resend.dev>';
 
   if (!resendApiKey) {
     if (process.env.NODE_ENV === 'production') {
@@ -99,6 +98,10 @@ const sendVerificationEmail = async (email: string, code: string) => {
 
     console.warn('[auth:email-verification] RESEND_API_KEY not configured; development verification code', { email, code });
     return;
+  }
+
+  if (!configuredFrom && process.env.NODE_ENV === 'production') {
+    throw new Error('Email sender is not configured.');
   }
 
   const response = await fetch('https://api.resend.com/emails', {
@@ -338,6 +341,7 @@ const app = new Hono()
   .post('/send-verification-code', zValidator('json', emailVerificationRequestSchema), async (c) => {
     const { email } = c.req.valid('json');
     const normalizedEmail = email.toLowerCase();
+    let verificationCodeId: string | null = null;
 
     try {
       await ensureAuthTables();
@@ -368,26 +372,37 @@ const app = new Hono()
       const code = createVerificationCode();
       const expiresAt = new Date(Date.now() + verificationCodeMaxAgeSeconds * 1000);
 
-      await getSql()`
+      const insertedCodes = (await getSql()`
         INSERT INTO email_verification_codes (email, purpose, code_hash, expires_at)
         VALUES (${normalizedEmail}, 'signup', ${getVerificationCodeHash(normalizedEmail, code)}, ${expiresAt.toISOString()})
-      `;
+        RETURNING id
+      `) as Array<{ id: string }>;
+      verificationCodeId = insertedCodes[0]?.id ?? null;
 
       await sendVerificationEmail(normalizedEmail, code);
 
       return c.json({ sent: true, expiresInSeconds: verificationCodeMaxAgeSeconds });
     } catch (error) {
+      if (verificationCodeId) {
+        await getSql()`
+          DELETE FROM email_verification_codes
+          WHERE id = ${verificationCodeId}
+        `;
+      }
+
       const message = error instanceof Error ? error.message : 'Could not send verification code.';
+      console.error('[auth:email-verification] send failed', { email: normalizedEmail, message });
       return c.json({ error: 'Could not send verification code.', message }, 500);
     }
   })
   .post('/signup', zValidator('json', signupSchema), async (c) => {
-    const { email, password, verificationCode } = c.req.valid('json');
+    const { email, password } = c.req.valid('json');
     const normalizedEmail = email.toLowerCase();
 
     try {
       await ensureAuthTables();
-      await verifySignupCode(normalizedEmail, verificationCode);
+      // Temporarily disabled while Resend domain verification is pending.
+      // await verifySignupCode(normalizedEmail, verificationCode);
 
       const passwordHash = await hashPassword(password);
       const rows = (await getSql()`
