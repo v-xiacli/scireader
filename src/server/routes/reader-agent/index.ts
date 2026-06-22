@@ -203,6 +203,14 @@ const financialAnalysisRequestSchema = z.object({
     code: z.string().trim().min(1).max(24),
     market: z.enum(['A', 'US', 'HK', 'FX']).optional(),
   }),
+  conversationHistory: z
+    .array(
+      z.object({
+        role: z.enum(['user', 'assistant']),
+        content: z.string(),
+      }),
+    )
+    .optional(),
   model: z.string().optional(),
 });
 
@@ -573,6 +581,12 @@ const getFinancialStockArchivePath = (userId: string, stock: { name: string; cod
   return `user-financial-analysis/${userId}/${stockKey}.md`;
 };
 
+const getFinancialStockDialogHistoryPath = (userId: string, stock: { name: string; code: string }) => {
+  const stockKey = cleanFinancialStockKey(`${stock.name}-${stock.code}`) || cleanFinancialStockKey(stock.code) || 'stock';
+
+  return `user-financial-analysis/${userId}/${stockKey}.chat.md`;
+};
+
 type SummaryJobPhase = 'queued' | 'materializing-pdf' | 'extracting-text' | 'brief-synthesis' | 'chunk' | 'chunk-retry' | 'final-synthesis' | 'final-synthesis-retry' | 'translating' | 'uploading' | 'finished' | 'failed';
 
 type SummaryJobEntry = {
@@ -677,6 +691,47 @@ const formatFinancialStockArchiveContext = (entries: FinancialStockArchiveEntry[
     .slice(-8)
     .map((entry, index) => `历史分析 ${index + 1}（${entry.createdAt}）\n问题：${entry.question}\n回答摘录：${entry.answer.slice(0, 5000)}`)
     .join('\n\n');
+
+const loadFinancialDialogHistory = async (userId: string, stock: { name: string; code: string }): Promise<StoredDialogTurn[]> => {
+  const content = await downloadTextIfExists(getFinancialStockDialogHistoryPath(userId, stock));
+  if (!content) return [];
+
+  try {
+    const parsed = parseJsonBlock(content);
+
+    return Array.isArray(parsed)
+      ? parsed
+          .filter((turn): turn is StoredDialogTurn =>
+            typeof turn === 'object' &&
+            turn !== null &&
+            (turn.role === 'user' || turn.role === 'assistant') &&
+            typeof turn.content === 'string' &&
+            typeof turn.createdAt === 'string',
+          )
+          .slice(-80)
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveFinancialDialogHistory = async (userId: string, stock: { name: string; code: string }, turns: StoredDialogTurn[]) => {
+  const nextTurns = turns.slice(-80);
+  const title = `${stock.name} ${stock.code}`.trim();
+
+  await uploadTextAsAdmin(
+    `# Financial dialog history: ${title}\n\n\`\`\`json\n${JSON.stringify(nextTurns, null, 2)}\n\`\`\`\n`,
+    getFinancialStockDialogHistoryPath(userId, stock),
+  );
+
+  return nextTurns;
+};
+
+const appendFinancialDialogTurns = async (userId: string, stock: { name: string; code: string }, turns: StoredDialogTurn[]) => {
+  const currentTurns = await loadFinancialDialogHistory(userId, stock);
+
+  return saveFinancialDialogHistory(userId, stock, [...currentTurns, ...turns]);
+};
 
 const loadFigureReadingIfExists = async (filePath: string): Promise<StoredFigureReading | null> => {
   const content = await downloadTextIfExists(filePath);
@@ -2146,6 +2201,9 @@ const buildFinancialAnalysis = async (user: { id: string; email: string }, reque
 
 该股票历史 AI 分析档案：
 ${stockArchiveContext || '暂无历史档案，这是该股票第一次财务/股价分析。'}
+
+本用户最近对话历史：
+${formatConversationHistoryForReaderPrompt(request.conversationHistory) || '暂无最近对话历史。'}
 
 请按以下结构输出中文分析：
 1. 核心结论：用交易员语言给出多空判断、确定性强弱、关键触发条件。
@@ -5160,6 +5218,22 @@ const app = new Hono()
           billingMultiplier: FINANCIAL_ANALYSIS_BILLING_MULTIPLIER,
         },
       });
+      const now = new Date().toISOString();
+      await appendFinancialDialogTurns(user.id, request.stock, [
+        {
+          role: 'user',
+          content: request.topic?.trim() || '请综合分析上传的财务报告、走势图、K线和盘口材料。',
+          createdAt: now,
+        },
+        {
+          role: 'assistant',
+          content: result.answer,
+          createdAt: now,
+          model: result.model,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+        },
+      ]);
 
       return c.json({
         answer: result.answer,
@@ -5184,6 +5258,25 @@ const app = new Hono()
 
       console.error('[reader-agent:financial-analysis] request failed', { message });
       return c.json({ error: 'Financial analysis failed.', message }, status);
+    }
+  })
+  .get('/financial-analysis/history', async (c) => {
+    try {
+      const user = await getCurrentUser(getCookie(c, sessionCookieName));
+      if (!user) return c.json({ error: 'Not authenticated.' }, 401);
+
+      const name = c.req.query('name')?.trim();
+      const code = c.req.query('code')?.trim();
+      if (!name || !code) return c.json({ error: 'Missing stock.', message: '请先选择股票。' }, 400);
+
+      const history = await loadFinancialDialogHistory(user.id, { name, code });
+
+      return c.json({ history });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Financial history failed.';
+
+      console.error('[reader-agent:financial-analysis-history] request failed', { message });
+      return c.json({ error: 'Financial history failed.', message }, 500);
     }
   })
   .post('/stock-quotes', zValidator('json', stockQuotesRequestSchema), async (c) => {

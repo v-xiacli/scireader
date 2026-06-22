@@ -1,8 +1,10 @@
 'use client';
 
-import { ArrowLeft, BarChart3, Loader2, Paperclip, Send, Trash2, Upload } from 'lucide-react';
+import { ArrowLeft, BarChart3, Loader2, Trash2, Upload } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
+
+import { useFloatingChat } from '@/components/chat/floating-chat-context';
 
 type AuthUser = { id: string; email: string };
 
@@ -11,20 +13,6 @@ type FinancialMaterial = {
   storagePath: string;
   contentType: string;
   size: number;
-};
-
-type FinancialAnalysisResult = {
-  answer: string;
-  model: string;
-  usage?: {
-    inputTokens: number;
-    outputTokens: number;
-    cacheCreationInputTokens?: number;
-    cacheReadInputTokens?: number;
-    baseBillableTokens?: number;
-    billableTokens: number;
-    billingMultiplier?: number;
-  };
 };
 
 type StockWatchlistItem = {
@@ -39,13 +27,6 @@ type StockQuote = StockWatchlistItem & {
   change: number;
   changePct: number;
   currency: string;
-};
-
-type FinancialChatMessage = {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  usage?: FinancialAnalysisResult['usage'];
 };
 
 const formatDate = (value: string) => {
@@ -72,22 +53,13 @@ const parseStockWatchlistText = (text: string): StockWatchlistItem[] =>
     .slice(0, 80);
 
 const FinancialAnalysisPage = () => {
+  const { setFinancialContext } = useFloatingChat();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const chatBottomRef = useRef<HTMLDivElement>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
   const [materials, setMaterials] = useState<FinancialMaterial[]>([]);
-  const [prompt, setPrompt] = useState('');
-  const [messages, setMessages] = useState<FinancialChatMessage[]>([
-    {
-      id: 'welcome',
-      role: 'assistant',
-      content: '上传财报 PDF、K线图、盘口截图或走势图后，直接在下面提问。我会按交易员视角，把材料、行情和风险点一起分析。',
-    },
-  ]);
   const [message, setMessage] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [stockWatchlist, setStockWatchlist] = useState<StockWatchlistItem[]>([]);
   const [stockWatchlistText, setStockWatchlistText] = useState('');
   const [stockQuotes, setStockQuotes] = useState<StockQuote[]>([]);
@@ -144,7 +116,7 @@ const FinancialAnalysisPage = () => {
   const saveStockWatchlist = async () => {
     const watchlist = parseStockWatchlistText(stockWatchlistText);
     if (!watchlist.length) {
-      setStockMessage('请至少保留一只自选股。');
+      setStockMessage('請至少保留一隻自選股。');
       return;
     }
 
@@ -201,19 +173,26 @@ const FinancialAnalysisPage = () => {
   }, [isLoggedIn, stockWatchlist]);
 
   useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isAnalyzing]);
+    setFinancialContext({
+      active: true,
+      materials,
+      selectedStock,
+      billingMultiplier: 3,
+    });
+  }, [materials, selectedStock, setFinancialContext]);
+
+  useEffect(() => () => setFinancialContext(null), [setFinancialContext]);
 
   const handleUpload = async (files: FileList | File[]) => {
     const selectedFiles = Array.from(files).slice(0, Math.max(0, 12 - materials.length));
     if (!isLoggedIn) {
-      setMessage('请先登录再上传财务材料。');
+      setMessage('請先登入再上傳財務材料。');
       return;
     }
 
     const unsupported = selectedFiles.find((file) => file.type !== 'application/pdf' && !file.type.startsWith('image/'));
     if (unsupported) {
-      setMessage(`不支持的文件类型：${unsupported.name}`);
+      setMessage(`不支援的檔案類型：${unsupported.name}`);
       return;
     }
 
@@ -246,71 +225,11 @@ const FinancialAnalysisPage = () => {
       }
 
       setMaterials((current) => [...current, ...uploaded].slice(-12));
-      setMessage(`已上传 ${uploaded.length} 个材料。`);
+      setMessage(`已上傳 ${uploaded.length} 個材料。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Financial material upload failed.');
     } finally {
       setIsUploading(false);
-    }
-  };
-
-  const handleSend = async () => {
-    const topic = prompt.trim();
-
-    if (!isLoggedIn) {
-      setMessage('请先登录再使用财务分析。');
-      return;
-    }
-
-    if (!materials.length) {
-      setMessage('请先上传财务报告、走势图或盘口图片。');
-      return;
-    }
-
-    if (!topic) {
-      setMessage('请输入你想分析的问题。');
-      return;
-    }
-
-    if (!selectedStock) {
-      setMessage('请先在自选股里选择本次要分析的股票。');
-      return;
-    }
-
-    const userMessage: FinancialChatMessage = {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: `【${selectedStock.name} ${selectedStock.code}】${topic}`,
-    };
-
-    setMessages((current) => [...current, userMessage]);
-    setPrompt('');
-    setIsAnalyzing(true);
-    setMessage(null);
-
-    try {
-      const response = await fetch('/api/reader-agent/financial-analysis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic, files: materials, stock: selectedStock }),
-      });
-      const result = await response.json();
-
-      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Financial analysis failed.');
-
-      setMessages((current) => [
-        ...current,
-        {
-          id: `assistant-${Date.now()}`,
-          role: 'assistant',
-          content: result.answer,
-          usage: result.usage,
-        },
-      ]);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Financial analysis failed.');
-    } finally {
-      setIsAnalyzing(false);
     }
   };
 
@@ -325,12 +244,12 @@ const FinancialAnalysisPage = () => {
             <div>
               <div className="flex items-center gap-2">
                 <BarChart3 className="size-5 text-primary" />
-                <h1 className="text-xl font-semibold">财务分析</h1>
+                <h1 className="text-xl font-semibold">財務分析</h1>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
-                {authUser ? `当前账户：${authUser.email}` : isSessionLoading ? '正在检查登录状态...' : '请先回到主页登录后使用。'}
+                {authUser ? `當前帳戶：${authUser.email}` : isSessionLoading ? '正在檢查登入狀態...' : '請先回到首頁登入後使用。'}
               </p>
-              <p className="mt-1 text-xs font-medium text-amber-700">该功能需要单独开通；token 使用费按正常分析的 3 倍计算。</p>
+              <p className="mt-1 text-xs font-medium text-amber-700">該功能需要單獨開通；token 使用費按正常分析的 3 倍計算。</p>
             </div>
           </div>
           <button
@@ -340,16 +259,16 @@ const FinancialAnalysisPage = () => {
             type="button"
           >
             {isUploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
-            {isUploading ? '上传中...' : '上传材料'}
+            {isUploading ? '上傳中...' : '上傳材料'}
           </button>
         </header>
 
         <section className="mt-4 rounded-2xl border bg-white p-3 shadow-sm">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-sm font-medium">自选股实时价格</p>
+              <p className="text-sm font-medium">自選股即時價格</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {quotesUpdatedAt ? `最近更新 ${formatDate(quotesUpdatedAt)}` : '进入页面后自动刷新；每 60 秒更新一次。'}
+                {quotesUpdatedAt ? `最近更新 ${formatDate(quotesUpdatedAt)}` : '進入頁面後自動刷新；每 60 秒更新一次。'}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -364,7 +283,7 @@ const FinancialAnalysisPage = () => {
                     分析：{stock.name} {stock.code}
                   </option>
                 )) : (
-                  <option value="">请选择股票</option>
+                  <option value="">請選擇股票</option>
                 )}
               </select>
               <button
@@ -380,7 +299,7 @@ const FinancialAnalysisPage = () => {
                 onClick={() => setIsWatchlistEditing((current) => !current)}
                 type="button"
               >
-                {isWatchlistEditing ? '收起编辑' : '编辑自选股'}
+                {isWatchlistEditing ? '收起編輯' : '編輯自選股'}
               </button>
             </div>
           </div>
@@ -390,7 +309,7 @@ const FinancialAnalysisPage = () => {
               <textarea
                 className="min-h-28 w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none transition focus:border-primary"
                 onChange={(event) => setStockWatchlistText(event.target.value)}
-                placeholder={'每行一只：名称,代码,市场\n例如：北方华创,002371,A\n英伟达,NVDA,US'}
+                placeholder={'每行一隻：名稱,代碼,市場\n例如：北方華創,002371,A\n英偉達,NVDA,US'}
                 value={stockWatchlistText}
               />
               <div className="flex flex-wrap gap-2">
@@ -399,9 +318,9 @@ const FinancialAnalysisPage = () => {
                   onClick={() => void saveStockWatchlist()}
                   type="button"
                 >
-                  保存自选股
+                  保存自選股
                 </button>
-                <span className="self-center text-xs text-muted-foreground">市场支持 A / US / HK / FX。</span>
+                <span className="self-center text-xs text-muted-foreground">市場支援 A / US / HK / FX。</span>
               </div>
             </div>
           ) : null}
@@ -438,15 +357,15 @@ const FinancialAnalysisPage = () => {
                 </button>
               );
             }) : (
-              <p className="text-sm text-muted-foreground">{isLoggedIn ? '暂无行情。请刷新或编辑自选股列表。' : '登录后显示你的自选股实时价格。'}</p>
+              <p className="text-sm text-muted-foreground">{isLoggedIn ? '暫無行情。請刷新或編輯自選股列表。' : '登入後顯示你的自選股即時價格。'}</p>
             )}
           </div>
         </section>
 
-        <div className="mt-4 grid min-h-0 flex-1 gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
+        <div className="mt-4 grid max-w-xl gap-4">
           <aside className="rounded-2xl border bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="font-semibold">已上传材料</h2>
+              <h2 className="font-semibold">已上傳材料</h2>
               {materials.length ? (
                 <button
                   className="text-sm font-medium text-slate-500 hover:text-red-600"
@@ -457,6 +376,7 @@ const FinancialAnalysisPage = () => {
                 </button>
               ) : null}
             </div>
+            {message ? <p className="mt-2 text-sm text-muted-foreground">{message}</p> : null}
             <input
               accept="application/pdf,image/*"
               className="hidden"
@@ -488,79 +408,11 @@ const FinancialAnalysisPage = () => {
                 </div>
               )) : (
                 <div className="rounded-xl border border-dashed bg-slate-50 p-4 text-sm text-muted-foreground">
-                  支持多个 PDF、K线图、盘口截图和走势图图片。
+                  支援多個 PDF、K 線圖、盤口截圖和走勢圖圖片。
                 </div>
               )}
             </div>
           </aside>
-
-          <section className="flex min-h-[560px] flex-col rounded-2xl border bg-white shadow-sm">
-            <div className="min-h-0 flex-1 overflow-auto p-4">
-              <div className="mx-auto flex max-w-3xl flex-col gap-4">
-                {messages.map((item) => (
-                  <div className={`flex ${item.role === 'user' ? 'justify-end' : 'justify-start'}`} key={item.id}>
-                    <div className={`max-w-[88%] rounded-2xl px-4 py-3 text-sm leading-7 shadow-sm ${item.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-slate-50 text-slate-900'}`}>
-                      <div className="whitespace-pre-wrap">{item.content}</div>
-                      {item.usage ? (
-                        <p className={`mt-3 text-xs ${item.role === 'user' ? 'text-primary-foreground/75' : 'text-muted-foreground'}`}>
-                          input {item.usage.inputTokens.toLocaleString()} / output {item.usage.outputTokens.toLocaleString()} / billable {item.usage.billableTokens.toLocaleString()}
-                          {item.usage.billingMultiplier ? ` / ${item.usage.billingMultiplier}x` : ''}
-                          {item.usage.baseBillableTokens ? ` / base ${item.usage.baseBillableTokens.toLocaleString()}` : ''}
-                          {item.usage.cacheReadInputTokens ? ` / cache read ${item.usage.cacheReadInputTokens.toLocaleString()}` : ''}
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
-                ))}
-                {isAnalyzing ? (
-                  <div className="flex justify-start">
-                    <div className="inline-flex items-center gap-2 rounded-2xl bg-slate-50 px-4 py-3 text-sm text-muted-foreground shadow-sm">
-                      <Loader2 className="size-4 animate-spin" />
-                      正在分析材料...
-                    </div>
-                  </div>
-                ) : null}
-                <div ref={chatBottomRef} />
-              </div>
-            </div>
-
-            <div className="border-t p-3">
-              {message ? <p className="mb-2 text-sm text-muted-foreground">{message}</p> : null}
-              <div className="mx-auto flex max-w-3xl items-end gap-2">
-                <button
-                  className="inline-flex size-11 shrink-0 items-center justify-center rounded-xl border text-slate-600 disabled:cursor-not-allowed disabled:opacity-70"
-                  disabled={isUploading || !isLoggedIn || materials.length >= 12}
-                  onClick={() => fileInputRef.current?.click()}
-                  title="上传材料"
-                  type="button"
-                >
-                  {isUploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
-                </button>
-                <textarea
-                  className="max-h-40 min-h-11 flex-1 resize-none rounded-xl border px-4 py-3 text-sm outline-none transition focus:border-primary"
-                  disabled={isAnalyzing || !isLoggedIn}
-                  onChange={(event) => setPrompt(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.shiftKey) {
-                      event.preventDefault();
-                      void handleSend();
-                    }
-                  }}
-                  placeholder="例如：结合这些财报和盘口截图，判断短线资金是否有异动，中线基本面风险在哪里。"
-                  value={prompt}
-                />
-                <button
-                  className="inline-flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
-                  disabled={isAnalyzing || !isLoggedIn || !materials.length || !prompt.trim() || !selectedStock}
-                  onClick={() => void handleSend()}
-                  title="发送"
-                  type="button"
-                >
-                  {isAnalyzing ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-                </button>
-              </div>
-            </div>
-          </section>
         </div>
       </div>
     </main>
