@@ -15,6 +15,26 @@ type FinancialMaterial = {
   size: number;
 };
 
+type FinancialReport = {
+  id: string;
+  stock: {
+    name: string;
+    code: string;
+    market?: string | null;
+  };
+  question: string;
+  answer: string;
+  model?: string | null;
+  createdAt: string;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    baseBillableTokens: number;
+    billableTokens: number;
+    billingMultiplier: number;
+  };
+};
+
 type StockWatchlistItem = {
   name: string;
   code: string;
@@ -57,6 +77,9 @@ const FinancialAnalysisPage = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
+  const [isFinancialEnabled, setIsFinancialEnabled] = useState(false);
+  const [isActivatingFinancial, setIsActivatingFinancial] = useState(false);
+  const [financialAccessMessage, setFinancialAccessMessage] = useState<string | null>(null);
   const [materials, setMaterials] = useState<FinancialMaterial[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -68,9 +91,64 @@ const FinancialAnalysisPage = () => {
   const [isWatchlistEditing, setIsWatchlistEditing] = useState(false);
   const [quotesUpdatedAt, setQuotesUpdatedAt] = useState<string | null>(null);
   const [selectedStockKey, setSelectedStockKey] = useState('');
+  const [reports, setReports] = useState<FinancialReport[]>([]);
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  const [reportsMessage, setReportsMessage] = useState<string | null>(null);
 
   const isLoggedIn = Boolean(authUser);
   const selectedStock = stockWatchlist.find((stock) => `${stock.market ?? 'A'}:${stock.code}` === selectedStockKey) ?? stockWatchlist[0] ?? null;
+  const selectedReport = reports.find((report) => report.id === selectedReportId) ?? null;
+
+  const loadFinancialAccess = async () => {
+    try {
+      const response = await fetch('/api/auth/financial-analysis-access');
+      const result = await response.json();
+
+      setIsFinancialEnabled(Boolean(response.ok && result.enabled));
+    } catch {
+      setIsFinancialEnabled(false);
+    }
+  };
+
+  const loadReports = async () => {
+    try {
+      const response = await fetch('/api/reader-agent/financial-analysis/reports');
+      const result = await response.json();
+
+      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Financial reports failed.');
+
+      setReports(result.reports ?? []);
+      setReportsMessage(null);
+    } catch (error) {
+      setReports([]);
+      setReportsMessage(error instanceof Error ? error.message : 'Financial reports failed.');
+    }
+  };
+
+  const activateFinancialAnalysis = async () => {
+    if (!isLoggedIn) {
+      setFinancialAccessMessage('請先登入後再開通財務分析。');
+      return;
+    }
+
+    setIsActivatingFinancial(true);
+    setFinancialAccessMessage(null);
+
+    try {
+      const response = await fetch('/api/auth/financial-analysis-access', { method: 'POST' });
+      const result = await response.json();
+
+      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Financial analysis access failed.');
+
+      setIsFinancialEnabled(Boolean(result.enabled));
+      setFinancialAccessMessage('財務分析已開通。');
+      void loadReports();
+    } catch (error) {
+      setFinancialAccessMessage(error instanceof Error ? error.message : 'Financial analysis access failed.');
+    } finally {
+      setIsActivatingFinancial(false);
+    }
+  };
 
   const refreshStockQuotes = async (watchlist = stockWatchlist) => {
     if (!watchlist.length) return;
@@ -148,7 +226,10 @@ const FinancialAnalysisPage = () => {
 
         if (response.ok && result.user) {
           setAuthUser(result.user);
+          setIsFinancialEnabled(Boolean(result.financialAnalysisEnabled));
           await loadStockWatchlist();
+          await loadFinancialAccess();
+          await loadReports();
         }
       } catch {
         setAuthUser(null);
@@ -174,14 +255,24 @@ const FinancialAnalysisPage = () => {
 
   useEffect(() => {
     setFinancialContext({
-      active: true,
+      active: isFinancialEnabled,
       materials,
       selectedStock,
       billingMultiplier: 3,
     });
-  }, [materials, selectedStock, setFinancialContext]);
+  }, [isFinancialEnabled, materials, selectedStock, setFinancialContext]);
 
   useEffect(() => () => setFinancialContext(null), [setFinancialContext]);
+
+  useEffect(() => {
+    const refreshReports = () => {
+      void loadReports();
+    };
+
+    window.addEventListener('financial-analysis-report-created', refreshReports);
+
+    return () => window.removeEventListener('financial-analysis-report-created', refreshReports);
+  }, []);
 
   const handleUpload = async (files: FileList | File[]) => {
     const selectedFiles = Array.from(files).slice(0, Math.max(0, 12 - materials.length));
@@ -254,7 +345,7 @@ const FinancialAnalysisPage = () => {
           </div>
           <button
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
-            disabled={isUploading || !isLoggedIn || materials.length >= 12}
+            disabled={isUploading || !isLoggedIn || !isFinancialEnabled || materials.length >= 12}
             onClick={() => fileInputRef.current?.click()}
             type="button"
           >
@@ -262,6 +353,28 @@ const FinancialAnalysisPage = () => {
             {isUploading ? '上傳中...' : '上傳材料'}
           </button>
         </header>
+
+        {!isFinancialEnabled ? (
+          <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="font-semibold text-amber-950">開通財務分析</h2>
+                <p className="mt-1 text-sm leading-6 text-amber-900">
+                  財務分析會讀取財報、K 線圖、盤口截圖和走勢圖，並按股票保存本用戶的歷史報告。使用前需單獨開通，token 使用量按正常分析的 3 倍計算。
+                </p>
+              </div>
+              <button
+                className="inline-flex items-center justify-center rounded-xl bg-amber-600 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-70"
+                disabled={isActivatingFinancial || !isLoggedIn}
+                onClick={() => void activateFinancialAnalysis()}
+                type="button"
+              >
+                {isActivatingFinancial ? '開通中...' : '確認開通'}
+              </button>
+            </div>
+            {financialAccessMessage ? <p className="mt-2 text-sm text-amber-900">{financialAccessMessage}</p> : null}
+          </section>
+        ) : null}
 
         <section className="mt-4 rounded-2xl border bg-white p-3 shadow-sm">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -362,7 +475,7 @@ const FinancialAnalysisPage = () => {
           </div>
         </section>
 
-        <div className="mt-4 grid max-w-xl gap-4">
+        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(280px,420px)_minmax(0,1fr)]">
           <aside className="rounded-2xl border bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between gap-3">
               <h2 className="font-semibold">已上傳材料</h2>
@@ -380,7 +493,7 @@ const FinancialAnalysisPage = () => {
             <input
               accept="application/pdf,image/*"
               className="hidden"
-              disabled={isUploading || !isLoggedIn}
+                disabled={isUploading || !isLoggedIn || !isFinancialEnabled}
               multiple
               onChange={(event) => {
                 const files = event.target.files;
@@ -413,6 +526,68 @@ const FinancialAnalysisPage = () => {
               )}
             </div>
           </aside>
+
+          <section className="rounded-2xl border bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="font-semibold">歷史報告</h2>
+                <p className="mt-1 text-sm text-muted-foreground">只保存本用戶的股票、問題、回答和 token 記錄；不保存歷史上傳資料。</p>
+              </div>
+              <button
+                className="rounded-xl border px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-70"
+                disabled={!isLoggedIn || !isFinancialEnabled}
+                onClick={() => void loadReports()}
+                type="button"
+              >
+                重新整理
+              </button>
+            </div>
+            {reportsMessage ? <p className="mt-2 text-sm text-red-600">{reportsMessage}</p> : null}
+            <div className="mt-4 grid gap-3">
+              {reports.length ? reports.map((report) => {
+                const isSelected = selectedReportId === report.id;
+
+                return (
+                  <button
+                    className={`rounded-xl border p-3 text-left transition ${isSelected ? 'border-primary bg-primary/5' : 'bg-slate-50 hover:border-primary/40'}`}
+                    key={report.id}
+                    onClick={() => setSelectedReportId((current) => current === report.id ? null : report.id)}
+                    type="button"
+                  >
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="font-medium">{report.stock.name} {report.stock.code}</p>
+                      <p className="text-xs text-muted-foreground">{formatDate(report.createdAt)}</p>
+                    </div>
+                    <p className="mt-2 line-clamp-2 text-sm text-slate-700">{report.question}</p>
+                    {report.usage ? (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {report.usage.billableTokens.toLocaleString()} billable · {report.usage.billingMultiplier}x
+                      </p>
+                    ) : null}
+                  </button>
+                );
+              }) : (
+                <div className="rounded-xl border border-dashed bg-slate-50 p-4 text-sm text-muted-foreground">
+                  尚無歷史報告。開通後在浮動聊天窗完成分析，報告會自動出現在這裡。
+                </div>
+              )}
+            </div>
+
+            {selectedReport ? (
+              <div className="mt-4 rounded-xl border bg-slate-50 p-4">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                  <h3 className="font-semibold">{selectedReport.stock.name} {selectedReport.stock.code}</h3>
+                  <span className="text-xs text-muted-foreground">{formatDate(selectedReport.createdAt)}</span>
+                </div>
+                <p className="mt-3 text-sm font-medium">問題</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{selectedReport.question}</p>
+                <p className="mt-4 text-sm font-medium">報告</p>
+                <div className="mt-1 max-h-96 overflow-auto whitespace-pre-wrap rounded-lg bg-white p-3 text-sm leading-7 text-slate-800">
+                  {selectedReport.answer}
+                </div>
+              </div>
+            ) : null}
+          </section>
         </div>
       </div>
     </main>

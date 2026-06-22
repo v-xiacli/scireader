@@ -7,7 +7,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { z } from 'zod';
 
-import { ensureAuthTables, getSql, getUserTokenAccount } from '@/server/db';
+import { enableUserFinancialAnalysis, ensureAuthTables, getSql, getUserFinancialAnalysisAccess, getUserTokenAccount } from '@/server/db';
 import { downloadTextAsAdmin, uploadTextAsAdmin } from '@/lib/firebase/server/storage-admin';
 
 const scrypt = promisify(scryptCallback);
@@ -79,6 +79,18 @@ const defaultStockWatchlist: z.infer<typeof stockWatchlistSchema> = [
   { name: '中國海油', code: '600938', market: 'A' },
   { name: '招商輪船', code: '601872', market: 'A' },
 ];
+
+const parseCsvEnv = (value?: string) =>
+  new Set((value ?? '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean));
+
+const isFinancialAnalysisAccessEnabled = async (user: { id: string; email: string }) => {
+  if (process.env.FINANCIAL_ANALYSIS_ENABLED === 'true') return true;
+
+  const enabledUserIds = parseCsvEnv(process.env.FINANCIAL_ANALYSIS_ENABLED_USER_IDS);
+  const enabledEmails = parseCsvEnv(process.env.FINANCIAL_ANALYSIS_ENABLED_EMAILS);
+
+  return enabledUserIds.has(user.id.toLowerCase()) || enabledEmails.has(user.email.toLowerCase()) || await getUserFinancialAnalysisAccess(user.id);
+};
 
 const hashPassword = async (password: string) => {
   const salt = randomBytes(16).toString('hex');
@@ -337,7 +349,11 @@ const app = new Hono()
   .get('/me', async (c) => {
     try {
       const user = await getCurrentUser(getCookie(c, sessionCookieName));
-      return c.json({ user, tokenAccount: user ? await getUserTokenAccount(user.id) : null });
+      return c.json({
+        user,
+        tokenAccount: user ? await getUserTokenAccount(user.id) : null,
+        financialAnalysisEnabled: user ? await isFinancialAnalysisAccessEnabled(user) : false,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not load session.';
       return c.json({ error: 'Could not load session.', message }, 500);
@@ -348,6 +364,18 @@ const app = new Hono()
     if (!user) return c.json({ error: 'Not authenticated.' }, 401);
 
     return c.json({ tokenAccount: await getUserTokenAccount(user.id) });
+  })
+  .get('/financial-analysis-access', async (c) => {
+    const user = await getCurrentUser(getCookie(c, sessionCookieName));
+    if (!user) return c.json({ error: 'Not authenticated.' }, 401);
+
+    return c.json({ enabled: await isFinancialAnalysisAccessEnabled(user) });
+  })
+  .post('/financial-analysis-access', async (c) => {
+    const user = await getCurrentUser(getCookie(c, sessionCookieName));
+    if (!user) return c.json({ error: 'Not authenticated.' }, 401);
+
+    return c.json({ enabled: await enableUserFinancialAnalysis(user.id) });
   })
   .get('/stock-watchlist', async (c) => {
     const user = await getCurrentUser(getCookie(c, sessionCookieName));

@@ -1235,6 +1235,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
               : message,
           ),
         );
+        window.dispatchEvent(new Event('financial-analysis-report-created'));
       } catch (error) {
         setMessages((current) =>
           current.map((message) =>

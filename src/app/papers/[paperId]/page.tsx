@@ -93,8 +93,8 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
   return (
     <main className="relative h-screen overflow-hidden p-1">
       <nav className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-4 rounded-2xl bg-white/90 px-4 py-2 shadow-sm backdrop-blur">
-        <Link className="text-sm font-medium text-primary" href="/">
-          ← Paper library
+        <Link className="text-sm font-medium text-primary" href="/research">
+          ← 論文庫
         </Link>
         <div className="text-sm text-muted-foreground">PDF viewer + large floating chat</div>
         <div className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">{readingMode === 'reviewer' ? '審稿人模式' : '讀者模式'}</div>
@@ -110,7 +110,7 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
           <div className="max-w-md rounded-2xl border bg-white p-6 text-center shadow-sm">
             <h1 className="text-xl font-semibold">請從已上傳論文打開</h1>
             <p className="mt-2 text-sm text-muted-foreground">預設樣例論文已關閉。請回到論文庫，打開你上傳後的對應論文。</p>
-            <Link className="mt-4 inline-flex rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground" href="/">
+            <Link className="mt-4 inline-flex rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground" href="/research">
               返回論文庫
             </Link>
           </div>
