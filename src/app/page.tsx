@@ -651,7 +651,7 @@ const HomePage = () => {
                 </p>
                 <p className="mt-1 max-w-44 text-xs text-muted-foreground">
                   {tokenEstimate
-                    ? `${tokenEstimate.inputTokens.toLocaleString()} raw · ${getBillingModeLabel(tokenEstimate.model)}${tokenEstimate.tokenWeight ? ` x${tokenEstimate.tokenWeight}` : ''}`
+                    ? `${tokenEstimate.inputTokens.toLocaleString()} raw · ${getBillingModeLabel(tokenEstimate.model)}`
                     : tokenEstimateMessage}
                 </p>
               </div>
@@ -672,15 +672,15 @@ const HomePage = () => {
           <div className="mt-5 grid gap-3 border-t pt-4 text-sm md:grid-cols-3">
             <div>
               <p className="font-medium">充值參考</p>
-              <p className="mt-1 text-muted-foreground">僅接受美元充值；US$1 ≈ 1,080,000 token，首登贈送 10,000 token。</p>
+              <p className="mt-1 text-muted-foreground">僅接受美元充值；US$1 ≈ 2,000,000 token，首登贈送 10,000 token。</p>
             </div>
             <div>
               <p className="font-medium">扣費規則</p>
-              <p className="mt-1 text-muted-foreground">min 按 1 倍，normal 按 1.5 倍，pro 按 2 倍。</p>
+              <p className="mt-1 text-muted-foreground">按模型實際輸入/輸出單價折算；輸入價格約為輸出價格的 1/6。</p>
             </div>
             <div>
               <p className="font-medium">閱讀估算</p>
-              <p className="mt-1 text-muted-foreground">US$1 約可精讀 45-90 篇 5000 words 英文文獻，超長論文按實際 token 扣費。</p>
+              <p className="mt-1 text-muted-foreground">US$1 約可精讀 80-160 篇 5000 words 英文文獻，超長論文按實際 token 扣費。</p>
             </div>
           </div>
         </header>

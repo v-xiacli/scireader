@@ -96,6 +96,13 @@ type SummaryFreshnessResult = {
   improvementPrompt?: string;
 };
 
+type ModelUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
+};
+
 type ReferenceEvaluationRecord = {
   referenceKey: string;
   referenceTitle?: string;
@@ -1184,8 +1191,32 @@ const getModelTokenWeight = (model?: string) => {
   return 1;
 };
 
-const getBillableTokens = (inputTokens: number, outputTokens: number, model?: string) =>
-  Math.ceil((Math.max(0, inputTokens) + Math.max(0, outputTokens)) * getModelTokenWeight(model));
+const billingTokensPerUsdCost = 5_000_000;
+
+const getModelPricePerMillionTokens = (model?: string) => {
+  const normalizedModel = model?.toLowerCase() ?? '';
+
+  if (normalizedModel.includes('gpt-5.5')) return { input: 0.15, output: 0.9, cacheRead: 0.015 };
+  if (/gpt-5\.4(?!-mini)/.test(normalizedModel)) return { input: 0.075, output: 0.45, cacheRead: 0.0075 };
+  return { input: 0.0225, output: 0.135, cacheRead: 0.0022 };
+};
+
+const getBillableTokens = (inputTokens: number, outputTokens: number, model?: string, cachedUsage?: Pick<ModelUsage, 'cacheCreationInputTokens' | 'cacheReadInputTokens'>) => {
+  const price = getModelPricePerMillionTokens(model);
+  const cacheCreationInputTokens = Math.max(0, cachedUsage?.cacheCreationInputTokens ?? 0);
+  const cacheReadInputTokens = Math.max(0, cachedUsage?.cacheReadInputTokens ?? 0);
+  const inputCost = ((Math.max(0, inputTokens) + cacheCreationInputTokens) / 1_000_000) * price.input;
+  const cacheReadCost = (cacheReadInputTokens / 1_000_000) * price.cacheRead;
+  const outputCost = (Math.max(0, outputTokens) / 1_000_000) * price.output;
+
+  return Math.ceil((inputCost + cacheReadCost + outputCost) * billingTokensPerUsdCost);
+};
+
+const getUsageBillableTokens = (usage: ModelUsage, model?: string) =>
+  getBillableTokens(usage.inputTokens, usage.outputTokens, model, {
+    cacheCreationInputTokens: usage.cacheCreationInputTokens,
+    cacheReadInputTokens: usage.cacheReadInputTokens,
+  });
 
 const insufficientTokenMessage = 'token余额不足，请充值';
 
@@ -1805,6 +1836,8 @@ const askClaude = async (request: z.infer<typeof readerRequestSchema>, forcedMod
       model: modelSelection.model,
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
+      cacheCreationInputTokens: usageWithCache.cache_creation_input_tokens ?? 0,
+      cacheReadInputTokens: usageWithCache.cache_read_input_tokens ?? 0,
     };
   } finally {
     if (tempPdf) await fs.rm(tempPdf.outputDir, { recursive: true, force: true });
@@ -3256,7 +3289,7 @@ ${numbered.draft}
     inputTokens: triage.inputTokens + result.inputTokens,
     outputTokens: triage.outputTokens + result.outputTokens,
     sourceCount: sources.length,
-    baseBillableTokens: getBillableTokens(triage.inputTokens, triage.outputTokens, triage.model) + getBillableTokens(result.inputTokens, result.outputTokens, result.model),
+    baseBillableTokens: getBillableTokens(triage.inputTokens, triage.outputTokens, triage.model) + getUsageBillableTokens(result, result.model),
   };
 };
 
@@ -3729,8 +3762,8 @@ const startSummaryGenerationJob = (
     const outputTokens = (freshness?.outputTokens ?? 0) + result.outputTokens + finalChineseResult.outputTokens;
     const billableTokens =
       (freshness ? getBillableTokens(freshness.inputTokens, freshness.outputTokens, selectCheapTriageModel().model) : 0) +
-      getBillableTokens(result.inputTokens, result.outputTokens, result.model) +
-      getBillableTokens(finalChineseResult.inputTokens, finalChineseResult.outputTokens, finalChineseResult.model);
+      getUsageBillableTokens(result, result.model) +
+      getUsageBillableTokens(finalChineseResult, finalChineseResult.model);
 
     console.log('[reader-agent:summarize] background summary generation finished', {
       jobId,
@@ -4001,7 +4034,7 @@ const app = new Hono()
       await ensurePositiveTokenBalance(user.id);
 
       const result = await generateWritingIntroduction(user.id, request);
-      const baseBillableTokens = getBillableTokens(result.inputTokens, result.outputTokens, result.model);
+      const baseBillableTokens = getUsageBillableTokens(result, result.model);
       const billableTokens = baseBillableTokens * WRITING_BILLING_MULTIPLIER;
       const tokenAccount = await recordUserTokenUsage({
         userId: user.id,
@@ -4105,7 +4138,7 @@ const app = new Hono()
       await ensurePositiveTokenBalance(user.id);
 
       const result = await generateWritingFollowUp(user.id, request);
-      const baseBillableTokens = result.baseBillableTokens ?? getBillableTokens(result.inputTokens, result.outputTokens, result.model);
+      const baseBillableTokens = result.baseBillableTokens ?? getUsageBillableTokens(result, result.model);
       const billableTokens = baseBillableTokens * WRITING_BILLING_MULTIPLIER;
       const tokenAccount = await recordUserTokenUsage({
         userId: user.id,
@@ -4210,7 +4243,7 @@ const app = new Hono()
 
       if (!hasPaperContext || request.paperId === 'general-chat') {
         const result = await askGeneralChat(request);
-        const billableTokens = getBillableTokens(result.inputTokens, result.outputTokens, result.model);
+        const billableTokens = getUsageBillableTokens(result, result.model);
         const tokenAccount = await recordUserTokenUsage({
           userId: user.id,
           paperId: request.paperId,
@@ -4299,7 +4332,7 @@ const app = new Hono()
           selectReaderModel(request),
           'chinese',
         );
-        const billableTokens = getBillableTokens(result.inputTokens, result.outputTokens, result.model);
+        const billableTokens = getUsageBillableTokens(result, result.model);
         const tokenAccount = await recordUserTokenUsage({
           userId: user.id,
           paperId: request.paperId,
@@ -4544,8 +4577,8 @@ const app = new Hono()
       const translatedOutputTokens = memoryOutputTokens + expensiveTranslatedResult.outputTokens + translatedAnswer.outputTokens;
       const translatedBillableTokens =
         getBillableTokens(memoryInputTokens, memoryOutputTokens, memoryResult.model) +
-        getBillableTokens(expensiveTranslatedResult.inputTokens, expensiveTranslatedResult.outputTokens, expensiveTranslatedResult.model) +
-        getBillableTokens(translatedAnswer.inputTokens, translatedAnswer.outputTokens, translatedAnswer.model);
+        getUsageBillableTokens(expensiveTranslatedResult, expensiveTranslatedResult.model) +
+        getUsageBillableTokens(translatedAnswer, translatedAnswer.model);
       const translatedTokenAccount = await recordUserTokenUsage({
         userId: user.id,
         paperId: request.paperId,
@@ -4726,7 +4759,7 @@ const app = new Hono()
       await ensurePositiveTokenBalance(user.id);
 
       const result = await generateImage(request);
-      const billableTokens = getBillableTokens(result.inputTokens, result.outputTokens, result.model);
+      const billableTokens = getUsageBillableTokens(result, result.model);
       const tokenAccount = await recordUserTokenUsage({
         userId: user.id,
         paperId: request.paperId,
@@ -5020,5 +5053,6 @@ const app = new Hono()
   });
 
 export default app;
+
 
 
