@@ -13,7 +13,7 @@ type ViewerPreferences = {
 };
 
 export const GlobalFloatingChat = () => {
-  const { paper, selectedText } = useFloatingChat();
+  const { financialContext, paper, selectedText } = useFloatingChat();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
   const [preferences, setPreferences] = useState<ViewerPreferences | null>(null);
@@ -62,6 +62,7 @@ export const GlobalFloatingChat = () => {
     console.info('Global floating chat state.', {
       isSessionLoading,
       isAuthenticated,
+      hasFinancialContext: Boolean(financialContext?.active),
       hasPaper: Boolean(paper),
       paperId: paper?.id,
       hasPreferences: Boolean(preferences),
@@ -69,13 +70,13 @@ export const GlobalFloatingChat = () => {
       chatSize: preferences?.chatSize,
       chatFontSize: preferences?.chatFontSize,
     });
-  }, [isSessionLoading, isAuthenticated, paper, preferences]);
+  }, [financialContext?.active, isSessionLoading, isAuthenticated, paper, preferences]);
 
-  if (isSessionLoading && !paper) {
+  if (isSessionLoading && !paper && !financialContext?.active) {
     console.info('Global floating chat hidden: session loading and no paper context yet.');
     return null;
   }
-  if (!isAuthenticated && !paper) {
+  if (!isAuthenticated && !paper && !financialContext?.active) {
     console.info('Global floating chat hidden: not authenticated and no paper context.');
     return null;
   }
@@ -87,6 +88,7 @@ export const GlobalFloatingChat = () => {
       initialFontSize={preferences?.chatFontSize}
       initialPosition={preferences?.chatPosition}
       initialSize={preferences?.chatSize}
+      financialContext={financialContext}
       onLayoutChange={saveLayout}
       paper={paper ?? undefined}
       selectedText={selectedText}

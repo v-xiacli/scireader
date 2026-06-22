@@ -8,10 +8,12 @@ import remarkMath from 'remark-math';
 
 import { mockMessages } from '@/features/papers/mock-data';
 import type { ChatMessage, PaperReadingMode, PaperSelection, PaperSummary } from '@/types/paper';
+import type { FloatingFinancialContext } from '@/components/chat/floating-chat-context';
 
 interface FloatingChatBoxProps {
   paper?: PaperSummary | null;
   selectedText?: PaperSelection | null;
+  financialContext?: FloatingFinancialContext | null;
   initialPosition?: { x: number; y: number };
   initialSize?: { width: number; height: number };
   initialFontSize?: ChatFontSize;
@@ -339,13 +341,15 @@ const clampLayout = (position: { x: number; y: number }, size: { width: number; 
   };
 };
 
-export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosition, initialSize, initialFontSize = 'small', onLayoutChange }: FloatingChatBoxProps) => {
+export const FloatingChatBox = ({ paper = null, selectedText = null, financialContext = null, initialPosition, initialSize, initialFontSize = 'small', onLayoutChange }: FloatingChatBoxProps) => {
   const dragOffsetRef = useRef(defaultPosition);
   const resizeStartRef = useRef({ x: 0, y: 0, width: defaultSize.width, height: defaultSize.height, left: defaultPosition.x, top: defaultPosition.y });
   const resizeHandleRef = useRef<ResizeHandle>('bottom-right');
   const appliedInitialPositionKeyRef = useRef('');
   const appliedInitialSizeKeyRef = useRef('');
   const appliedInitialFontSizeRef = useRef<ChatFontSize | null>(null);
+  const appliedChatModeRef = useRef<'financial' | 'standard' | null>(null);
+  const appliedFinancialHistoryKeyRef = useRef('');
   const sizeRef = useRef(initialSize ?? defaultSize);
   const messageBodyRefs = useRef(new Map<string, HTMLDivElement>());
   const [messages, setMessages] = useState<ChatMessage[]>(mockMessages);
@@ -371,6 +375,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   const [confirmedLargeSummaryKey, setConfirmedLargeSummaryKey] = useState('');
   const [isCheckingSummaryCost, setIsCheckingSummaryCost] = useState(false);
   const hasPaper = Boolean(paper);
+  const isFinancialChat = Boolean(financialContext?.active);
+  const financialStockKey = financialContext?.selectedStock ? `${financialContext.selectedStock.market ?? 'A'}:${financialContext.selectedStock.code}` : '';
   const paperId = paper?.id;
   const paperPdfUrl = paper?.pdfUrl;
   const paperTitle = paper?.title;
@@ -400,6 +406,28 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
   useEffect(() => {
     sizeRef.current = size;
   }, [size]);
+
+  useEffect(() => {
+    const nextMode = isFinancialChat ? 'financial' : 'standard';
+    if (appliedChatModeRef.current === nextMode) return;
+    appliedChatModeRef.current = nextMode;
+    appliedFinancialHistoryKeyRef.current = '';
+
+    setMessages(
+      isFinancialChat
+        ? [
+            {
+              id: 'financial-welcome',
+              role: 'assistant',
+              content: '财务分析已接入。请先在页面选择股票并上传材料，然后直接在这里提问；本功能需要单独开通，token 使用费按正常分析的 3 倍计算。',
+              contextLabel: 'Financial analysis',
+            },
+          ]
+        : mockMessages,
+    );
+    setInput('');
+    setPendingImageReading(null);
+  }, [isFinancialChat]);
 
   useEffect(() => {
     const updateViewportMode = () => {
@@ -535,6 +563,98 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     },
     [messages, paperId, paperPdfUrl, paperTitle, paperContextSummary, readingMode, readingModePrompt, selectedText, paper?.authors, paper?.journal, paper?.year],
   );
+
+  const askFinancialAgent = useCallback(
+    async (prompt: string) => {
+      if (!financialContext?.selectedStock) throw new Error('请先在财务分析页面选择本次要分析的股票。');
+      if (!financialContext.materials.length) throw new Error('请先上传财报、K线图、盘口截图或走势图。');
+
+      const response = await fetch('/api/reader-agent/financial-analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: prompt,
+          files: financialContext.materials,
+          stock: financialContext.selectedStock,
+          conversationHistory: buildConversationHistory(messages),
+        }),
+      });
+      const result = await response.json();
+
+      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Financial analysis failed.');
+
+      return result as {
+        answer: string;
+        usage?: {
+          inputTokens?: number;
+          outputTokens?: number;
+          baseBillableTokens?: number;
+          billableTokens?: number;
+          billingMultiplier?: number;
+          cacheReadInputTokens?: number;
+        };
+        archiveEntryCount?: number;
+      };
+    },
+    [financialContext, messages],
+  );
+
+  const loadFinancialHistory = useCallback(async () => {
+    if (!financialContext?.selectedStock) return [];
+
+    const params = new URLSearchParams({
+      name: financialContext.selectedStock.name,
+      code: financialContext.selectedStock.code,
+    });
+    if (financialContext.selectedStock.market) params.set('market', financialContext.selectedStock.market);
+
+    const response = await fetch(`/api/reader-agent/financial-analysis/history?${params.toString()}`);
+    const result = await response.json();
+
+    if (!response.ok) throw new Error(result.message ?? result.error ?? 'Financial history failed.');
+
+    return Array.isArray(result.history) ? (result.history as StoredHistoryTurn[]) : [];
+  }, [financialContext?.selectedStock]);
+
+  useEffect(() => {
+    if (!isFinancialChat || !financialStockKey) return;
+    if (appliedFinancialHistoryKeyRef.current === financialStockKey) return;
+    appliedFinancialHistoryKeyRef.current = financialStockKey;
+
+    let cancelled = false;
+
+    const loadHistory = async () => {
+      const welcomeMessage: ChatMessage = {
+        id: 'financial-welcome',
+        role: 'assistant',
+        content: '财务分析已接入。请先在页面选择股票并上传材料，然后直接在这里提问；本功能需要单独开通，token 使用费按正常分析的 3 倍计算。',
+        contextLabel: 'Financial analysis',
+      };
+
+      try {
+        const history = await loadFinancialHistory();
+        if (cancelled) return;
+
+        setMessages([
+          welcomeMessage,
+          ...history.map((turn, index): ChatMessage => ({
+            id: `financial-history-${turn.createdAt}-${index}`,
+            role: turn.role,
+            content: turn.content,
+            contextLabel: turn.role === 'assistant' ? 'Saved financial analysis' : 'Saved financial question',
+          })),
+        ]);
+      } catch {
+        if (!cancelled) setMessages([welcomeMessage]);
+      }
+    };
+
+    void loadHistory();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [financialStockKey, isFinancialChat, loadFinancialHistory]);
 
   const loadPaperHistory = useCallback(async () => {
     if (!paperId || !paperPdfUrl) return [];
@@ -1082,6 +1202,52 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
     const trimmed = input.trim();
     if (!trimmed || isThinking) return;
 
+    if (isFinancialChat) {
+      const loadingId = crypto.randomUUID();
+      const stockLabel = financialContext?.selectedStock ? `${financialContext.selectedStock.name} ${financialContext.selectedStock.code}` : '未选择股票';
+      const userMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: trimmed,
+        contextLabel: `Financial analysis · ${stockLabel}`,
+      };
+
+      setMessages((current) => [
+        ...current,
+        userMessage,
+        { id: loadingId, role: 'assistant', content: '正在进行财务分析...', contextLabel: 'Financial analysis' },
+      ]);
+      setInput('');
+      setIsThinking(true);
+
+      try {
+        const result = await askFinancialAgent(trimmed);
+        const usage = result.usage;
+        const usageLabel = usage?.billableTokens
+          ? ` · ${usage.billableTokens.toLocaleString()} billable${usage.billingMultiplier ? ` · ${usage.billingMultiplier}x` : ''}${usage.baseBillableTokens ? ` · base ${usage.baseBillableTokens.toLocaleString()}` : ''}`
+          : '';
+        const archiveLabel = result.archiveEntryCount ? ` · archive ${result.archiveEntryCount}` : '';
+
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === loadingId
+              ? { ...message, content: result.answer, contextLabel: `Financial analysis${usageLabel}${archiveLabel}` }
+              : message,
+          ),
+        );
+      } catch (error) {
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === loadingId ? { ...message, content: error instanceof Error ? error.message : 'Financial analysis failed.' } : message,
+          ),
+        );
+      } finally {
+        setIsThinking(false);
+      }
+
+      return;
+    }
+
     const wantsImageReading = hasPaper && isImageReadingPrompt(trimmed);
     const imagePageRange = wantsImageReading ? parseImagePageRange(trimmed, paper?.pages) : null;
     const userMessage: ChatMessage = {
@@ -1234,9 +1400,13 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
           <div className="min-w-0">
             <div className="flex items-baseline gap-2">
               <p className="text-[11px] font-medium uppercase tracking-wide text-primary">{readingModeLabel}</p>
-              <h2 className="text-sm font-semibold">{hasPaper ? 'Paper chat' : 'SCIReader chat'}</h2>
+              <h2 className="text-sm font-semibold">{isFinancialChat ? '财务分析 chat' : hasPaper ? 'Paper chat' : 'SCIReader chat'}</h2>
             </div>
-            <p className="truncate text-[11px] text-muted-foreground">{paper?.title ?? 'Ask without opening a paper'}</p>
+            <p className="truncate text-[11px] text-muted-foreground">
+              {isFinancialChat
+                ? `${financialContext?.selectedStock ? `${financialContext.selectedStock.name} ${financialContext.selectedStock.code}` : '请选择股票'} · ${financialContext?.materials.length ?? 0} 个材料 · 3x token`
+                : paper?.title ?? 'Ask without opening a paper'}
+            </p>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-1">
             {exportableMessages.length ? (
@@ -1500,7 +1670,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
           onKeyDown={(event) => {
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) void sendMessage();
           }}
-          placeholder="Ask about the paper, selected text, methods, or citations..."
+          placeholder={isFinancialChat ? '输入财务分析问题，例如：结合盘口和财报，短线资金是否有异动？' : 'Ask about the paper, selected text, methods, or citations...'}
           value={input}
         />
         <button
@@ -1510,7 +1680,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, initialPosi
           type="button"
         >
           {isThinking ? <Loader2 className="size-4 animate-spin" /> : <CornerDownLeft className="size-4" />}
-          {isThinking ? 'Reader agent is working...' : 'Send to reader agent'}
+          {isThinking ? (isFinancialChat ? 'Financial analyst is working...' : 'Reader agent is working...') : isFinancialChat ? 'Send to financial analyst' : 'Send to reader agent'}
         </button>
       </footer>
       {!isMobileViewport && !isDesktopChatCollapsed && (
