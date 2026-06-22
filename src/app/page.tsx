@@ -84,7 +84,7 @@ const formatArticleDate = (value: string) => {
 
 const HomePage = () => {
   const router = useRouter();
-  const isSignupVerificationEnabled = false;
+  const isSignupVerificationEnabled = true;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const estimatedPaperIdRef = useRef<string | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>('login');

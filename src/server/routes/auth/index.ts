@@ -26,7 +26,9 @@ const credentialsSchema = z.object({
   password: z.string().min(8).max(128),
 });
 
-const signupSchema = credentialsSchema;
+const signupSchema = credentialsSchema.extend({
+  verificationCode: z.string().trim().regex(/^\d{6}$/),
+});
 
 const emailVerificationRequestSchema = z.object({
   email: z.string().trim().email().max(254),
@@ -396,13 +398,12 @@ const app = new Hono()
     }
   })
   .post('/signup', zValidator('json', signupSchema), async (c) => {
-    const { email, password } = c.req.valid('json');
+    const { email, password, verificationCode } = c.req.valid('json');
     const normalizedEmail = email.toLowerCase();
 
     try {
       await ensureAuthTables();
-      // Temporarily disabled while Resend domain verification is pending.
-      // await verifySignupCode(normalizedEmail, verificationCode);
+      await verifySignupCode(normalizedEmail, verificationCode);
 
       const passwordHash = await hashPassword(password);
       const rows = (await getSql()`
