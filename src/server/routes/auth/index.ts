@@ -64,6 +64,22 @@ const removeUploadedPaperSchema = z.object({
   filePath: z.string().min(1),
 });
 
+const stockWatchlistItemSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  code: z.string().trim().min(1).max(24),
+  market: z.enum(['A', 'US', 'HK', 'FX']).optional(),
+});
+
+const stockWatchlistSchema = z.array(stockWatchlistItemSchema).max(80);
+
+const defaultStockWatchlist: z.infer<typeof stockWatchlistSchema> = [
+  { name: '北方华创', code: '002371', market: 'A' },
+  { name: '茂莱光学', code: '688502', market: 'A' },
+  { name: '南大光电', code: '300346', market: 'A' },
+  { name: '中国海油', code: '600938', market: 'A' },
+  { name: '招商轮船', code: '601872', market: 'A' },
+];
+
 const hashPassword = async (password: string) => {
   const salt = randomBytes(16).toString('hex');
   const derivedKey = (await scrypt(password, salt, 64)) as Buffer;
@@ -164,6 +180,7 @@ const verifySignupCode = async (email: string, code: string) => {
 
 const getPreferencePath = (userId: string) => `user-preferences/${userId}.md`;
 const getUploadedPapersPath = (userId: string) => `user-papers/${userId}.md`;
+const getStockWatchlistPath = (userId: string) => `user-watchlists/${userId}.stocks.md`;
 
 const parseJsonBlock = (content: string) => {
   const match = content.match(/```json\n([\s\S]*?)\n```/);
@@ -189,6 +206,29 @@ const saveViewerPreferences = async (userId: string, preferences: z.infer<typeof
   );
 
   return nextPreferences;
+};
+
+const loadStockWatchlist = async (userId: string) => {
+  try {
+    return stockWatchlistSchema.parse(parseJsonBlock(await downloadTextAsAdmin(getStockWatchlistPath(userId))) ?? defaultStockWatchlist);
+  } catch {
+    return defaultStockWatchlist;
+  }
+};
+
+const saveStockWatchlist = async (userId: string, watchlist: z.infer<typeof stockWatchlistSchema>) => {
+  const normalized = watchlist.map((item) => ({
+    name: item.name.trim(),
+    code: item.code.trim().toUpperCase(),
+    market: item.market,
+  }));
+
+  await uploadTextAsAdmin(
+    `# Stock watchlist\n\n\`\`\`json\n${JSON.stringify(normalized, null, 2)}\n\`\`\`\n`,
+    getStockWatchlistPath(userId),
+  );
+
+  return normalized;
 };
 
 export const loadUploadedPapers = async (userId: string) => {
@@ -308,6 +348,18 @@ const app = new Hono()
     if (!user) return c.json({ error: 'Not authenticated.' }, 401);
 
     return c.json({ tokenAccount: await getUserTokenAccount(user.id) });
+  })
+  .get('/stock-watchlist', async (c) => {
+    const user = await getCurrentUser(getCookie(c, sessionCookieName));
+    if (!user) return c.json({ error: 'Not authenticated.' }, 401);
+
+    return c.json({ watchlist: await loadStockWatchlist(user.id) });
+  })
+  .put('/stock-watchlist', zValidator('json', z.object({ watchlist: stockWatchlistSchema })), async (c) => {
+    const user = await getCurrentUser(getCookie(c, sessionCookieName));
+    if (!user) return c.json({ error: 'Not authenticated.' }, 401);
+
+    return c.json({ watchlist: await saveStockWatchlist(user.id, c.req.valid('json').watchlist) });
   })
   .get('/viewer-preferences', async (c) => {
     const user = await getCurrentUser(getCookie(c, sessionCookieName));

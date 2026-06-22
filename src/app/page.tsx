@@ -55,6 +55,18 @@ type FinancialAnalysisResult = {
     billableTokens: number;
   };
 };
+type StockWatchlistItem = {
+  name: string;
+  code: string;
+  market?: 'A' | 'US' | 'HK' | 'FX';
+};
+type StockQuote = StockWatchlistItem & {
+  price: number | null;
+  prevClose: number | null;
+  change: number;
+  changePct: number;
+  currency: string;
+};
 type ViewerPreferences = {
   readingMode?: PaperReadingMode;
   detailedReport?: boolean;
@@ -99,6 +111,23 @@ const formatArticleDate = (value: string) => {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 };
 
+const formatStockWatchlistText = (watchlist: StockWatchlistItem[]) =>
+  watchlist.map((item) => `${item.name},${item.code},${item.market ?? 'A'}`).join('\n');
+
+const parseStockWatchlistText = (text: string): StockWatchlistItem[] =>
+  text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [name = '', code = '', market = 'A'] = line.split(/[,\s，]+/).map((part) => part.trim()).filter(Boolean);
+      const normalizedMarket = ['A', 'US', 'HK', 'FX'].includes(market.toUpperCase()) ? (market.toUpperCase() as StockWatchlistItem['market']) : 'A';
+
+      return { name, code: code.toUpperCase(), market: normalizedMarket };
+    })
+    .filter((item) => item.name && item.code)
+    .slice(0, 80);
+
 const HomePage = () => {
   const router = useRouter();
   const isSignupVerificationEnabled = true;
@@ -141,6 +170,13 @@ const HomePage = () => {
   const [isFinancialAnalyzing, setIsFinancialAnalyzing] = useState(false);
   const [financialMessage, setFinancialMessage] = useState<string | null>(null);
   const [financialResult, setFinancialResult] = useState<FinancialAnalysisResult | null>(null);
+  const [stockWatchlist, setStockWatchlist] = useState<StockWatchlistItem[]>([]);
+  const [stockWatchlistText, setStockWatchlistText] = useState('');
+  const [stockQuotes, setStockQuotes] = useState<StockQuote[]>([]);
+  const [stockQuoteMessage, setStockQuoteMessage] = useState<string | null>(null);
+  const [isStockQuotesLoading, setIsStockQuotesLoading] = useState(false);
+  const [isStockWatchlistEditing, setIsStockWatchlistEditing] = useState(false);
+  const [stockQuotesUpdatedAt, setStockQuotesUpdatedAt] = useState<string | null>(null);
 
   const isLoggedIn = Boolean(authUser);
   const papers = uploadedPapers;
@@ -197,6 +233,72 @@ const HomePage = () => {
     }
   };
 
+  const loadStockWatchlist = async () => {
+    try {
+      const response = await fetch('/api/auth/stock-watchlist');
+      const result = await response.json();
+      const watchlist = response.ok ? result.watchlist as StockWatchlistItem[] : [];
+
+      setStockWatchlist(watchlist);
+      setStockWatchlistText(formatStockWatchlistText(watchlist));
+      if (watchlist.length) void refreshStockQuotes(watchlist);
+    } catch {
+      setStockWatchlist([]);
+      setStockWatchlistText('');
+    }
+  };
+
+  const refreshStockQuotes = async (watchlist = stockWatchlist) => {
+    if (!watchlist.length) return;
+
+    setIsStockQuotesLoading(true);
+    setStockQuoteMessage(null);
+
+    try {
+      const response = await fetch('/api/reader-agent/stock-quotes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ watchlist }),
+      });
+      const result = await response.json();
+
+      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Stock quotes failed.');
+
+      setStockQuotes(result.quotes ?? []);
+      setStockQuotesUpdatedAt(result.updatedAt ?? new Date().toISOString());
+    } catch (error) {
+      setStockQuoteMessage(error instanceof Error ? error.message : 'Stock quotes failed.');
+    } finally {
+      setIsStockQuotesLoading(false);
+    }
+  };
+
+  const saveStockWatchlist = async () => {
+    const watchlist = parseStockWatchlistText(stockWatchlistText);
+    if (!watchlist.length) {
+      setStockQuoteMessage('请至少保留一只自选股。');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/auth/stock-watchlist', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ watchlist }),
+      });
+      const result = await response.json();
+
+      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Could not save watchlist.');
+
+      setStockWatchlist(result.watchlist);
+      setStockWatchlistText(formatStockWatchlistText(result.watchlist));
+      setIsStockWatchlistEditing(false);
+      void refreshStockQuotes(result.watchlist);
+    } catch (error) {
+      setStockQuoteMessage(error instanceof Error ? error.message : 'Could not save watchlist.');
+    }
+  };
+
   const loadTokenAccount = async () => {
     try {
       const response = await fetch('/api/auth/token-account');
@@ -221,6 +323,7 @@ const HomePage = () => {
           await loadViewerPreferences();
           await loadUploadedPapers();
           await loadWritingArticles();
+          await loadStockWatchlist();
         }
       } catch {
         setAuthUser(null);
@@ -231,6 +334,18 @@ const HomePage = () => {
 
     void loadSession();
   }, []);
+
+  useEffect(() => {
+    if (!isLoggedIn || !stockWatchlist.length) return;
+
+    void refreshStockQuotes(stockWatchlist);
+
+    const timer = window.setInterval(() => {
+      void refreshStockQuotes(stockWatchlist);
+    }, 60_000);
+
+    return () => window.clearInterval(timer);
+  }, [isLoggedIn, stockWatchlist]);
 
   useEffect(() => {
     const newestUploadedPaper = uploadedPapers.find((paper) => paper.filePath);
@@ -907,6 +1022,90 @@ const HomePage = () => {
             <p className="text-sm text-muted-foreground">
               上传财报 PDF、走势图、K线和盘口截图，生成面向 A 股交易场景的综合分析。
             </p>
+          </div>
+
+          <div className="mt-5 rounded-2xl border bg-slate-50 p-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-medium">自选股实时价格</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {stockQuotesUpdatedAt ? `最近更新 ${formatArticleDate(stockQuotesUpdatedAt)}` : '进入财务分析后自动刷新；每 60 秒更新一次。'}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="rounded-xl border px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-70"
+                  disabled={isStockQuotesLoading || !stockWatchlist.length}
+                  onClick={() => void refreshStockQuotes()}
+                  type="button"
+                >
+                  {isStockQuotesLoading ? '刷新中...' : '刷新'}
+                </button>
+                <button
+                  className="rounded-xl border px-3 py-2 text-sm font-medium text-slate-600 hover:bg-white"
+                  onClick={() => setIsStockWatchlistEditing((current) => !current)}
+                  type="button"
+                >
+                  {isStockWatchlistEditing ? '收起编辑' : '编辑自选股'}
+                </button>
+              </div>
+            </div>
+
+            {isStockWatchlistEditing ? (
+              <div className="mt-3 grid gap-2">
+                <textarea
+                  className="min-h-32 w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none transition focus:border-primary"
+                  onChange={(event) => setStockWatchlistText(event.target.value)}
+                  placeholder={'每行一只：名称,代码,市场\n例如：北方华创,002371,A\n英伟达,NVDA,US'}
+                  value={stockWatchlistText}
+                />
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+                    onClick={() => void saveStockWatchlist()}
+                    type="button"
+                  >
+                    保存自选股
+                  </button>
+                  <span className="self-center text-xs text-muted-foreground">市场支持 A / US / HK / FX。</span>
+                </div>
+              </div>
+            ) : null}
+
+            {stockQuoteMessage ? <p className="mt-2 text-sm text-red-600">{stockQuoteMessage}</p> : null}
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {stockQuotes.length ? stockQuotes.map((quote) => {
+                const direction = quote.changePct > 0 ? 'up' : quote.changePct < 0 ? 'down' : 'flat';
+                const colorClass = direction === 'up' ? 'text-red-600' : direction === 'down' ? 'text-emerald-600' : 'text-slate-600';
+                const sign = quote.changePct > 0 ? '+' : '';
+
+                return (
+                  <div className="rounded-xl border bg-white p-3" key={`${quote.market}-${quote.code}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">{quote.name}</p>
+                        <p className="text-xs text-muted-foreground">{quote.code} · {quote.market ?? 'A'}</p>
+                      </div>
+                      <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] text-slate-500">{quote.currency}</span>
+                    </div>
+                    <p className={`mt-3 text-2xl font-semibold ${colorClass}`}>
+                      {quote.price === null ? '--' : `${quote.currency}${quote.price.toFixed(2)}`}
+                    </p>
+                    <p className={`mt-1 text-sm font-medium ${colorClass}`}>
+                      {sign}{quote.change.toFixed(2)} / {sign}{quote.changePct.toFixed(2)}%
+                    </p>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      昨收 {quote.prevClose === null ? '--' : `${quote.currency}${quote.prevClose.toFixed(2)}`}
+                    </p>
+                  </div>
+                );
+              }) : (
+                <div className="rounded-xl border bg-white p-3 text-sm text-muted-foreground sm:col-span-2 xl:col-span-4">
+                  {isLoggedIn ? '暂无行情。请刷新或编辑自选股列表。' : '登录后显示你的自选股实时价格。'}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">

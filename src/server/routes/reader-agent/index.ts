@@ -184,6 +184,16 @@ const financialAnalysisRequestSchema = z.object({
   model: z.string().optional(),
 });
 
+const stockWatchlistItemSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  code: z.string().trim().min(1).max(24),
+  market: z.enum(['A', 'US', 'HK', 'FX']).optional(),
+});
+
+const stockQuotesRequestSchema = z.object({
+  watchlist: z.array(stockWatchlistItemSchema).min(1).max(80),
+});
+
 const tokenEstimateRequestSchema = z.object({
   paperId: z.string().min(1),
   pdfUrl: z.string().min(1),
@@ -1922,6 +1932,106 @@ const generateImage = async (request: z.infer<typeof imageRequestSchema>) => {
     outputTokens: response.usage.output_tokens,
     ...image,
   };
+};
+
+const inferStockMarket = (code: string, market?: 'A' | 'US' | 'HK' | 'FX') => {
+  if (market) return market;
+  if (code.toLowerCase().startsWith('hf_')) return 'FX';
+  if (/^\d{5}$/.test(code)) return 'HK';
+  if (/^[a-z]+$/i.test(code)) return 'US';
+  return 'A';
+};
+
+const getTencentQuotePrefix = (code: string, market?: 'A' | 'US' | 'HK' | 'FX') => {
+  const normalizedCode = code.trim().toUpperCase().replace(/[^A-Z0-9_.]/g, '');
+  const normalizedMarket = inferStockMarket(normalizedCode, market);
+
+  if (normalizedMarket === 'US') return `us${normalizedCode}`;
+  if (normalizedMarket === 'HK') return `hk${normalizedCode}`;
+  if (normalizedMarket === 'FX') return normalizedCode.toLowerCase().startsWith('hf_') ? normalizedCode : `hf_${normalizedCode}`;
+  return normalizedCode.startsWith('60') || normalizedCode.startsWith('68') ? `sh${normalizedCode}` : `sz${normalizedCode}`;
+};
+
+const fetchWithTimeout = async (url: string, timeoutMs = 12000) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+const fetchTencentQuoteText = async (query: string) => {
+  const response = await fetchWithTimeout(`https://qt.gtimg.cn/q=${query}`);
+  if (!response.ok) throw new Error(`Tencent quote request failed: ${response.status}`);
+  const buffer = await response.arrayBuffer();
+
+  return new TextDecoder('gbk').decode(buffer);
+};
+
+const fetchStockQuotes = async (watchlist: z.infer<typeof stockWatchlistItemSchema>[]) => {
+  const requests = watchlist.map((stock) => ({
+    stock,
+    prefix: getTencentQuotePrefix(stock.code, stock.market),
+  }));
+  const query = requests.map((request) => request.prefix).join(',');
+  const text = await fetchTencentQuoteText(query);
+  const lineByPrefix = new Map<string, string>();
+
+  for (const line of text.split(';')) {
+    const match = line.match(/^v_([^=]+)=/);
+    if (match && line.includes('~')) lineByPrefix.set(match[1].toLowerCase(), line);
+  }
+
+  const quotes = [];
+
+  for (const request of requests) {
+    const { stock, prefix } = request;
+    const line = lineByPrefix.get(prefix.toLowerCase());
+    const market = inferStockMarket(stock.code, stock.market);
+
+    if (!line) {
+      quotes.push({
+        name: stock.name,
+        code: stock.code.toUpperCase(),
+        market,
+        price: null,
+        prevClose: null,
+        change: 0,
+        changePct: 0,
+        currency: market === 'US' ? '$' : market === 'HK' ? 'HK$' : '¥',
+      });
+      continue;
+    }
+
+    const parts = line.split('~');
+    const rawPrice = parts[3];
+    const rawPrevClose = parts[4] || rawPrice;
+    const price = Number.parseFloat(rawPrice);
+    const prevClose = Number.parseFloat(rawPrevClose);
+    let changePct = Number.parseFloat(parts[32]);
+
+    if (!Number.isFinite(changePct) && Number.isFinite(price) && Number.isFinite(prevClose) && prevClose > 0) {
+      changePct = ((price - prevClose) / prevClose) * 100;
+    }
+
+    const change = Number.isFinite(price) && Number.isFinite(prevClose) ? price - prevClose : 0;
+
+    quotes.push({
+      name: stock.name || parts[1] || stock.code,
+      code: stock.code.toUpperCase(),
+      market,
+      price: Number.isFinite(price) ? price : null,
+      prevClose: Number.isFinite(prevClose) ? prevClose : null,
+      change,
+      changePct: Number.isFinite(changePct) ? changePct : 0,
+      currency: market === 'US' ? '$' : market === 'HK' ? 'HK$' : '¥',
+    });
+  }
+
+  return quotes;
 };
 
 const financialAnalystSystemPrompt = `你是一个在北京金融界头部证券公司上班的股票交易员，你对A股市场的潜规则和各种习惯非常熟悉，你了解国家队的操作风格，你也熟悉游资和量化交易公司的各种套路。
@@ -4947,6 +5057,23 @@ const app = new Hono()
 
       console.error('[reader-agent:financial-analysis] request failed', { message });
       return c.json({ error: 'Financial analysis failed.', message }, status);
+    }
+  })
+  .post('/stock-quotes', zValidator('json', stockQuotesRequestSchema), async (c) => {
+    const request = c.req.valid('json');
+
+    try {
+      const user = await getCurrentUser(getCookie(c, sessionCookieName));
+      if (!user) return c.json({ error: 'Not authenticated.' }, 401);
+
+      const quotes = await fetchStockQuotes(request.watchlist);
+
+      return c.json({ quotes, updatedAt: new Date().toISOString() });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Stock quotes failed.';
+
+      console.error('[reader-agent:stock-quotes] request failed', { message });
+      return c.json({ error: 'Stock quotes failed.', message }, 500);
     }
   })
   .post('/summarize', zValidator('json', readerRequestSchema), async (c) => {
