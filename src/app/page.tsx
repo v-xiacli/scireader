@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { ArrowRight, BarChart3, FileText, Loader2, MessageSquareText, PenLine, Trash2, Upload, WalletCards } from 'lucide-react';
+import { ArrowRight, BarChart3, FileText, Loader2, MessageSquareText, PenLine, Trash2, WalletCards } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
