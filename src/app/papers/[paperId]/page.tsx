@@ -108,10 +108,10 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
       ) : (
         <div className="flex h-full items-center justify-center px-6">
           <div className="max-w-md rounded-2xl border bg-white p-6 text-center shadow-sm">
-            <h1 className="text-xl font-semibold">请从已上传论文打开</h1>
-            <p className="mt-2 text-sm text-muted-foreground">默认样例论文已关闭。请回到论文库，打开你上传后的对应论文。</p>
+            <h1 className="text-xl font-semibold">請從已上傳論文打開</h1>
+            <p className="mt-2 text-sm text-muted-foreground">預設樣例論文已關閉。請回到論文庫，打開你上傳後的對應論文。</p>
             <Link className="mt-4 inline-flex rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground" href="/">
-              返回论文库
+              返回論文庫
             </Link>
           </div>
         </div>

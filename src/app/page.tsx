@@ -450,12 +450,12 @@ const HomePage = () => {
     }
 
     if (!writingTopic.trim()) {
-      setWritingMessage('请输入写作题目或方向。');
+      setWritingMessage('請輸入寫作題目或方向。');
       return;
     }
 
     if (!selectedWritingMaterialCount) {
-      setWritingMessage('请选择至少一篇已读文件或已生成文章。');
+      setWritingMessage('請選擇至少一篇已讀文件或已生成文章。');
       return;
     }
 
@@ -491,7 +491,7 @@ const HomePage = () => {
       if (!response.ok) {
         const message = result.message ?? result.error ?? 'Writing mode failed.';
         setWritingResult({
-          draft: `## 写作模式暂时无法生成\n\n${message}`,
+          draft: `## 寫作模式暫時無法生成\n\n${message}`,
           references: [],
           storagePath: '',
           savedAt: new Date().toISOString(),
@@ -502,10 +502,10 @@ const HomePage = () => {
       setWritingResult(result);
       if (result.article) setWritingArticles((current) => [result.article, ...current.filter((article) => article.storagePath !== result.article.storagePath)]);
       if (result.tokenAccount) setTokenAccount(result.tokenAccount);
-      setWritingMessage(result.processing ? '正在自动生成缺失的读书笔记，完成后请再次生成 Introduction。' : `已生成并保存：${result.storagePath}`);
+      setWritingMessage(result.processing ? '正在自動生成缺失的讀書筆記，完成後請再次生成 Introduction。' : `已生成並保存：${result.storagePath}`);
     } catch (error) {
       setWritingResult((current) => current ?? {
-        draft: `## 写作模式暂时无法生成\n\n${error instanceof Error ? error.message : 'Writing mode failed.'}`,
+        draft: `## 寫作模式暫時無法生成\n\n${error instanceof Error ? error.message : 'Writing mode failed.'}`,
         references: [],
         storagePath: '',
         savedAt: new Date().toISOString(),
@@ -558,7 +558,7 @@ const HomePage = () => {
       }
       if (result.tokenAccount) setTokenAccount(result.tokenAccount);
       setWritingFollowUp('');
-      setWritingMessage(result.needsSupplementalReading ? result.draft : `已更新并保存：${result.storagePath}`);
+      setWritingMessage(result.needsSupplementalReading ? result.draft : `已更新並保存：${result.storagePath}`);
     } catch (error) {
       setWritingMessage(error instanceof Error ? error.message : 'Writing follow-up failed.');
     } finally {
@@ -594,7 +594,7 @@ const HomePage = () => {
       setWritingSelectedArticlePaths((current) =>
         current.includes(article.storagePath) ? current : [...current, article.storagePath],
       );
-      setWritingMessage(`已打开历史写作：${article.topic}`);
+      setWritingMessage(`已打開歷史寫作：${article.topic}`);
     } catch (error) {
       setWritingMessage(error instanceof Error ? error.message : 'Could not open article.');
     } finally {
@@ -794,9 +794,9 @@ const HomePage = () => {
                 <BarChart3 className="size-6" />
               </div>
               <div>
-                <h2 className="text-xl font-semibold">财务分析</h2>
+                <h2 className="text-xl font-semibold">財務分析</h2>
                 <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-                  单独页面，支持上传多个财报 PDF、K线图、盘口截图和走势图图片，并以对话方式分析。
+                  單獨頁面，支援上傳多個財報 PDF、K 線圖、盤口截圖和走勢圖圖片，並以對話方式分析。
                 </p>
               </div>
             </div>
@@ -804,7 +804,7 @@ const HomePage = () => {
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
               href="/financial-analysis"
             >
-              进入财务分析
+              進入財務分析
               <ArrowRight className="size-4" />
             </Link>
           </div>
@@ -814,27 +814,27 @@ const HomePage = () => {
           <div className="flex flex-col gap-2">
             <div className="flex items-center gap-2">
               <PenLine className="size-5 text-primary" />
-              <h2 className="text-xl font-semibold">写作模式</h2>
+              <h2 className="text-xl font-semibold">寫作模式</h2>
             </div>
             <p className="text-sm text-muted-foreground">
-              基于已保存的读书笔记组织 Introduction，并按首次出现顺序生成引用编号；写作模式按 1.5 倍 token 计费。
+              基於已保存的讀書筆記組織 Introduction，並按首次出現順序生成引用編號；寫作模式按 1.5 倍 token 計費。
             </p>
           </div>
 
           <div className="mt-5 grid gap-4">
             <div className="space-y-4">
               <label className="block">
-                <span className="text-sm font-medium">写作题目或方向</span>
+                <span className="text-sm font-medium">寫作題目或方向</span>
                 <textarea
                   className="mt-2 min-h-24 w-full rounded-xl border px-4 py-3 text-sm outline-none transition focus:border-primary"
                   onChange={(event) => setWritingTopic(event.target.value)}
-                  placeholder="例如：面向复杂环境感知的多模态融合方法研究"
+                  placeholder="例如：面向複雜環境感知的多模態融合方法研究"
                   value={writingTopic}
                 />
               </label>
 
               <div>
-                <p className="text-sm font-medium">输出语言</p>
+                <p className="text-sm font-medium">輸出語言</p>
                 <div className="mt-2 inline-flex rounded-xl border p-1">
                   {([
                     ['chinese', '中文'],
@@ -853,7 +853,7 @@ const HomePage = () => {
               </div>
 
               <div>
-                <p className="text-sm font-medium">已选素材</p>
+                <p className="text-sm font-medium">已選素材</p>
                 <div className="mt-2 min-h-20 rounded-xl border p-3">
                   {selectedWritingMaterialCount ? (
                     <div className="flex flex-wrap gap-2">
@@ -862,7 +862,7 @@ const HomePage = () => {
                           className="max-w-full rounded-lg border bg-slate-50 px-3 py-2 text-left text-sm transition hover:border-primary hover:bg-white"
                           key={getWritingPaperKey(paper)}
                           onClick={() => toggleWritingPaper(paper)}
-                          title="取消选择"
+                          title="取消選擇"
                           type="button"
                         >
                           <span className="block truncate font-medium">{paper.title}</span>
@@ -876,7 +876,7 @@ const HomePage = () => {
                           className="max-w-full rounded-lg border bg-indigo-50 px-3 py-2 text-left text-sm transition hover:border-primary hover:bg-white"
                           key={article.storagePath}
                           onClick={() => toggleWritingArticle(article)}
-                          title="取消选择"
+                          title="取消選擇"
                           type="button"
                         >
                           <span className="block truncate font-medium">{article.topic}</span>
@@ -887,7 +887,7 @@ const HomePage = () => {
                       ))}
                     </div>
                   ) : (
-                    <p className="text-sm text-muted-foreground">请在下面的 Your papers 或 Your articles 列表里勾选要用于写作的素材。</p>
+                    <p className="text-sm text-muted-foreground">請在下面的 Your papers 或 Your articles 列表裡勾選要用於寫作的素材。</p>
                   )}
                 </div>
               </div>
@@ -922,7 +922,7 @@ const HomePage = () => {
                 <input
                   className="min-w-0 flex-1 rounded-xl border px-4 py-2 text-sm outline-none transition focus:border-primary"
                   onChange={(event) => setWritingFollowUp(event.target.value)}
-                  placeholder="继续追问或提出修改要求；需要补读时会先判断，不会自动重读"
+                  placeholder="繼續追問或提出修改要求；需要補讀時會先判斷，不會自動重讀"
                   value={writingFollowUp}
                 />
                 <button
@@ -932,7 +932,7 @@ const HomePage = () => {
                   type="button"
                 >
                   {isWritingFollowUp ? <Loader2 className="size-4 animate-spin" /> : null}
-                  {isWritingFollowUp ? '处理中...' : '追问/修改'}
+                  {isWritingFollowUp ? '處理中...' : '追問/修改'}
                 </button>
               </div> : null}
             </div>
@@ -943,7 +943,7 @@ const HomePage = () => {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-xl font-semibold">Your articles</h2>
-              <p className="mt-1 text-sm text-muted-foreground">写作模式生成的 Introduction 和修改稿会保存在这里。</p>
+              <p className="mt-1 text-sm text-muted-foreground">寫作模式生成的 Introduction 和修改稿會保存在這裡。</p>
             </div>
           </div>
 
@@ -958,7 +958,7 @@ const HomePage = () => {
                 >
                   <label
                     className="flex shrink-0 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm transition hover:border-primary hover:bg-white"
-                    title={isSelectedForWriting ? '取消加入写作模式' : '加入写作模式'}
+                    title={isSelectedForWriting ? '取消加入寫作模式' : '加入寫作模式'}
                   >
                     <input
                       checked={isSelectedForWriting}
@@ -966,7 +966,7 @@ const HomePage = () => {
                       onChange={() => toggleWritingArticle(article)}
                       type="checkbox"
                     />
-                    <span className="hidden sm:inline">写作</span>
+                    <span className="hidden sm:inline">寫作</span>
                   </label>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -1008,7 +1008,7 @@ const HomePage = () => {
               );
             }) : (
               <div className="rounded-2xl border bg-slate-50 p-4 text-sm text-muted-foreground">
-                还没有写作结果。生成 Introduction 后会自动出现在这里。
+                還沒有寫作結果。生成 Introduction 後會自動出現在這裡。
               </div>
             )}
           </div>
@@ -1096,7 +1096,7 @@ const HomePage = () => {
                     canSelectForWriting ? 'cursor-pointer hover:border-primary hover:bg-white' : 'cursor-not-allowed bg-slate-50 text-slate-400'
                   }`}
                   onClick={(event) => event.stopPropagation()}
-                  title={canSelectForWriting ? (isSelectedForWriting ? '取消加入写作模式' : '加入写作模式') : '登录并上传论文后可加入写作模式'}
+                  title={canSelectForWriting ? (isSelectedForWriting ? '取消加入寫作模式' : '加入寫作模式') : '登入並上傳論文後可加入寫作模式'}
                 >
                   <input
                     checked={isSelectedForWriting}
@@ -1107,7 +1107,7 @@ const HomePage = () => {
                     }}
                     type="checkbox"
                   />
-                  <span className="hidden sm:inline">写作</span>
+                  <span className="hidden sm:inline">寫作</span>
                 </label>
               );
               const content = (
