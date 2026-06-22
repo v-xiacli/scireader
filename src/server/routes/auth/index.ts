@@ -73,11 +73,11 @@ const stockWatchlistItemSchema = z.object({
 const stockWatchlistSchema = z.array(stockWatchlistItemSchema).max(80);
 
 const defaultStockWatchlist: z.infer<typeof stockWatchlistSchema> = [
-  { name: '北方华创', code: '002371', market: 'A' },
-  { name: '茂莱光学', code: '688502', market: 'A' },
-  { name: '南大光电', code: '300346', market: 'A' },
-  { name: '中国海油', code: '600938', market: 'A' },
-  { name: '招商轮船', code: '601872', market: 'A' },
+  { name: '北方華創', code: '002371', market: 'A' },
+  { name: '茂萊光學', code: '688502', market: 'A' },
+  { name: '南大光電', code: '300346', market: 'A' },
+  { name: '中國海油', code: '600938', market: 'A' },
+  { name: '招商輪船', code: '601872', market: 'A' },
 ];
 
 const hashPassword = async (password: string) => {
