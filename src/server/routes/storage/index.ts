@@ -45,7 +45,8 @@ const app = new Hono()
       if (!file) return c.json({ error: 'No file provided for upload.' }, 400);
       if (!clientFilePath) return c.json({ error: 'No filePath provided.' }, 400);
       if (clientFilePath.includes('..')) return c.json({ error: 'Invalid file path provided.' }, 400);
-      if (file.type !== 'application/pdf') return c.json({ error: 'Only PDF uploads are supported.' }, 400);
+      const isSupportedUpload = file.type === 'application/pdf' || file.type.startsWith('image/');
+      if (!isSupportedUpload) return c.json({ error: 'Only PDF and image uploads are supported.' }, 400);
 
       const user = await getCurrentUser(getCookie(c, sessionCookieName));
       if (!user) return c.json({ error: 'Not authenticated.' }, 401);

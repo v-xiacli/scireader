@@ -171,6 +171,19 @@ const imageRequestSchema = z.object({
   model: z.string().optional(),
 });
 
+const financialAnalysisFileSchema = z.object({
+  name: z.string().min(1).max(240),
+  storagePath: z.string().min(1),
+  contentType: z.string().min(1),
+  size: z.number().nonnegative().optional(),
+});
+
+const financialAnalysisRequestSchema = z.object({
+  topic: z.string().trim().max(1000).optional(),
+  files: z.array(financialAnalysisFileSchema).min(1).max(12),
+  model: z.string().optional(),
+});
+
 const tokenEstimateRequestSchema = z.object({
   paperId: z.string().min(1),
   pdfUrl: z.string().min(1),
@@ -416,6 +429,12 @@ const resolveUploadedPdfStoragePath = (pdfUrl?: string) => {
 };
 
 const isPendingUserUpload = (user: { id: string; email: string }, storagePath: string) => storagePath.startsWith(getUserStoragePrefix({ id: user.id, name: user.email }));
+
+const assertUserStorageAccess = (user: { id: string; email: string }, storagePath: string) => {
+  if (!storagePath || storagePath.includes('..') || !isPendingUserUpload(user, storagePath)) {
+    throw new Error('You do not have access to this file.');
+  }
+};
 
 const requirePaperAccess = async (c: Context, pdfUrl?: string): Promise<PaperAccess> => {
   const user = await getCurrentUser(getCookie(c, sessionCookieName));
@@ -1902,6 +1921,98 @@ const generateImage = async (request: z.infer<typeof imageRequestSchema>) => {
     inputTokens: response.usage.input_tokens,
     outputTokens: response.usage.output_tokens,
     ...image,
+  };
+};
+
+const financialAnalystSystemPrompt = `你是一个在北京金融界头部证券公司上班的股票交易员，你对A股市场的潜规则和各种习惯非常熟悉，你了解国家队的操作风格，你也熟悉游资和量化交易公司的各种套路。
+
+你正在帮助用户分析财务报告、走势图、K线、盘口截图和相关材料。请保持交易员视角，但必须谨慎：不要编造不存在的数据，不要承诺收益，不要给出确定性买卖指令。输出必须包含“风险提示：以下仅为研究分析，不构成投资建议”。`;
+
+const buildFinancialAnalysis = async (user: { id: string; email: string }, request: z.infer<typeof financialAnalysisRequestSchema>) => {
+  const modelSelection = selectExpensiveReaderModel();
+  const client = createAnthropicClient(modelSelection.target);
+  const content: ReaderMessageContent = [
+    {
+      type: 'text',
+      text: `分析主题或问题：${request.topic?.trim() || '请综合分析上传的财务报告、走势图、K线和盘口材料。'}
+
+请按以下结构输出中文分析：
+1. 核心结论：用交易员语言给出多空判断、确定性强弱、关键触发条件。
+2. 基本面：收入、利润、现金流、负债、经营质量、估值或行业对比，明确哪些来自材料、哪些是推断。
+3. 技术面和盘口：趋势、量价、K线形态、支撑压力、筹码/资金行为、可能的量化或游资痕迹。
+4. A股语境：结合国家队、机构、游资、量化、政策窗口、财报披露期等常见交易习惯分析，但不要阴谋化。
+5. 风险和反证：列出可能推翻判断的信号。
+6. 后续观察清单：给出需要继续跟踪的指标、价量条件和公告事件。
+
+风险提示：以下仅为研究分析，不构成投资建议。`,
+    },
+  ];
+  const fileSummaries: Array<{ name: string; contentType: string; storagePath: string; extractedChars?: number }> = [];
+
+  for (const file of request.files) {
+    assertUserStorageAccess(user, file.storagePath);
+
+    if (file.contentType === 'application/pdf') {
+      const tempPdf = await materializePdfToTempFile(file.storagePath);
+
+      try {
+        const extracted = await extractPdfText(tempPdf.localPdfPath);
+        const text = extracted.text.slice(0, 80_000);
+        content.push({
+          type: 'text',
+          text: `\n\n[PDF材料] ${file.name}\nStorage path: ${file.storagePath}\nExtracted text:\n${text || '未能提取到可读文本。'}`,
+          cache_control: text.length >= MIN_PROMPT_CACHE_TEXT_CHARS ? { type: 'ephemeral' } : undefined,
+        } as ReaderMessageContentBlock);
+        fileSummaries.push({ name: file.name, contentType: file.contentType, storagePath: file.storagePath, extractedChars: extracted.extractedChars });
+      } finally {
+        await fs.rm(tempPdf.outputDir, { recursive: true, force: true });
+      }
+
+      continue;
+    }
+
+    if (file.contentType.startsWith('image/')) {
+      const { buffer, contentType } = await downloadFileAsAdmin(file.storagePath);
+      const mediaType = contentType === 'image/jpg' ? 'image/jpeg' : contentType;
+
+      if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(mediaType)) {
+        content.push({ type: 'text', text: `\n\n[图片材料] ${file.name}\n该图片格式 ${mediaType} 暂不支持直接视觉分析。` });
+        fileSummaries.push({ name: file.name, contentType: mediaType, storagePath: file.storagePath });
+        continue;
+      }
+
+      content.push({ type: 'text', text: `\n\n[图片材料] ${file.name}\nStorage path: ${file.storagePath}` });
+      content.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: mediaType,
+          data: buffer.toString('base64'),
+        },
+      } as ReaderMessageContentBlock);
+      fileSummaries.push({ name: file.name, contentType: mediaType, storagePath: file.storagePath });
+    }
+  }
+
+  const response = await client.beta.messages.create({
+    model: request.model?.trim() || modelSelection.model,
+    max_tokens: 6000,
+    system: financialAnalystSystemPrompt,
+    messages: [{ role: 'user', content }],
+  });
+  const usageWithCache = response.usage as typeof response.usage & {
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
+
+  return {
+    answer: textFromResponse(response),
+    model: request.model?.trim() || modelSelection.model,
+    files: fileSummaries,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+    cacheCreationInputTokens: usageWithCache.cache_creation_input_tokens ?? 0,
+    cacheReadInputTokens: usageWithCache.cache_read_input_tokens ?? 0,
   };
 };
 
@@ -4788,6 +4899,54 @@ const app = new Hono()
       const status = message === 'Not authenticated.' ? 401 : isInsufficientTokenBalanceError(error) ? 402 : 500;
 
       return c.json({ error: 'Image generation failed.', message }, status);
+    }
+  })
+  .post('/financial-analysis', zValidator('json', financialAnalysisRequestSchema), async (c) => {
+    const request = c.req.valid('json');
+
+    try {
+      const user = await getCurrentUser(getCookie(c, sessionCookieName));
+      if (!user) return c.json({ error: 'Not authenticated.' }, 401);
+
+      await ensurePositiveTokenBalance(user.id);
+
+      const result = await buildFinancialAnalysis(user, request);
+      const billableTokens = getUsageBillableTokens(result, result.model);
+      const tokenAccount = await recordUserTokenUsage({
+        userId: user.id,
+        paperId: `financial:${Date.now()}`,
+        action: 'financial:analysis',
+        model: result.model,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        billableTokens,
+        metadata: {
+          topic: request.topic,
+          files: result.files.map((file) => ({ name: file.name, contentType: file.contentType, storagePath: file.storagePath })),
+          cacheCreationInputTokens: result.cacheCreationInputTokens,
+          cacheReadInputTokens: result.cacheReadInputTokens,
+        },
+      });
+
+      return c.json({
+        answer: result.answer,
+        model: result.model,
+        files: result.files,
+        usage: {
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          cacheCreationInputTokens: result.cacheCreationInputTokens,
+          cacheReadInputTokens: result.cacheReadInputTokens,
+          billableTokens,
+        },
+        tokenAccount,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Financial analysis failed.';
+      const status = message === 'Not authenticated.' ? 401 : isInsufficientTokenBalanceError(error) ? 402 : 500;
+
+      console.error('[reader-agent:financial-analysis] request failed', { message });
+      return c.json({ error: 'Financial analysis failed.', message }, status);
     }
   })
   .post('/summarize', zValidator('json', readerRequestSchema), async (c) => {

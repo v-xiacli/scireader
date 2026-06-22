@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { ArrowRight, FileText, Loader2, MessageSquareText, PenLine, Trash2, WalletCards } from 'lucide-react';
+import { ArrowRight, BarChart3, FileText, Loader2, MessageSquareText, PenLine, Trash2, Upload, WalletCards } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
@@ -37,6 +37,23 @@ type WritingArticle = {
   kind: 'introduction' | 'follow-up';
   selectedPaperCount: number;
   billableTokens?: number;
+};
+type FinancialMaterial = {
+  name: string;
+  storagePath: string;
+  contentType: string;
+  size: number;
+};
+type FinancialAnalysisResult = {
+  answer: string;
+  model: string;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheCreationInputTokens?: number;
+    cacheReadInputTokens?: number;
+    billableTokens: number;
+  };
 };
 type ViewerPreferences = {
   readingMode?: PaperReadingMode;
@@ -86,6 +103,7 @@ const HomePage = () => {
   const router = useRouter();
   const isSignupVerificationEnabled = true;
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const financialInputRef = useRef<HTMLInputElement>(null);
   const estimatedPaperIdRef = useRef<string | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
@@ -117,6 +135,12 @@ const HomePage = () => {
   const [writingSelectedArticlePaths, setWritingSelectedArticlePaths] = useState<string[]>([]);
   const [deletingWritingPath, setDeletingWritingPath] = useState<string | null>(null);
   const [loadingWritingPath, setLoadingWritingPath] = useState<string | null>(null);
+  const [financialTopic, setFinancialTopic] = useState('');
+  const [financialMaterials, setFinancialMaterials] = useState<FinancialMaterial[]>([]);
+  const [isFinancialUploading, setIsFinancialUploading] = useState(false);
+  const [isFinancialAnalyzing, setIsFinancialAnalyzing] = useState(false);
+  const [financialMessage, setFinancialMessage] = useState<string | null>(null);
+  const [financialResult, setFinancialResult] = useState<FinancialAnalysisResult | null>(null);
 
   const isLoggedIn = Boolean(authUser);
   const papers = uploadedPapers;
@@ -400,6 +424,93 @@ const HomePage = () => {
       setUploadMessage(error instanceof Error ? error.message : 'Upload failed.');
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleFinancialUpload = async (files: FileList | File[]) => {
+    const nextFiles = Array.from(files);
+    if (!nextFiles.length) return;
+    if (!isLoggedIn) {
+      setFinancialMessage('Please log in before uploading financial materials.');
+      return;
+    }
+
+    const unsupported = nextFiles.find((file) => file.type !== 'application/pdf' && !file.type.startsWith('image/'));
+    if (unsupported) {
+      setFinancialMessage(`Unsupported file type: ${unsupported.name}`);
+      return;
+    }
+
+    setIsFinancialUploading(true);
+    setFinancialMessage(null);
+
+    try {
+      const uploaded: FinancialMaterial[] = [];
+
+      for (const file of nextFiles) {
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '-');
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('filePath', `financial/${Date.now()}-${safeName}`);
+
+        const response = await fetch('/api/storage/upload/private', {
+          method: 'POST',
+          body: formData,
+        });
+        const result = await response.json();
+
+        if (!response.ok) throw new Error(result.message ?? result.error ?? `Upload failed: ${file.name}`);
+
+        uploaded.push({
+          name: file.name,
+          storagePath: result.filePath,
+          contentType: file.type || 'application/octet-stream',
+          size: file.size,
+        });
+      }
+
+      setFinancialMaterials((current) => [...current, ...uploaded].slice(-12));
+      setFinancialMessage(`已上传 ${uploaded.length} 个财务材料。`);
+    } catch (error) {
+      setFinancialMessage(error instanceof Error ? error.message : 'Financial material upload failed.');
+    } finally {
+      setIsFinancialUploading(false);
+    }
+  };
+
+  const handleFinancialAnalysis = async () => {
+    if (!isLoggedIn) {
+      setFinancialMessage('Please log in before using financial analysis.');
+      return;
+    }
+    if (!financialMaterials.length) {
+      setFinancialMessage('请先上传财务报告、走势图或盘口图片。');
+      return;
+    }
+
+    setIsFinancialAnalyzing(true);
+    setFinancialMessage(null);
+
+    try {
+      const response = await fetch('/api/reader-agent/financial-analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: financialTopic,
+          files: financialMaterials,
+        }),
+      });
+      const result = await response.json();
+
+      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Financial analysis failed.');
+
+      setFinancialResult({ answer: result.answer, model: result.model, usage: result.usage });
+      if (result.tokenAccount) setTokenAccount(result.tokenAccount);
+      setFinancialMessage('财务分析已生成。');
+    } catch (error) {
+      setFinancialMessage(error instanceof Error ? error.message : 'Financial analysis failed.');
+    } finally {
+      setIsFinancialAnalyzing(false);
     }
   };
 
@@ -786,6 +897,129 @@ const HomePage = () => {
             <p className="mt-2 text-sm text-muted-foreground">Check your credits before using AI features.</p>
           </div>
         </div>
+
+        <section className="rounded-3xl bg-white p-4 shadow-sm sm:p-6">
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <BarChart3 className="size-5 text-primary" />
+              <h2 className="text-xl font-semibold">财务分析</h2>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              上传财报 PDF、走势图、K线和盘口截图，生成面向 A 股交易场景的综合分析。
+            </p>
+          </div>
+
+          <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
+            <div className="space-y-4">
+              <label className="block">
+                <span className="text-sm font-medium">分析主题或问题</span>
+                <textarea
+                  className="mt-2 min-h-24 w-full rounded-xl border px-4 py-3 text-sm outline-none transition focus:border-primary"
+                  onChange={(event) => setFinancialTopic(event.target.value)}
+                  placeholder="例如：结合财报和盘口截图，判断这只票短线是否有资金异动，以及中线基本面风险。"
+                  value={financialTopic}
+                />
+              </label>
+
+              <div>
+                <input
+                  accept="application/pdf,image/*"
+                  className="hidden"
+                  disabled={isFinancialUploading || !isLoggedIn}
+                  multiple
+                  onChange={(event) => {
+                    const files = event.target.files;
+                    if (files) void handleFinancialUpload(files);
+                    event.target.value = '';
+                  }}
+                  ref={financialInputRef}
+                  type="file"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
+                    disabled={isFinancialUploading || !isLoggedIn}
+                    onClick={() => {
+                      if (!isLoggedIn) {
+                        setFinancialMessage('Please log in before uploading financial materials.');
+                        return;
+                      }
+                      financialInputRef.current?.click();
+                    }}
+                    type="button"
+                  >
+                    {isFinancialUploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+                    {isFinancialUploading ? 'Uploading...' : 'Upload reports/images'}
+                  </button>
+                  <button
+                    className="inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-70"
+                    disabled={isFinancialAnalyzing || !isLoggedIn || !financialMaterials.length}
+                    onClick={() => void handleFinancialAnalysis()}
+                    type="button"
+                  >
+                    {isFinancialAnalyzing ? <Loader2 className="size-4 animate-spin" /> : <BarChart3 className="size-4" />}
+                    {isFinancialAnalyzing ? 'Analyzing...' : 'Generate analysis'}
+                  </button>
+                  {financialMaterials.length ? (
+                    <button
+                      className="rounded-xl border px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                      onClick={() => {
+                        setFinancialMaterials([]);
+                        setFinancialResult(null);
+                      }}
+                      type="button"
+                    >
+                      Clear
+                    </button>
+                  ) : null}
+                </div>
+                {financialMessage ? <p className="mt-2 text-sm text-muted-foreground">{financialMessage}</p> : null}
+              </div>
+
+              <div className="rounded-2xl border bg-slate-50 p-3">
+                <p className="text-sm font-medium">已上传材料</p>
+                <div className="mt-3 grid gap-2">
+                  {financialMaterials.length ? financialMaterials.map((file) => (
+                    <div className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2 text-sm" key={file.storagePath}>
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{file.name}</p>
+                        <p className="text-xs text-muted-foreground">{file.contentType} · {(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                      </div>
+                      <button
+                        className="rounded-lg border p-2 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                        onClick={() => setFinancialMaterials((current) => current.filter((item) => item.storagePath !== file.storagePath))}
+                        title="Remove material"
+                        type="button"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    </div>
+                  )) : (
+                    <p className="text-sm text-muted-foreground">还没有上传材料。支持多个 PDF、K线图、盘口截图和走势图图片。</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border bg-slate-50 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="font-semibold">分析结果</h3>
+                {financialResult?.usage ? (
+                  <span className="text-xs text-muted-foreground">{financialResult.usage.billableTokens.toLocaleString()} billable</span>
+                ) : null}
+              </div>
+              <div className="mt-3 max-h-[520px] overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-sm leading-7">
+                {financialResult?.answer ?? '上传材料并点击 Generate analysis 后，结果会显示在这里。'}
+              </div>
+              {financialResult?.usage ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  input {financialResult.usage.inputTokens.toLocaleString()} / output {financialResult.usage.outputTokens.toLocaleString()}
+                  {financialResult.usage.cacheReadInputTokens ? ` / cache read ${financialResult.usage.cacheReadInputTokens.toLocaleString()}` : ''}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </section>
 
         <section className="rounded-3xl bg-white p-4 shadow-sm sm:p-6">
           <div className="flex flex-col gap-2">
