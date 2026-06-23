@@ -72,6 +72,17 @@ const formatMaterialSize = (bytes: number) => {
 const formatStockWatchlistText = (watchlist: StockWatchlistItem[]) =>
   watchlist.map((item) => `${item.name},${item.code},${item.market ?? 'A'}`).join('\n');
 
+const normalizeStockCode = (code: string, market?: StockWatchlistItem['market']) => {
+  const normalizedCode = code.trim().toUpperCase().replace(/\s+/g, '');
+  const prefixedHongKongCode = normalizedCode.match(/^HK\.?(\d{1,5})$/);
+
+  if ((market === 'HK' || prefixedHongKongCode) && /^\d{1,5}$/.test(prefixedHongKongCode?.[1] ?? normalizedCode)) {
+    return (prefixedHongKongCode?.[1] ?? normalizedCode).padStart(5, '0');
+  }
+
+  return normalizedCode;
+};
+
 const parseStockWatchlistText = (text: string): StockWatchlistItem[] =>
   text
     .split(/\r?\n/)
@@ -79,9 +90,14 @@ const parseStockWatchlistText = (text: string): StockWatchlistItem[] =>
     .filter(Boolean)
     .map((line) => {
       const [name = '', code = '', market = 'A'] = line.split(/[,\s，]+/).map((part) => part.trim()).filter(Boolean);
-      const normalizedMarket = ['A', 'US', 'HK', 'FX'].includes(market.toUpperCase()) ? (market.toUpperCase() as StockWatchlistItem['market']) : 'A';
+      const codeLooksHongKong = /^HK\.?\d{1,5}$/i.test(code);
+      const normalizedMarket = codeLooksHongKong
+        ? 'HK'
+        : ['A', 'US', 'HK', 'FX'].includes(market.toUpperCase())
+          ? (market.toUpperCase() as StockWatchlistItem['market'])
+          : 'A';
 
-      return { name, code: code.toUpperCase(), market: normalizedMarket };
+      return { name, code: normalizeStockCode(code, normalizedMarket), market: normalizedMarket };
     })
     .filter((item) => item.name && item.code)
     .slice(0, 80);
@@ -562,7 +578,7 @@ const FinancialAnalysisPage = () => {
 
           {stockMessage ? <p className="mt-2 text-sm text-red-600">{stockMessage}</p> : null}
 
-          <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+          <div className="mt-3 flex flex-wrap gap-2">
             {stockQuotes.length ? stockQuotes.map((quote) => {
               const colorClass = quote.changePct > 0 ? 'text-red-600' : quote.changePct < 0 ? 'text-emerald-600' : 'text-slate-600';
               const sign = quote.changePct > 0 ? '+' : '';
@@ -571,22 +587,22 @@ const FinancialAnalysisPage = () => {
 
               return (
                 <button
-                  className={`min-w-44 rounded-xl border px-3 py-2 text-left transition ${isSelected ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'bg-slate-50 hover:border-primary/40'}`}
+                  className={`min-h-28 w-28 rounded-xl border px-2 py-2 text-left transition ${isSelected ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'bg-slate-50 hover:border-primary/40'}`}
                   key={`${quote.market}-${quote.code}`}
                   onClick={() => setSelectedStockKey(quoteKey)}
                   type="button"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold">{quote.name}</p>
+                      <p className="truncate text-xs font-semibold">{quote.name}</p>
                       <p className="text-xs text-muted-foreground">{quote.code} · {quote.market ?? 'A'}</p>
                     </div>
                     <span className="text-xs text-muted-foreground">{quote.currency}</span>
                   </div>
-                  <p className={`mt-2 text-lg font-semibold ${colorClass}`}>
+                  <p className={`mt-2 truncate text-base font-semibold ${colorClass}`}>
                     {quote.price === null ? '--' : `${quote.currency}${quote.price.toFixed(2)}`}
                   </p>
-                  <p className={`text-xs font-medium ${colorClass}`}>
+                  <p className={`truncate text-[11px] font-medium ${colorClass}`}>
                     {sign}{quote.change.toFixed(2)} / {sign}{quote.changePct.toFixed(2)}%
                   </p>
                 </button>

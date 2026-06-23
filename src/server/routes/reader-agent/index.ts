@@ -2093,21 +2093,26 @@ const generateImage = async (request: z.infer<typeof imageRequestSchema>) => {
 };
 
 const inferStockMarket = (code: string, market?: 'A' | 'US' | 'HK' | 'FX') => {
+  const normalizedCode = code.trim().toUpperCase();
+
   if (market) return market;
-  if (code.toLowerCase().startsWith('hf_')) return 'FX';
-  if (/^\d{5}$/.test(code)) return 'HK';
-  if (/^[a-z]+$/i.test(code)) return 'US';
+  if (normalizedCode.toLowerCase().startsWith('hf_')) return 'FX';
+  if (/^HK\.?\d{1,5}$/.test(normalizedCode)) return 'HK';
+  if (/^\d{5}$/.test(normalizedCode)) return 'HK';
+  if (/^[a-z]+$/i.test(normalizedCode)) return 'US';
   return 'A';
 };
 
 const getTencentQuotePrefix = (code: string, market?: 'A' | 'US' | 'HK' | 'FX') => {
   const normalizedCode = code.trim().toUpperCase().replace(/[^A-Z0-9_.]/g, '');
   const normalizedMarket = inferStockMarket(normalizedCode, market);
+  const hongKongCode = normalizedCode.match(/^HK\.?(\d{1,5})$/)?.[1] ?? normalizedCode;
+  const quoteCode = normalizedMarket === 'HK' && /^\d{1,5}$/.test(hongKongCode) ? hongKongCode.padStart(5, '0') : normalizedCode;
 
-  if (normalizedMarket === 'US') return `us${normalizedCode}`;
-  if (normalizedMarket === 'HK') return `hk${normalizedCode}`;
-  if (normalizedMarket === 'FX') return normalizedCode.toLowerCase().startsWith('hf_') ? normalizedCode : `hf_${normalizedCode}`;
-  return normalizedCode.startsWith('60') || normalizedCode.startsWith('68') ? `sh${normalizedCode}` : `sz${normalizedCode}`;
+  if (normalizedMarket === 'US') return `us${quoteCode}`;
+  if (normalizedMarket === 'HK') return `hk${quoteCode}`;
+  if (normalizedMarket === 'FX') return quoteCode.toLowerCase().startsWith('hf_') ? quoteCode : `hf_${quoteCode}`;
+  return quoteCode.startsWith('60') || quoteCode.startsWith('68') ? `sh${quoteCode}` : `sz${quoteCode}`;
 };
 
 const fetchWithTimeout = async (url: string, timeoutMs = 12000) => {
@@ -2150,11 +2155,14 @@ const fetchStockQuotes = async (watchlist: z.infer<typeof stockWatchlistItemSche
     const { stock, prefix } = request;
     const line = lineByPrefix.get(prefix.toLowerCase());
     const market = inferStockMarket(stock.code, stock.market);
+    const normalizedStockCode = stock.code.trim().toUpperCase();
+    const hongKongDisplayCode = normalizedStockCode.match(/^HK\.?(\d{1,5})$/)?.[1] ?? normalizedStockCode;
+    const displayCode = market === 'HK' && /^\d{1,5}$/.test(hongKongDisplayCode) ? hongKongDisplayCode.padStart(5, '0') : normalizedStockCode;
 
     if (!line) {
       quotes.push({
         name: stock.name,
-        code: stock.code.toUpperCase(),
+        code: displayCode,
         market,
         price: null,
         prevClose: null,
@@ -2180,7 +2188,7 @@ const fetchStockQuotes = async (watchlist: z.infer<typeof stockWatchlistItemSche
 
     quotes.push({
       name: stock.name || parts[1] || stock.code,
-      code: stock.code.toUpperCase(),
+      code: displayCode,
       market,
       price: Number.isFinite(price) ? price : null,
       prevClose: Number.isFinite(prevClose) ? prevClose : null,

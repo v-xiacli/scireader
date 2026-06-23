@@ -80,6 +80,24 @@ const defaultStockWatchlist: z.infer<typeof stockWatchlistSchema> = [
   { name: '招商輪船', code: '601872', market: 'A' },
 ];
 
+const normalizeStockWatchlistItem = (item: z.infer<typeof stockWatchlistItemSchema>): z.infer<typeof stockWatchlistItemSchema> => {
+  const rawCode = item.code.trim().toUpperCase().replace(/\s+/g, '');
+  const prefixedHongKongCode = rawCode.match(/^HK\.?(\d{1,5})$/);
+  const market = prefixedHongKongCode ? 'HK' : item.market;
+  const code = market === 'HK' && /^\d{1,5}$/.test(prefixedHongKongCode?.[1] ?? rawCode)
+    ? (prefixedHongKongCode?.[1] ?? rawCode).padStart(5, '0')
+    : rawCode;
+
+  return {
+    name: item.name.trim(),
+    code,
+    market,
+  };
+};
+
+const normalizeStockWatchlist = (watchlist: z.infer<typeof stockWatchlistSchema>) =>
+  stockWatchlistSchema.parse(watchlist.map(normalizeStockWatchlistItem));
+
 const parseCsvEnv = (value?: string) =>
   new Set((value ?? '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean));
 
@@ -222,18 +240,14 @@ const saveViewerPreferences = async (userId: string, preferences: z.infer<typeof
 
 const loadStockWatchlist = async (userId: string) => {
   try {
-    return stockWatchlistSchema.parse(parseJsonBlock(await downloadTextAsAdmin(getStockWatchlistPath(userId))) ?? defaultStockWatchlist);
+    return normalizeStockWatchlist(stockWatchlistSchema.parse(parseJsonBlock(await downloadTextAsAdmin(getStockWatchlistPath(userId))) ?? defaultStockWatchlist));
   } catch {
-    return defaultStockWatchlist;
+    return normalizeStockWatchlist(defaultStockWatchlist);
   }
 };
 
 const saveStockWatchlist = async (userId: string, watchlist: z.infer<typeof stockWatchlistSchema>) => {
-  const normalized = watchlist.map((item) => ({
-    name: item.name.trim(),
-    code: item.code.trim().toUpperCase(),
-    market: item.market,
-  }));
+  const normalized = normalizeStockWatchlist(watchlist);
 
   await uploadTextAsAdmin(
     `# Stock watchlist\n\n\`\`\`json\n${JSON.stringify(normalized, null, 2)}\n\`\`\`\n`,
