@@ -1517,6 +1517,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
       const report = (event as CustomEvent<FinancialReportEventDetail>).detail?.report;
       if (!report?.answer?.trim()) return;
 
+      const reportAnswer = report.answer;
       const stockLabel = [report.stock?.name, report.stock?.code].filter(Boolean).join(' ') || '历史报告';
       const usageLabel = report.usage?.billableTokens
         ? ` · ${report.usage.billableTokens.toLocaleString()} billable${report.usage.billingMultiplier ? ` · ${report.usage.billingMultiplier}x` : ''}`
@@ -1535,7 +1536,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
         {
           id: crypto.randomUUID(),
           role: 'assistant',
-          content: report.answer,
+          content: reportAnswer,
           contextLabel: `Saved financial report${usageLabel}${timeLabel}`,
         },
       ]);
