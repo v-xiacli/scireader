@@ -102,6 +102,27 @@ type PendingImageReading = {
   estimate: FigureReadingEstimateResponse;
 };
 
+type FinancialReportEventDetail = {
+  report?: {
+    stock?: {
+      name?: string;
+      code?: string;
+      market?: string | null;
+    };
+    question?: string;
+    answer?: string;
+    model?: string | null;
+    createdAt?: string;
+    usage?: {
+      inputTokens?: number;
+      outputTokens?: number;
+      baseBillableTokens?: number;
+      billableTokens?: number;
+      billingMultiplier?: number;
+    };
+  };
+};
+
 const largeSummaryBillableTokenThreshold = 500_000;
 const imageReadingPromptTemplate = '读取第x页到第y页的图片';
 const maxImageReadingPagesPerRequest = 6;
@@ -1488,6 +1509,42 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
 
     return () => window.removeEventListener('financial-analysis-start', handleFinancialStart);
   }, [isFinancialChat, sendMessage]);
+
+  useEffect(() => {
+    if (!isFinancialChat) return;
+
+    const handleOpenFinancialReport = (event: Event) => {
+      const report = (event as CustomEvent<FinancialReportEventDetail>).detail?.report;
+      if (!report?.answer?.trim()) return;
+
+      const stockLabel = [report.stock?.name, report.stock?.code].filter(Boolean).join(' ') || '历史报告';
+      const usageLabel = report.usage?.billableTokens
+        ? ` · ${report.usage.billableTokens.toLocaleString()} billable${report.usage.billingMultiplier ? ` · ${report.usage.billingMultiplier}x` : ''}`
+        : '';
+      const createdAt = report.createdAt ? new Date(report.createdAt) : null;
+      const timeLabel = createdAt && !Number.isNaN(createdAt.getTime()) ? ` · ${createdAt.toLocaleString()}` : '';
+
+      setMessages((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          role: 'user',
+          content: report.question?.trim() || `查看 ${stockLabel} 的历史报告`,
+          contextLabel: `Financial report history · ${stockLabel}`,
+        },
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: report.answer,
+          contextLabel: `Saved financial report${usageLabel}${timeLabel}`,
+        },
+      ]);
+    };
+
+    window.addEventListener('financial-analysis-open-report', handleOpenFinancialReport);
+
+    return () => window.removeEventListener('financial-analysis-open-report', handleOpenFinancialReport);
+  }, [isFinancialChat]);
 
   return (
     <aside

@@ -153,7 +153,6 @@ const FinancialAnalysisPage = () => {
   const [analysisTargetText, setAnalysisTargetText] = useState('');
   const [financialAnalysisMode, setFinancialAnalysisMode] = useState<FinancialAnalysisMode>('normal');
   const [reports, setReports] = useState<FinancialReport[]>([]);
-  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [reportsMessage, setReportsMessage] = useState<string | null>(null);
 
   const isLoggedIn = Boolean(authUser);
@@ -163,7 +162,6 @@ const FinancialAnalysisPage = () => {
     return quote ? { ...stock, name: quote.name } : stock;
   });
   const selectedStock = parseAnalysisTarget(analysisTargetText);
-  const selectedReport = reports.find((report) => report.id === selectedReportId) ?? null;
   const materialSizeTotal = materials.reduce((total, file) => total + file.size, 0);
 
   const loadFinancialAccess = async () => {
@@ -715,13 +713,13 @@ const FinancialAnalysisPage = () => {
             {reportsMessage ? <p className="mt-2 text-sm text-red-600">{reportsMessage}</p> : null}
             <div className="mt-4 grid gap-3">
               {reports.length ? reports.map((report) => {
-                const isSelected = selectedReportId === report.id;
-
                 return (
                   <button
-                    className={`rounded-xl border p-3 text-left transition ${isSelected ? 'border-primary bg-primary/5' : 'bg-slate-50 hover:border-primary/40'}`}
+                    className="rounded-xl border bg-slate-50 p-3 text-left transition hover:border-primary/40 hover:bg-primary/5"
                     key={report.id}
-                    onClick={() => setSelectedReportId((current) => current === report.id ? null : report.id)}
+                    onClick={() => {
+                      window.dispatchEvent(new CustomEvent('financial-analysis-open-report', { detail: { report } }));
+                    }}
                     type="button"
                   >
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -742,21 +740,6 @@ const FinancialAnalysisPage = () => {
                 </div>
               )}
             </div>
-
-            {selectedReport ? (
-              <div className="mt-4 rounded-xl border bg-slate-50 p-4">
-                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                  <h3 className="font-semibold">{selectedReport.stock.name} {selectedReport.stock.code}</h3>
-                  <span className="text-xs text-muted-foreground">{formatDate(selectedReport.createdAt)}</span>
-                </div>
-                <p className="mt-3 text-sm font-medium">問題</p>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{selectedReport.question}</p>
-                <p className="mt-4 text-sm font-medium">報告</p>
-                <div className="mt-1 max-h-96 overflow-auto whitespace-pre-wrap rounded-lg bg-white p-3 text-sm leading-7 text-slate-800">
-                  {selectedReport.answer}
-                </div>
-              </div>
-            ) : null}
           </section>
         </div>
       </div>
