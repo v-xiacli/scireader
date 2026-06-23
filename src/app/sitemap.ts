@@ -21,14 +21,26 @@ const sitemap = (): MetadataRoute.Sitemap => {
     {
       url: `${siteUrl}/financial-analysis`,
       lastModified: now,
-      changeFrequency: 'weekly',
-      priority: 0.8,
+      changeFrequency: 'daily',
+      priority: 0.9,
     },
     {
       url: `${siteUrl}/research`,
       lastModified: now,
+      changeFrequency: 'daily',
+      priority: 0.9,
+    },
+    {
+      url: `${siteUrl}/ai-read-paper`,
+      lastModified: now,
       changeFrequency: 'weekly',
-      priority: 0.8,
+      priority: 0.85,
+    },
+    {
+      url: `${siteUrl}/ai-paper-reading`,
+      lastModified: now,
+      changeFrequency: 'weekly',
+      priority: 0.85,
     },
   ];
 };
