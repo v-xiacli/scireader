@@ -2139,8 +2139,9 @@ const fetchStockQuotes = async (watchlist: z.infer<typeof stockWatchlistItemSche
   const lineByPrefix = new Map<string, string>();
 
   for (const line of text.split(';')) {
-    const match = line.match(/^v_([^=]+)=/);
-    if (match && line.includes('~')) lineByPrefix.set(match[1].toLowerCase(), line);
+    const quoteLine = line.trim();
+    const match = quoteLine.match(/^v_([^=]+)=/);
+    if (match && quoteLine.includes('~')) lineByPrefix.set(match[1].toLowerCase(), quoteLine);
   }
 
   const quotes = [];
