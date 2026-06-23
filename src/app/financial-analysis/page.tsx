@@ -587,7 +587,7 @@ const FinancialAnalysisPage = () => {
 
               return (
                 <button
-                  className={`min-h-28 w-28 rounded-xl border px-2 py-2 text-left transition ${isSelected ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'bg-slate-50 hover:border-primary/40'}`}
+                  className={`min-h-24 w-[calc(50%-0.25rem)] rounded-xl border px-2 py-2 text-left transition sm:min-h-28 sm:w-28 ${isSelected ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'bg-slate-50 hover:border-primary/40'}`}
                   key={`${quote.market}-${quote.code}`}
                   onClick={() => setSelectedStockKey(quoteKey)}
                   type="button"
