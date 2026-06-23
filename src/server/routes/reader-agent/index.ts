@@ -3704,14 +3704,15 @@ const generateChunkedEnglishSummary = async (
 
   if (!storagePath) {
     setJobStatus({ phase: 'final-synthesis', message: 'No uploaded PDF path; generating from prompt/context only.' });
+    const responseLanguage = isQualityReadingMode(request) ? 'english' : 'chinese';
     const result = await createExpensiveTextResponse(
-      buildReaderSystemPrompt(Boolean(request.paperContextSummary), false, request.modePrompt, 'english'),
+      buildReaderSystemPrompt(Boolean(request.paperContextSummary), false, request.modePrompt, responseLanguage),
       `Paper title: ${request.title ?? request.paperId}\n\nTask:\n${request.prompt}`,
       12000,
       { jobId, paperId: request.paperId, phase: 'fallback-no-pdf' },
     );
 
-    return { answer: result.answer, inputTokens: result.inputTokens, outputTokens: result.outputTokens, model: result.model, responseLanguage: 'english' as const };
+    return { answer: result.answer, inputTokens: result.inputTokens, outputTokens: result.outputTokens, model: result.model, responseLanguage };
   }
 
   setJobStatus({ phase: 'materializing-pdf', message: 'Downloading PDF from storage into a temporary file.' });
@@ -4836,6 +4837,7 @@ const app = new Hono()
         neo4jRecords: neo4jExternalEvaluations.length,
         blobRecords: blobExternalEvaluations.length,
       });
+
       const sourceLanguage = await detectSourceLanguageForAsk(request, storagePath);
       const shouldUseTranslationPipeline = isQualityReadingMode(request) && sourceLanguage === 'english';
       const shouldAskExpensiveReaderInChinese = !shouldUseTranslationPipeline;
