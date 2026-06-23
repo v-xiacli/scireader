@@ -42,6 +42,12 @@ const sitemap = (): MetadataRoute.Sitemap => {
       changeFrequency: 'weekly',
       priority: 0.85,
     },
+    {
+      url: `${siteUrl}/ai-stock-analysis`,
+      lastModified: now,
+      changeFrequency: 'weekly',
+      priority: 0.85,
+    },
   ];
 };
 
