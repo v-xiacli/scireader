@@ -193,6 +193,7 @@ const financialAnalysisFileSchema = z.object({
   storagePath: z.string().min(1),
   contentType: z.string().min(1),
   size: z.number().nonnegative().optional(),
+  url: z.string().url().optional(),
 });
 
 const financialAnalysisRequestSchema = z.object({
@@ -2115,15 +2116,52 @@ const getTencentQuotePrefix = (code: string, market?: 'A' | 'US' | 'HK' | 'FX') 
   return quoteCode.startsWith('60') || quoteCode.startsWith('68') ? `sh${quoteCode}` : `sz${quoteCode}`;
 };
 
-const fetchWithTimeout = async (url: string, timeoutMs = 12000) => {
+const fetchWithTimeout = async (url: string, timeoutMs = 12000, init?: RequestInit) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    return await fetch(url, { signal: controller.signal });
+    return await fetch(url, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timeout);
   }
+};
+
+const extractReadableTextFromHtml = (html: string) =>
+  html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const readWebMaterial = async (url: string) => {
+  const response = await fetchWithTimeout(url, 15000, {
+    headers: {
+      Accept: 'text/html,application/xhtml+xml,application/xml,text/plain;q=0.9,*/*;q=0.8',
+      'User-Agent': 'SCIReader/1.0 financial-analysis (+https://scireader.xyz)',
+    },
+  });
+
+  if (!response.ok) throw new Error(`Web material request failed: ${response.status}`);
+
+  const contentType = response.headers.get('content-type') ?? '';
+  const rawText = await response.text();
+  const text = contentType.includes('html') ? extractReadableTextFromHtml(rawText) : rawText.replace(/\s+/g, ' ').trim();
+
+  return {
+    contentType: contentType || 'text/html',
+    text: text.slice(0, 80_000),
+    extractedChars: text.length,
+  };
 };
 
 const fetchTencentQuoteText = async (query: string) => {
@@ -2239,6 +2277,27 @@ ${formatConversationHistoryForReaderPrompt(request.conversationHistory) || '暂�
   const fileSummaries: Array<{ name: string; contentType: string; storagePath: string; extractedChars?: number }> = [];
 
   for (const file of request.files) {
+    const webUrl = file.url ?? (file.storagePath.startsWith('url:') ? file.storagePath.slice(4) : null);
+
+    if (webUrl) {
+      try {
+        const webMaterial = await readWebMaterial(webUrl);
+
+        content.push({
+          type: 'text',
+          text: `\n\n[网页材料] ${file.name}\nURL: ${webUrl}\nExtracted text:\n${webMaterial.text || '未能提取到可读网页正文。'}`,
+          cache_control: webMaterial.text.length >= MIN_PROMPT_CACHE_TEXT_CHARS ? { type: 'ephemeral' } : undefined,
+        } as ReaderMessageContentBlock);
+        fileSummaries.push({ name: file.name, contentType: webMaterial.contentType, storagePath: file.storagePath, extractedChars: webMaterial.extractedChars });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '网页读取失败。';
+        content.push({ type: 'text', text: `\n\n[网页材料] ${file.name}\nURL: ${webUrl}\n读取失败：${message}\n请在分析中说明该网页材料未能读取，不要编造网页内容。` });
+        fileSummaries.push({ name: file.name, contentType: file.contentType, storagePath: file.storagePath });
+      }
+
+      continue;
+    }
+
     assertUserStorageAccess(user, file.storagePath);
 
     if (file.contentType === 'application/pdf') {

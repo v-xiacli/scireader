@@ -9,6 +9,8 @@ export type FloatingFinancialMaterial = {
   storagePath: string;
   contentType: string;
   size: number;
+  url?: string;
+  addedAt?: string;
 };
 
 export type FloatingFinancialStock = {

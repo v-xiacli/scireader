@@ -72,6 +72,17 @@ const stockWatchlistItemSchema = z.object({
 
 const stockWatchlistSchema = z.array(stockWatchlistItemSchema).max(80);
 
+const financialMaterialSchema = z.object({
+  name: z.string().trim().min(1).max(240),
+  storagePath: z.string().trim().min(1),
+  contentType: z.string().trim().min(1).max(120),
+  size: z.number().nonnegative().default(0),
+  url: z.string().url().optional(),
+  addedAt: z.string().optional(),
+});
+
+const financialMaterialsSchema = z.array(financialMaterialSchema).max(80);
+
 const defaultStockWatchlist: z.infer<typeof stockWatchlistSchema> = [
   { name: '北方華創', code: '002371', market: 'A' },
   { name: '茂萊光學', code: '688502', market: 'A' },
@@ -211,6 +222,7 @@ const verifySignupCode = async (email: string, code: string) => {
 const getPreferencePath = (userId: string) => `user-preferences/${userId}.md`;
 const getUploadedPapersPath = (userId: string) => `user-papers/${userId}.md`;
 const getStockWatchlistPath = (userId: string) => `user-watchlists/${userId}.stocks.md`;
+const getFinancialMaterialsPath = (userId: string) => `user-financial-materials/${userId}.md`;
 
 const parseJsonBlock = (content: string) => {
   const match = content.match(/```json\n([\s\S]*?)\n```/);
@@ -252,6 +264,33 @@ const saveStockWatchlist = async (userId: string, watchlist: z.infer<typeof stoc
   await uploadTextAsAdmin(
     `# Stock watchlist\n\n\`\`\`json\n${JSON.stringify(normalized, null, 2)}\n\`\`\`\n`,
     getStockWatchlistPath(userId),
+  );
+
+  return normalized;
+};
+
+const loadFinancialMaterials = async (userId: string) => {
+  try {
+    return financialMaterialsSchema.parse(parseJsonBlock(await downloadTextAsAdmin(getFinancialMaterialsPath(userId))) ?? []);
+  } catch {
+    return [];
+  }
+};
+
+const saveFinancialMaterials = async (userId: string, materials: z.infer<typeof financialMaterialsSchema>) => {
+  const seen = new Set<string>();
+  const normalized = financialMaterialsSchema.parse(materials)
+    .filter((material) => {
+      if (seen.has(material.storagePath)) return false;
+
+      seen.add(material.storagePath);
+      return true;
+    })
+    .slice(-80);
+
+  await uploadTextAsAdmin(
+    `# Financial materials\n\n\`\`\`json\n${JSON.stringify(normalized, null, 2)}\n\`\`\`\n`,
+    getFinancialMaterialsPath(userId),
   );
 
   return normalized;
@@ -402,6 +441,18 @@ const app = new Hono()
     if (!user) return c.json({ error: 'Not authenticated.' }, 401);
 
     return c.json({ watchlist: await saveStockWatchlist(user.id, c.req.valid('json').watchlist) });
+  })
+  .get('/financial-materials', async (c) => {
+    const user = await getCurrentUser(getCookie(c, sessionCookieName));
+    if (!user) return c.json({ error: 'Not authenticated.' }, 401);
+
+    return c.json({ materials: await loadFinancialMaterials(user.id) });
+  })
+  .put('/financial-materials', zValidator('json', z.object({ materials: financialMaterialsSchema })), async (c) => {
+    const user = await getCurrentUser(getCookie(c, sessionCookieName));
+    if (!user) return c.json({ error: 'Not authenticated.' }, 401);
+
+    return c.json({ materials: await saveFinancialMaterials(user.id, c.req.valid('json').materials) });
   })
   .get('/viewer-preferences', async (c) => {
     const user = await getCurrentUser(getCookie(c, sessionCookieName));

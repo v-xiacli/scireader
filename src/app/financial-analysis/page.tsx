@@ -14,6 +14,8 @@ type FinancialMaterial = {
   storagePath: string;
   contentType: string;
   size: number;
+  url?: string;
+  addedAt?: string;
 };
 
 type FinancialReport = {
@@ -68,6 +70,19 @@ const formatMaterialSize = (bytes: number) => {
 
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 };
+
+const mergeFinancialMaterials = (current: FinancialMaterial[], incoming: FinancialMaterial[], limit = 80) => {
+  const byPath = new Map(current.map((material) => [material.storagePath, material]));
+
+  for (const material of incoming) {
+    byPath.set(material.storagePath, { ...byPath.get(material.storagePath), ...material });
+  }
+
+  return Array.from(byPath.values()).slice(-limit);
+};
+
+const describeMaterialSize = (material: FinancialMaterial) =>
+  material.url ? '網頁連結' : `${formatMaterialSize(material.size)}`;
 
 const formatStockWatchlistText = (watchlist: StockWatchlistItem[]) =>
   watchlist.map((item) => `${item.name},${item.code},${item.market ?? 'A'}`).join('\n');
@@ -141,6 +156,8 @@ const FinancialAnalysisPage = () => {
   const [isActivatingFinancial, setIsActivatingFinancial] = useState(false);
   const [financialAccessMessage, setFinancialAccessMessage] = useState<string | null>(null);
   const [materials, setMaterials] = useState<FinancialMaterial[]>([]);
+  const [materialLibrary, setMaterialLibrary] = useState<FinancialMaterial[]>([]);
+  const [materialUrl, setMaterialUrl] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [stockWatchlist, setStockWatchlist] = useState<StockWatchlistItem[]>([]);
@@ -292,6 +309,102 @@ const FinancialAnalysisPage = () => {
     }
   };
 
+  const loadFinancialMaterials = async () => {
+    try {
+      const response = await fetch('/api/auth/financial-materials');
+      const result = await response.json();
+      const storedMaterials = response.ok ? result.materials as FinancialMaterial[] : [];
+
+      setMaterialLibrary(storedMaterials);
+    } catch {
+      setMaterialLibrary([]);
+    }
+  };
+
+  const persistFinancialMaterials = async (nextMaterials: FinancialMaterial[]) => {
+    const response = await fetch('/api/auth/financial-materials', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ materials: nextMaterials }),
+    });
+    const result = await response.json();
+
+    if (!response.ok) throw new Error(result.message ?? result.error ?? 'Could not save financial materials.');
+
+    const savedMaterials = result.materials as FinancialMaterial[];
+    setMaterialLibrary(savedMaterials);
+
+    return savedMaterials;
+  };
+
+  const addCurrentMaterials = (incoming: FinancialMaterial[]) => {
+    setMaterials((current) => mergeFinancialMaterials(current, incoming, 12));
+  };
+
+  const saveMaterialsToLibrary = async (incoming: FinancialMaterial[]) => {
+    const nextLibrary = mergeFinancialMaterials(materialLibrary, incoming, 80);
+
+    setMaterialLibrary(nextLibrary);
+    await persistFinancialMaterials(nextLibrary);
+
+    return nextLibrary;
+  };
+
+  const addLinkMaterial = async () => {
+    if (!isLoggedIn) {
+      setMessage('請先登入再加入網頁連結。');
+      return;
+    }
+
+    if (!isFinancialEnabled) {
+      setFinancialAccessMessage('請先開通財務分析功能。');
+      return;
+    }
+
+    try {
+      const url = new URL(materialUrl.trim());
+      const pathName = url.pathname === '/' ? '' : url.pathname;
+      const name = `${url.hostname}${pathName}`.slice(0, 120);
+      const material: FinancialMaterial = {
+        name: name || url.href,
+        storagePath: `url:${url.href}`,
+        contentType: 'text/html',
+        size: 0,
+        url: url.href,
+        addedAt: new Date().toISOString(),
+      };
+
+      addCurrentMaterials([material]);
+      await saveMaterialsToLibrary([material]);
+      setMaterialUrl('');
+      setMessage('已加入網頁連結，本次分析會嘗試讀取正文。');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '請輸入有效的網頁連結。');
+    }
+  };
+
+  const addMaterialFromLibrary = (storagePath: string) => {
+    const material = materialLibrary.find((item) => item.storagePath === storagePath);
+
+    if (!material) return;
+    addCurrentMaterials([material]);
+  };
+
+  const removeMaterialFromLibrary = async (storagePath: string) => {
+    const nextLibrary = materialLibrary.filter((item) => item.storagePath !== storagePath);
+
+    setMaterialLibrary(nextLibrary);
+    setMaterials((current) => current.filter((item) => item.storagePath !== storagePath));
+
+    try {
+      await persistFinancialMaterials(nextLibrary);
+      setMessage('已從歷史資料移除。');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not save financial materials.');
+      void loadFinancialMaterials();
+    }
+  };
+
   useEffect(() => {
     const loadSession = async () => {
       try {
@@ -304,6 +417,7 @@ const FinancialAnalysisPage = () => {
           setIsFinancialEnabled(Boolean(result.financialAnalysisEnabled));
           await loadStockWatchlist();
           await loadFinancialAccess();
+          await loadFinancialMaterials();
           await loadReports();
           await loadTokenAccount();
         }
@@ -352,9 +466,14 @@ const FinancialAnalysisPage = () => {
   }, []);
 
   const handleUpload = async (files: FileList | File[]) => {
-    const selectedFiles = Array.from(files).slice(0, Math.max(0, 12 - materials.length));
     if (!isLoggedIn) {
       setMessage('請先登入再上傳財務材料。');
+      return;
+    }
+
+    const selectedFiles = Array.from(files).slice(0, Math.max(0, 12 - materials.length));
+    if (!selectedFiles.length) {
+      setMessage('本次資料已達 12 份上限。');
       return;
     }
 
@@ -389,11 +508,13 @@ const FinancialAnalysisPage = () => {
           storagePath: result.filePath,
           contentType: file.type,
           size: file.size,
+          addedAt: new Date().toISOString(),
         });
       }
 
-      setMaterials((current) => [...current, ...uploaded].slice(-12));
-      setMessage(`已上傳 ${uploaded.length} 個材料。`);
+      addCurrentMaterials(uploaded);
+      await saveMaterialsToLibrary(uploaded);
+      setMessage(`已上傳 ${uploaded.length} 個材料，並加入本次分析。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Financial material upload failed.');
     } finally {
@@ -502,7 +623,7 @@ const FinancialAnalysisPage = () => {
             </div>
             <div>
               <p className="font-medium">材料說明</p>
-              <p className="mt-1 text-muted-foreground">可上傳多份財報 PDF、K 線圖、盤口截圖和走勢圖；歷史報告不保存原始上傳材料。</p>
+              <p className="mt-1 text-muted-foreground">可上傳多份財報 PDF、K 線圖、盤口截圖、走勢圖，也可貼網頁連結；歷史資料和本次資料分開管理。</p>
             </div>
           </div>
         </section>
@@ -645,15 +766,18 @@ const FinancialAnalysisPage = () => {
 
         <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(280px,420px)_minmax(0,1fr)]">
           <aside className="rounded-2xl border bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="font-semibold">已上傳材料</h2>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="font-semibold">本次資料</h2>
+                <p className="mt-1 text-sm text-muted-foreground">只會分析這裡的資料；可從歷史資料拖入或點擊加入。</p>
+              </div>
               {materials.length ? (
                 <button
                   className="text-sm font-medium text-slate-500 hover:text-red-600"
                   onClick={() => setMaterials([])}
                   type="button"
                 >
-                  清空
+                  清空本次
                 </button>
               ) : null}
             </div>
@@ -671,17 +795,24 @@ const FinancialAnalysisPage = () => {
               ref={fileInputRef}
               type="file"
             />
-            <div className="mt-4 grid gap-2">
+            <div
+              className="mt-4 grid min-h-24 gap-2 rounded-xl border border-dashed border-slate-200 p-2"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                addMaterialFromLibrary(event.dataTransfer.getData('text/plain'));
+              }}
+            >
               {materials.length ? materials.map((file) => (
                 <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 text-sm" key={file.storagePath}>
                   <div className="min-w-0">
                     <p className="truncate font-medium">{file.name}</p>
-                    <p className="text-xs text-muted-foreground">{file.contentType} · {(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                    <p className="text-xs text-muted-foreground">{file.contentType} · {describeMaterialSize(file)}</p>
                   </div>
                   <button
                     className="rounded-lg border bg-white p-2 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
                     onClick={() => setMaterials((current) => current.filter((item) => item.storagePath !== file.storagePath))}
-                    title="移除材料"
+                    title="移出本次資料"
                     type="button"
                   >
                     <Trash2 className="size-4" />
@@ -689,9 +820,85 @@ const FinancialAnalysisPage = () => {
                 </div>
               )) : (
                 <div className="rounded-xl border border-dashed bg-slate-50 p-4 text-sm text-muted-foreground">
-                  支援多個 PDF、K 線圖、盤口截圖和走勢圖圖片。
+                  拖入歷史資料，或上傳 PDF、K 線圖、盤口截圖、走勢圖圖片。
                 </div>
               )}
+            </div>
+
+            <div className="mt-4 border-t pt-4">
+              <h3 className="text-sm font-semibold">加入網頁連結</h3>
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                <input
+                  className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-primary"
+                  onChange={(event) => setMaterialUrl(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') void addLinkMaterial();
+                  }}
+                  placeholder="貼上年報、公告或網頁連結"
+                  value={materialUrl}
+                />
+                <button
+                  className="rounded-xl border px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-70"
+                  disabled={!materialUrl.trim() || !isLoggedIn || !isFinancialEnabled}
+                  onClick={() => void addLinkMaterial()}
+                  type="button"
+                >
+                  加入連結
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 border-t pt-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold">歷史資料</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">登入後保存資料索引；拖動或點擊可加入本次。</p>
+                </div>
+              </div>
+              <div className="mt-3 grid max-h-[28rem] gap-2 overflow-y-auto pr-1">
+                {materialLibrary.length ? materialLibrary.map((file) => {
+                  const isCurrent = materials.some((item) => item.storagePath === file.storagePath);
+
+                  return (
+                    <div
+                      className={`rounded-xl border px-3 py-2 text-sm ${isCurrent ? 'border-primary/40 bg-primary/5' : 'bg-slate-50'}`}
+                      draggable
+                      key={file.storagePath}
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData('text/plain', file.storagePath);
+                        event.dataTransfer.effectAllowed = 'copy';
+                      }}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate font-medium">{file.name}</p>
+                          <p className="text-xs text-muted-foreground">{file.contentType} · {describeMaterialSize(file)}</p>
+                        </div>
+                        <button
+                          className="rounded-lg border bg-white p-2 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                          onClick={() => void removeMaterialFromLibrary(file.storagePath)}
+                          title="從歷史資料移除"
+                          type="button"
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      </div>
+                      <button
+                        className="mt-2 w-full rounded-lg border bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-primary/40 hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={isCurrent || materials.length >= 12}
+                        onClick={() => addMaterialFromLibrary(file.storagePath)}
+                        type="button"
+                      >
+                        {isCurrent ? '已在本次資料' : '加入本次資料'}
+                      </button>
+                    </div>
+                  );
+                }) : (
+                  <div className="rounded-xl border border-dashed bg-slate-50 p-4 text-sm text-muted-foreground">
+                    暫無歷史資料。上傳文件或加入網頁連結後會保存在這裡。
+                  </div>
+                )}
+              </div>
             </div>
           </aside>
 
