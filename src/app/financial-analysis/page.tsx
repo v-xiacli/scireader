@@ -115,6 +115,22 @@ const parseStockWatchlistText = (text: string): StockWatchlistItem[] =>
     .filter((item) => item.name && item.code)
     .slice(0, 80);
 
+const parseAnalysisTarget = (text: string): StockWatchlistItem | null => {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  const parts = trimmed.split(/[,\s，]+/).map((part) => part.trim()).filter(Boolean);
+  const rawCode = parts.find((part) => /^HK\.?\d{1,5}$/i.test(part) || /^\d{1,6}$/.test(part) || /^[A-Z]{1,8}$/i.test(part) || /^hf_/i.test(part));
+  const rawMarket = parts.find((part) => ['A', 'US', 'HK', 'FX'].includes(part.toUpperCase()));
+  const market = inferInputMarket(rawCode ?? trimmed, rawMarket);
+  const code = rawCode ? normalizeStockCode(rawCode, market) : trimmed.slice(0, 24);
+  const name = rawCode
+    ? parts.filter((part) => part !== rawCode && part !== rawMarket).join(' ').trim() || code
+    : trimmed;
+
+  return { name, code, market };
+};
+
 const FinancialAnalysisPage = () => {
   const { setFinancialContext } = useFloatingChat();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -134,7 +150,7 @@ const FinancialAnalysisPage = () => {
   const [isQuotesLoading, setIsQuotesLoading] = useState(false);
   const [isWatchlistEditing, setIsWatchlistEditing] = useState(false);
   const [quotesUpdatedAt, setQuotesUpdatedAt] = useState<string | null>(null);
-  const [selectedStockKey, setSelectedStockKey] = useState('');
+  const [analysisTargetText, setAnalysisTargetText] = useState('');
   const [financialAnalysisMode, setFinancialAnalysisMode] = useState<FinancialAnalysisMode>('normal');
   const [reports, setReports] = useState<FinancialReport[]>([]);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
@@ -146,7 +162,7 @@ const FinancialAnalysisPage = () => {
 
     return quote ? { ...stock, name: quote.name } : stock;
   });
-  const selectedStock = displayStocks.find((stock) => `${stock.market ?? 'A'}:${stock.code}` === selectedStockKey) ?? displayStocks[0] ?? null;
+  const selectedStock = parseAnalysisTarget(analysisTargetText);
   const selectedReport = reports.find((report) => report.id === selectedReportId) ?? null;
   const materialSizeTotal = materials.reduce((total, file) => total + file.size, 0);
 
@@ -245,7 +261,6 @@ const FinancialAnalysisPage = () => {
 
       setStockWatchlist(watchlist);
       setStockWatchlistText(formatStockWatchlistText(watchlist));
-      if (watchlist.length) setSelectedStockKey((current) => current || `${watchlist[0].market ?? 'A'}:${watchlist[0].code}`);
       if (watchlist.length) void refreshStockQuotes(watchlist);
     } catch {
       setStockWatchlist([]);
@@ -272,7 +287,6 @@ const FinancialAnalysisPage = () => {
 
       setStockWatchlist(result.watchlist);
       setStockWatchlistText(formatStockWatchlistText(result.watchlist));
-      if (result.watchlist.length) setSelectedStockKey(`${result.watchlist[0].market ?? 'A'}:${result.watchlist[0].code}`);
       setIsWatchlistEditing(false);
       void refreshStockQuotes(result.watchlist);
     } catch (error) {
@@ -401,7 +415,7 @@ const FinancialAnalysisPage = () => {
     }
 
     if (!selectedStock) {
-      setStockMessage('請先選擇本次要分析的股票。');
+      setStockMessage('請先輸入擬分析板塊或股票。');
       return;
     }
 
@@ -412,7 +426,7 @@ const FinancialAnalysisPage = () => {
 
     window.dispatchEvent(new CustomEvent('financial-analysis-start', {
       detail: {
-        prompt: `请综合分析 ${selectedStock.name}（${selectedStock.code}）的本次上传材料，并结合该股票历史档案给出交易员视角的判断。`,
+        prompt: `请综合分析 ${selectedStock.name}（${selectedStock.code}）的本次上传材料，并结合该分析对象的历史档案给出交易员视角的判断。`,
       },
     }));
   };
@@ -501,7 +515,7 @@ const FinancialAnalysisPage = () => {
               <div>
                 <h2 className="font-semibold text-amber-950">開通財務分析</h2>
                 <p className="mt-1 text-sm leading-6 text-amber-900">
-                  財務分析會讀取財報、K 線圖、盤口截圖和走勢圖，並按股票保存本用戶的歷史報告。使用前需單獨開通，token 使用量按正常分析的 3 倍計算。
+                  財務分析會讀取財報、K 線圖、盤口截圖和走勢圖，並按分析對象保存本用戶的歷史報告。使用前需單獨開通，token 使用量按正常分析的 3 倍計算。
                 </p>
               </div>
               <button
@@ -526,20 +540,12 @@ const FinancialAnalysisPage = () => {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <select
-                className="rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-primary"
-                disabled={!stockWatchlist.length}
-                onChange={(event) => setSelectedStockKey(event.target.value)}
-                value={selectedStockKey}
-              >
-                {displayStocks.length ? displayStocks.map((stock) => (
-                  <option key={`${stock.market ?? 'A'}:${stock.code}`} value={`${stock.market ?? 'A'}:${stock.code}`}>
-                    分析：{stock.name} {stock.code}
-                  </option>
-                )) : (
-                  <option value="">請選擇股票</option>
-                )}
-              </select>
+              <input
+                className="min-w-64 rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-primary"
+                onChange={(event) => setAnalysisTargetText(event.target.value)}
+                placeholder="擬分析板塊或股票，例如：光伏設備、阿里巴巴 09988"
+                value={analysisTargetText}
+              />
               <div className="flex rounded-xl border p-1">
                 {financialAnalysisModes.map((mode) => (
                   <button
@@ -555,7 +561,7 @@ const FinancialAnalysisPage = () => {
               </div>
               <button
                 className="rounded-xl bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
-                disabled={!isLoggedIn || !isFinancialEnabled || !selectedStock || !materials.length}
+                disabled={!isLoggedIn || !isFinancialEnabled || !analysisTargetText.trim() || !materials.length}
                 onClick={startFinancialAnalysis}
                 type="button"
               >
@@ -607,13 +613,15 @@ const FinancialAnalysisPage = () => {
               const colorClass = quote.changePct > 0 ? 'text-red-600' : quote.changePct < 0 ? 'text-emerald-600' : 'text-slate-600';
               const sign = quote.changePct > 0 ? '+' : '';
               const quoteKey = `${quote.market ?? 'A'}:${quote.code}`;
-              const isSelected = quoteKey === selectedStockKey;
+              const targetKey = selectedStock ? `${selectedStock.market ?? 'A'}:${selectedStock.code}` : '';
+              const isSelected = quoteKey === targetKey;
+              const targetText = `${quote.name} ${quote.code}`;
 
               return (
                 <button
                   className={`min-h-24 w-[calc((100%-1rem)/3)] rounded-xl border px-2 py-2 text-left transition sm:min-h-28 sm:w-28 ${isSelected ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'bg-slate-50 hover:border-primary/40'}`}
                   key={`${quote.market}-${quote.code}`}
-                  onClick={() => setSelectedStockKey(quoteKey)}
+                  onClick={() => setAnalysisTargetText(targetText)}
                   type="button"
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -693,7 +701,7 @@ const FinancialAnalysisPage = () => {
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="font-semibold">歷史報告</h2>
-                <p className="mt-1 text-sm text-muted-foreground">只保存本用戶的股票、問題、回答和 token 記錄；不保存歷史上傳資料。</p>
+                <p className="mt-1 text-sm text-muted-foreground">只保存本用戶的分析對象、問題、回答和 token 記錄；不保存歷史上傳資料。</p>
               </div>
               <button
                 className="rounded-xl border px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-70"

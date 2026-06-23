@@ -2214,12 +2214,12 @@ const buildFinancialAnalysis = async (user: { id: string; email: string }, reque
   const content: ReaderMessageContent = [
     {
       type: 'text',
-      text: `本次分析股票：${request.stock.name}（${request.stock.code}，${request.stock.market ?? 'A'}）
+      text: `本次分析对象：${request.stock.name}（${request.stock.code}，${request.stock.market ?? 'A'}）
 分析主题或问题：${request.topic?.trim() || '请综合分析上传的财务报告、走势图、K线和盘口材料。'}
 分析模式：${analysisMode === 'quality' ? '高质量模式，需要更严格地交叉核验材料、历史档案、基本面和盘面信号。' : '一般模式，直接基于现有材料给出清晰判断。'}
 
-该股票历史 AI 分析档案：
-${stockArchiveContext || '暂无历史档案，这是该股票第一次财务/股价分析。'}
+该分析对象历史 AI 分析档案：
+${stockArchiveContext || '暂无历史档案，这是该对象第一次财务/股价分析。'}
 
 本用户最近对话历史：
 ${formatConversationHistoryForReaderPrompt(request.conversationHistory) || '暂无最近对话历史。'}

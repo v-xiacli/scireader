@@ -620,7 +620,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
 
   const askFinancialAgent = useCallback(
     async (prompt: string) => {
-      if (!financialContext?.selectedStock) throw new Error('请先在财务分析页面选择本次要分析的股票。');
+      if (!financialContext?.selectedStock) throw new Error('请先在财务分析页面输入拟分析板块或股票。');
       if (!financialContext.materials.length) throw new Error('请先上传财报、K线图、盘口截图或走势图。');
 
       const response = await fetch('/api/reader-agent/financial-analysis', {
@@ -1297,7 +1297,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
 
     if (isFinancialChat) {
       const loadingId = crypto.randomUUID();
-      const stockLabel = financialContext?.selectedStock ? `${financialContext.selectedStock.name} ${financialContext.selectedStock.code}` : '未选择股票';
+      const stockLabel = financialContext?.selectedStock ? `${financialContext.selectedStock.name} ${financialContext.selectedStock.code}` : '未填写分析对象';
       const userMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'user',
@@ -1513,7 +1513,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
             </div>
             <p className="truncate text-[11px] text-muted-foreground">
               {isFinancialChat
-                ? `${financialContext?.selectedStock ? `${financialContext.selectedStock.name} ${financialContext.selectedStock.code}` : '请选择股票'} · ${financialContext?.materials.length ?? 0} 个材料 · 3x token`
+                ? `${financialContext?.selectedStock ? `${financialContext.selectedStock.name} ${financialContext.selectedStock.code}` : '请输入拟分析对象'} · ${financialContext?.materials.length ?? 0} 个材料 · 3x token`
                 : paper?.title ?? 'Ask without opening a paper'}
             </p>
           </div>
