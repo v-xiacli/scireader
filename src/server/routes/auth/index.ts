@@ -39,7 +39,7 @@ const viewerPreferencesSchema = z.object({
   chatPosition: z.object({ x: z.number(), y: z.number() }).optional(),
   chatSize: z.object({ width: z.number(), height: z.number() }).optional(),
   chatFontSize: z.enum(['xs', 'small', 'medium', 'large', 'xl']).optional(),
-  readingMode: z.enum(['reviewer', 'reader']).optional(),
+  readingMode: z.enum(['quality', 'detailed', 'simple', 'reviewer', 'reader']).optional(),
   detailedReport: z.boolean().optional(),
 });
 
@@ -54,7 +54,7 @@ const uploadedPaperSchema = z.object({
   filePath: z.string(),
   journal: z.string().optional(),
   year: z.string().optional(),
-  readingMode: z.enum(['reviewer', 'reader']).optional(),
+  readingMode: z.enum(['quality', 'detailed', 'simple', 'reviewer', 'reader']).optional(),
   detailedReport: z.boolean().optional(),
 });
 

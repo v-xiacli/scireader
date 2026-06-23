@@ -1,4 +1,4 @@
-export type PaperReadingMode = 'reviewer' | 'reader';
+export type PaperReadingMode = 'quality' | 'detailed' | 'simple' | 'reviewer' | 'reader';
 
 export interface PaperSummary {
   id: string;
@@ -13,6 +13,7 @@ export interface PaperSummary {
   year?: string;
   readingMode?: PaperReadingMode;
   detailedReport?: boolean;
+  shouldAutoSummarize?: boolean;
 }
 
 export interface UserAccountSummary {

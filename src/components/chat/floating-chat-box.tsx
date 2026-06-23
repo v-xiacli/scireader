@@ -114,6 +114,44 @@ type ImagePageRange = {
 };
 
 const paperReadingPrompts: Record<PaperReadingMode, string> = {
+  quality: `You are SCIReader's high-quality academic paper analyst. Use the strongest available evidence in the paper and preserve technical precision.
+
+For normal chat questions, answer only the user's question. Do not generate a full report unless the user asks for a whole-paper summary.
+
+For a whole-paper summary, produce a rigorous but concise review report with these sections:
+1. Publication-level assessment: infer the technical field and likely paper level from contribution quality, evidence, novelty, validation, venue metadata, and writing.
+2. Verdict: what problem is solved, whether it is worth reading, and the evidence level (High/Medium/Low).
+3. Core mechanism: the actual physical, algorithmic, data, system, or engineering mechanism, including assumptions and boundary conditions.
+4. Key numbers: only the most important reported values, with units and operating conditions.
+5. Credibility check: experiments, simulations, measurements, baselines, ablations, statistics, deployment evidence, or domain logic.
+6. Innovation and transfer: whether novelty is strong, moderate, or incremental, and how it can be reused.
+7. Main weaknesses: missing evidence, hidden cost, narrow condition, reproducibility risk, or weak publication signals.
+
+Rules: be strict but evidence-based; do not fabricate; preserve citations, numbers, equations, figure/table labels, and Markdown structure.`,
+  detailed: `You are a cross-disciplinary engineering and applied-science paper reviewer. Be skeptical, concise, and evidence-based.
+
+For normal chat questions, answer only the user's question. Do not generate a full report unless the user asks for a whole-paper summary.
+
+For a whole-paper summary, produce a detailed Chinese review report with these sections:
+1. Verdict: what problem is solved, whether it is worth reading, and the evidence level.
+2. Core mechanism: the actual mechanism, assumptions, and boundary conditions.
+3. Key numbers: the most important reported values with units.
+4. Credibility check: whether experiments, simulations, measurements, baselines, ablations, statistics, deployment evidence, or domain logic support the claims.
+5. Main weaknesses: missing evidence, hidden cost, narrow condition, or reproducibility risk.
+
+Rules: no section-by-section narration; no long literature survey; if evidence is missing, say the paper does not provide sufficient information to determine.`,
+  simple: `You are SCIReader's fast academic reading assistant. Be concise and focus on transferable understanding.
+
+For normal chat questions, answer only the user's question.
+
+For a whole-paper summary, produce a short Chinese reading note with five compact sections:
+1. Core idea.
+2. Mechanism.
+3. Key numbers.
+4. How to reuse it.
+5. Limits.
+
+Rules: no broad literature essay; explain equations and figures only when they change the technical interpretation; keep the result short and anchored to paper text.`,
   reviewer: `You are a cross-disciplinary engineering and applied-science paper reviewer. Be skeptical, concise, and evidence-based.
 
 For normal chat questions, answer only the user's question. Do not generate a full report unless the user asks for a whole-paper summary.
@@ -138,6 +176,22 @@ For a whole-paper summary, produce a compact reading note with these five short 
 5. Limits: what is not proven, what operating range is narrow, and what should be checked before reuse.
 
 Rules: no section-by-section narration; no broad literature essay; explain equations and figures only when they change the technical interpretation; keep the whole report short, practical, and anchored to paper text.`,
+};
+
+const normalizePaperReadingMode = (mode: PaperReadingMode): PaperReadingMode => {
+  if (mode === 'quality' || mode === 'detailed' || mode === 'simple') return mode;
+  if (mode === 'reader') return 'simple';
+
+  return 'detailed';
+};
+
+const getPaperReadingModeLabel = (mode: PaperReadingMode) => {
+  const normalizedMode = normalizePaperReadingMode(mode);
+
+  if (normalizedMode === 'quality') return '高质量';
+  if (normalizedMode === 'simple') return '简单';
+
+  return '详细';
 };
 
 const chatFontSizeOrder: ChatFontSize[] = ['xs', 'small', 'medium', 'large', 'xl'];
@@ -380,11 +434,11 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
   const paperId = paper?.id;
   const paperPdfUrl = paper?.pdfUrl;
   const paperTitle = paper?.title;
-  const readingMode: PaperReadingMode = paper?.readingMode ?? 'reviewer';
+  const readingMode: PaperReadingMode = normalizePaperReadingMode(paper?.readingMode ?? 'detailed');
   const readingModePrompt = paperReadingPrompts[readingMode];
   const detailedReport = paper?.detailedReport ?? false;
   const summaryRunKey = getSummaryRunKey(paperId, paperPdfUrl, readingMode, detailedReport);
-  const readingModeLabel = `${readingMode === 'reviewer' ? '審稿人模式' : '讀者模式'} · ${detailedReport ? '詳細' : '極簡'}`;
+  const readingModeLabel = `${getPaperReadingModeLabel(readingMode)} · ${paper?.shouldAutoSummarize ? '解读中' : '待解读'}`;
   const fontSizeIndex = chatFontSizeOrder.indexOf(chatFontSize);
   const fontSizeStyle = chatFontSizeStyles[chatFontSize];
   const canDecreaseFontSize = fontSizeIndex > 0;
@@ -576,6 +630,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
           topic: prompt,
           files: financialContext.materials,
           stock: financialContext.selectedStock,
+          analysisMode: financialContext.analysisMode ?? 'normal',
           conversationHistory: buildConversationHistory(messages),
         }),
       });
@@ -800,6 +855,44 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
       setIsCheckingSummaryCost(false);
       setLargeSummaryWarning(null);
       setMessages(mockMessages);
+      return;
+    }
+
+    if (!paper?.shouldAutoSummarize) {
+      setPaperContextSummary('');
+      setSummaryProgress(null);
+      setIsSummarizing(false);
+      setIsCheckingSummaryCost(false);
+      setLargeSummaryWarning(null);
+      loadPaperHistory()
+        .then((history) => {
+          setMessages([
+            {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: '已打开论文。请先在论文库选择模式并点击“解读”，或直接在这里提出具体问题。',
+              contextLabel: 'Paper chat',
+            },
+            ...history.map((turn, index): ChatMessage => ({
+              id: `history-${turn.createdAt}-${index}`,
+              role: turn.role,
+              content: turn.content,
+              contextLabel: turn.role === 'assistant'
+                ? `${turn.routedBy === 'cheap-context' ? 'Saved answer · cheap context' : 'Saved answer · expensive reader'}${turn.inputTokens ? ` · ${turn.inputTokens.toLocaleString()} in / ${(turn.outputTokens ?? 0).toLocaleString()} out` : ''}`
+                : 'Saved question',
+            })),
+          ]);
+        })
+        .catch(() => {
+          setMessages([
+            {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: '已打开论文。请先在论文库选择模式并点击“解读”，或直接在这里提出具体问题。',
+              contextLabel: 'Paper chat',
+            },
+          ]);
+        });
       return;
     }
 
@@ -1198,8 +1291,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
     }
   };
 
-  const sendMessage = async () => {
-    const trimmed = input.trim();
+  const sendMessage = async (overrideInput?: string) => {
+    const trimmed = (overrideInput ?? input).trim();
     if (!trimmed || isThinking) return;
 
     if (isFinancialChat) {
@@ -1380,6 +1473,21 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
       setIsThinking(false);
     }
   };
+
+  useEffect(() => {
+    if (!isFinancialChat) return;
+
+    const handleFinancialStart = (event: Event) => {
+      const detail = (event as CustomEvent<{ prompt?: string }>).detail;
+      const prompt = detail?.prompt?.trim() || '请综合分析本次上传材料，并结合该股票历史档案给出交易员视角的判断。';
+
+      void sendMessage(prompt);
+    };
+
+    window.addEventListener('financial-analysis-start', handleFinancialStart);
+
+    return () => window.removeEventListener('financial-analysis-start', handleFinancialStart);
+  }, [isFinancialChat, sendMessage]);
 
   return (
     <aside

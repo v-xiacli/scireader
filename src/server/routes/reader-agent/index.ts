@@ -138,7 +138,7 @@ type FinancialStockArchiveEntry = {
   };
 };
 
-type PaperReadingMode = 'reviewer' | 'reader';
+type PaperReadingMode = 'quality' | 'detailed' | 'simple' | 'reviewer' | 'reader';
 
 const MAX_EXTRACTED_TEXT_CHARS = 600_000;
 const MAX_DIRECT_READER_TEXT_CHARS = 140_000;
@@ -167,7 +167,7 @@ const readerRequestSchema = z.object({
   journal: z.string().optional(),
   year: z.string().optional(),
   paperContextSummary: z.string().optional(),
-  readingMode: z.enum(['reviewer', 'reader']).optional(),
+  readingMode: z.enum(['quality', 'detailed', 'simple', 'reviewer', 'reader']).optional(),
   modePrompt: z.string().optional(),
   detailedReport: z.boolean().optional(),
   conversationHistory: z
@@ -203,6 +203,7 @@ const financialAnalysisRequestSchema = z.object({
     code: z.string().trim().min(1).max(24),
     market: z.enum(['A', 'US', 'HK', 'FX']).optional(),
   }),
+  analysisMode: z.enum(['quality', 'normal']).optional(),
   conversationHistory: z
     .array(
       z.object({
@@ -541,7 +542,14 @@ const getPaperIdentitySlug = (request: Pick<z.infer<typeof readerRequestSchema>,
     year: request.year,
   });
 
-const getReadingMode = (request: Pick<z.infer<typeof readerRequestSchema>, 'readingMode'>): PaperReadingMode => request.readingMode ?? 'reviewer';
+const getReadingMode = (request: Pick<z.infer<typeof readerRequestSchema>, 'readingMode'>): PaperReadingMode => {
+  if (request.readingMode === 'quality' || request.readingMode === 'detailed' || request.readingMode === 'simple') return request.readingMode;
+  if (request.readingMode === 'reader') return 'simple';
+
+  return 'detailed';
+};
+
+const isQualityReadingMode = (request: Pick<z.infer<typeof readerRequestSchema>, 'readingMode'>) => getReadingMode(request) === 'quality';
 
 const getSummaryDetailMode = (request: Pick<z.infer<typeof readerRequestSchema>, 'detailedReport'>) => request.detailedReport === true ? 'detailed' : 'brief';
 
@@ -2189,7 +2197,8 @@ const financialAnalystSystemPrompt = `你是一个在北京金融界头部证券
 你正在帮助用户分析财务报告、走势图、K线、盘口截图和相关材料。请保持交易员视角，但必须谨慎：不要编造不存在的数据，不要承诺收益，不要给出确定性买卖指令。必须使用简体中文输出，且输出必须包含“风险提示：以下仅为研究分析，不构成投资建议”。`;
 
 const buildFinancialAnalysis = async (user: { id: string; email: string }, request: z.infer<typeof financialAnalysisRequestSchema>) => {
-  const modelSelection = selectExpensiveReaderModel();
+  const analysisMode = request.analysisMode ?? 'normal';
+  const modelSelection = analysisMode === 'quality' ? selectExpertReviewModel() : selectExpensiveReaderModel();
   const client = createAnthropicClient(modelSelection.target);
   const stockArchive = await loadFinancialStockArchive(user.id, request.stock);
   const stockArchiveContext = formatFinancialStockArchiveContext(stockArchive);
@@ -2198,6 +2207,7 @@ const buildFinancialAnalysis = async (user: { id: string; email: string }, reque
       type: 'text',
       text: `本次分析股票：${request.stock.name}（${request.stock.code}，${request.stock.market ?? 'A'}）
 分析主题或问题：${request.topic?.trim() || '请综合分析上传的财务报告、走势图、K线和盘口材料。'}
+分析模式：${analysisMode === 'quality' ? '高质量模式，需要更严格地交叉核验材料、历史档案、基本面和盘面信号。' : '一般模式，直接基于现有材料给出清晰判断。'}
 
 该股票历史 AI 分析档案：
 ${stockArchiveContext || '暂无历史档案，这是该股票第一次财务/股价分析。'}
@@ -2284,6 +2294,7 @@ ${formatConversationHistoryForReaderPrompt(request.conversationHistory) || '暂�
     cacheCreationInputTokens: usageWithCache.cache_creation_input_tokens ?? 0,
     cacheReadInputTokens: usageWithCache.cache_read_input_tokens ?? 0,
     archiveEntryCount: stockArchive.length,
+    analysisMode,
   };
 };
 
@@ -3075,14 +3086,23 @@ const SUMMARY_BRIEF_SINGLE_PASS_MAX_CHARS = 60_000;
 const SUMMARY_CHUNK_TIMEOUT_MS = 90_000;
 const SUMMARY_FINAL_TIMEOUT_MS = 120_000;
 
-const getCompactSummaryInstruction = (mode: PaperReadingMode) =>
-  mode === 'reviewer'
-    ? 'You are a cross-disciplinary engineering and applied-science reviewer. Extract only the real technical mechanism, novelty, key numbers with units, evidence strength, paper tier clues, and the largest credibility risk. Be terse.'
-    : 'You are a cross-disciplinary engineering and applied-science research reader. Extract only the core technical idea, mechanism, key numbers with units, reusable design insight, paper tier clues, and limits. Be terse.';
+const getCompactSummaryInstruction = (mode: PaperReadingMode) => {
+  const normalizedMode = mode === 'reader' ? 'simple' : mode === 'reviewer' ? 'detailed' : mode;
+
+  if (normalizedMode === 'quality') {
+    return 'You are SCIReader high-quality academic analyst. Extract the real technical mechanism, novelty, key numbers with units, evidence strength, publication-level clues, innovation type, transfer value, and credibility risk. Be strict and evidence-based.';
+  }
+
+  if (normalizedMode === 'simple') {
+    return 'You are a fast cross-disciplinary research reader. Extract only the core technical idea, mechanism, key numbers with units, reusable design insight, and limits. Be terse.';
+  }
+
+  return 'You are a cross-disciplinary engineering and applied-science reviewer. Extract the real technical mechanism, novelty, key numbers with units, evidence strength, and the largest credibility risk. Be terse.';
+};
 
 const getSummaryLanguageInstruction = (language: 'english' | 'chinese') =>
   language === 'chinese'
-    ? 'Respond in Chinese. The source paper is primarily Chinese, so do not translate the paper into English first. Preserve numbers, units, equations, figure/table labels, citations, and Markdown structure.'
+    ? 'Respond in Chinese. Do not translate the paper into English first. Preserve numbers, units, equations, figure/table labels, citations, and Markdown structure.'
     : 'Respond in English. The final result may be translated to Chinese by a low-cost model; preserve numbers, units, equations, figure/table labels, citations, and Markdown structure.';
 
 const briefSummaryPrompt = `你将收到一份针对某篇论文生成的"深度阅读笔记"（完整版，可能来�?审稿模式"�?写稿模式"两种模板之一）�?
@@ -3709,8 +3729,10 @@ const generateChunkedEnglishSummary = async (
       });
     });
 
-    const wantsDetailedReport = request.detailedReport === true;
-    const summaryLanguage: 'english' | 'chinese' = extractedPdf.sourceLanguage === 'english' ? 'english' : 'chinese';
+    const readingMode = getReadingMode(request);
+    const wantsDetailedReport = readingMode === 'quality' || readingMode === 'detailed' || request.detailedReport === true;
+    const wantsTranslationPipeline = readingMode === 'quality' && extractedPdf.sourceLanguage === 'english';
+    const summaryLanguage: 'english' | 'chinese' = wantsTranslationPipeline ? 'english' : 'chinese';
     const summaryLanguageInstruction = getSummaryLanguageInstruction(summaryLanguage);
 
     console.log('[reader-agent:summarize] source language detected', {
@@ -3718,12 +3740,14 @@ const generateChunkedEnglishSummary = async (
       paperId: request.paperId,
       sourceLanguage: extractedPdf.sourceLanguage,
       summaryLanguage,
+      readingMode,
+      translationPipeline: wantsTranslationPipeline,
       extractedChars: extractedPdf.extractedChars,
       returnedChars: extractedPdf.returnedChars,
       wasTruncated: extractedPdf.wasTruncated,
     });
 
-    if (!wantsDetailedReport && extractedPdf.text.length <= SUMMARY_BRIEF_SINGLE_PASS_MAX_CHARS) {
+    if (readingMode === 'simple' && extractedPdf.text.length <= SUMMARY_BRIEF_SINGLE_PASS_MAX_CHARS) {
       setJobStatus({
         phase: 'brief-synthesis',
         currentChunk: undefined,
@@ -3784,7 +3808,7 @@ ${extractedPdf.text}`,
 
     const chunks = chunkExtractedPdfPages(extractedPdf.pages);
     const chunkNotes: string[] = [];
-    const compactInstruction = getCompactSummaryInstruction(getReadingMode(request));
+    const compactInstruction = getCompactSummaryInstruction(readingMode);
     let inputTokens = 0;
     let outputTokens = 0;
     let model = '';
@@ -3927,7 +3951,7 @@ ${chunk.text.slice(0, 5000)}`,
       });
     }
 
-    if (request.detailedReport !== true) {
+    if (readingMode === 'simple') {
       const combinedChunkNotes = chunkNotes.join('\n\n---\n\n');
 
       setJobStatus({
@@ -4123,7 +4147,8 @@ const startSummaryGenerationJob = (
     });
 
     const result = await generateChunkedEnglishSummary(request, jobId, setJobStatus);
-    const wantsDetailedReport = request.detailedReport === true;
+    const readingMode = getReadingMode(request);
+    const wantsDetailedReport = readingMode === 'quality' || readingMode === 'detailed' || request.detailedReport === true;
     const alreadyChinese = result.responseLanguage === 'chinese';
 
     setJobStatus({
@@ -4168,8 +4193,8 @@ const startSummaryGenerationJob = (
         outputTokens,
         billableTokens,
         metadata: {
-          detailedReport: wantsDetailedReport,
-          readingMode: getReadingMode(request),
+      detailedReport: wantsDetailedReport,
+      readingMode,
           summaryStoragePath,
           jobId,
         },
@@ -4812,7 +4837,8 @@ const app = new Hono()
         blobRecords: blobExternalEvaluations.length,
       });
       const sourceLanguage = await detectSourceLanguageForAsk(request, storagePath);
-      const shouldAskExpensiveReaderInChinese = sourceLanguage !== 'english';
+      const shouldUseTranslationPipeline = isQualityReadingMode(request) && sourceLanguage === 'english';
+      const shouldAskExpensiveReaderInChinese = !shouldUseTranslationPipeline;
       const translatedPrompt = shouldAskExpensiveReaderInChinese
         ? { text: request.prompt, model: 'source-language-direct', inputTokens: 0, outputTokens: 0 }
         : await translateUserQuestionToEnglish(request);
@@ -4822,6 +4848,8 @@ const app = new Hono()
       console.log('[reader-agent:ask] source language routing', {
         paperId: request.paperId,
         sourceLanguage,
+        readingMode: getReadingMode(request),
+        translationPipeline: shouldUseTranslationPipeline,
         expensiveReaderLanguage: shouldAskExpensiveReaderInChinese ? 'chinese' : 'english',
       });
 
@@ -5196,6 +5224,7 @@ const app = new Hono()
         metadata: {
           topic: request.topic,
           stock: request.stock,
+          analysisMode: request.analysisMode ?? 'normal',
           cacheCreationInputTokens: result.cacheCreationInputTokens,
           cacheReadInputTokens: result.cacheReadInputTokens,
           baseBillableTokens,

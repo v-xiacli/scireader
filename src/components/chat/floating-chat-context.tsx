@@ -21,6 +21,7 @@ export type FloatingFinancialContext = {
   active: boolean;
   materials: FloatingFinancialMaterial[];
   selectedStock: FloatingFinancialStock | null;
+  analysisMode?: 'quality' | 'normal';
   billingMultiplier: number;
 };
 

@@ -1,12 +1,13 @@
 'use client';
 
-import { ArrowLeft, BarChart3, Loader2, Trash2, Upload } from 'lucide-react';
+import { ArrowLeft, BarChart3, Loader2, Trash2, Upload, WalletCards } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 
 import { useFloatingChat } from '@/components/chat/floating-chat-context';
 
 type AuthUser = { id: string; email: string };
+type TokenAccount = { tokenBalance: number; tokenUsed: number; tokenAvailable: number };
 
 type FinancialMaterial = {
   name: string;
@@ -49,10 +50,23 @@ type StockQuote = StockWatchlistItem & {
   currency: string;
 };
 
+type FinancialAnalysisMode = 'quality' | 'normal';
+
+const financialAnalysisModes: Array<{ id: FinancialAnalysisMode; label: string; description: string }> = [
+  { id: 'quality', label: '高質量', description: '使用更強的分析鏈路，適合正式財報和複雜盤面。' },
+  { id: 'normal', label: '一般', description: '直接分析材料，適合快速判斷。' },
+];
+
 const formatDate = (value: string) => {
   const date = new Date(value);
 
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+};
+
+const formatMaterialSize = (bytes: number) => {
+  if (!bytes) return '0 MB';
+
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 };
 
 const formatStockWatchlistText = (watchlist: StockWatchlistItem[]) =>
@@ -76,6 +90,7 @@ const FinancialAnalysisPage = () => {
   const { setFinancialContext } = useFloatingChat();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [tokenAccount, setTokenAccount] = useState<TokenAccount | null>(null);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
   const [isFinancialEnabled, setIsFinancialEnabled] = useState(false);
   const [isActivatingFinancial, setIsActivatingFinancial] = useState(false);
@@ -91,6 +106,7 @@ const FinancialAnalysisPage = () => {
   const [isWatchlistEditing, setIsWatchlistEditing] = useState(false);
   const [quotesUpdatedAt, setQuotesUpdatedAt] = useState<string | null>(null);
   const [selectedStockKey, setSelectedStockKey] = useState('');
+  const [financialAnalysisMode, setFinancialAnalysisMode] = useState<FinancialAnalysisMode>('normal');
   const [reports, setReports] = useState<FinancialReport[]>([]);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [reportsMessage, setReportsMessage] = useState<string | null>(null);
@@ -98,6 +114,7 @@ const FinancialAnalysisPage = () => {
   const isLoggedIn = Boolean(authUser);
   const selectedStock = stockWatchlist.find((stock) => `${stock.market ?? 'A'}:${stock.code}` === selectedStockKey) ?? stockWatchlist[0] ?? null;
   const selectedReport = reports.find((report) => report.id === selectedReportId) ?? null;
+  const materialSizeTotal = materials.reduce((total, file) => total + file.size, 0);
 
   const loadFinancialAccess = async () => {
     try {
@@ -122,6 +139,17 @@ const FinancialAnalysisPage = () => {
     } catch (error) {
       setReports([]);
       setReportsMessage(error instanceof Error ? error.message : 'Financial reports failed.');
+    }
+  };
+
+  const loadTokenAccount = async () => {
+    try {
+      const response = await fetch('/api/auth/token-account');
+      const result = await response.json();
+
+      setTokenAccount(response.ok ? result.tokenAccount : null);
+    } catch {
+      setTokenAccount(null);
     }
   };
 
@@ -226,10 +254,12 @@ const FinancialAnalysisPage = () => {
 
         if (response.ok && result.user) {
           setAuthUser(result.user);
+          if (result.tokenAccount) setTokenAccount(result.tokenAccount);
           setIsFinancialEnabled(Boolean(result.financialAnalysisEnabled));
           await loadStockWatchlist();
           await loadFinancialAccess();
           await loadReports();
+          await loadTokenAccount();
         }
       } catch {
         setAuthUser(null);
@@ -258,9 +288,10 @@ const FinancialAnalysisPage = () => {
       active: isFinancialEnabled,
       materials,
       selectedStock,
+      analysisMode: financialAnalysisMode,
       billingMultiplier: 3,
     });
-  }, [isFinancialEnabled, materials, selectedStock, setFinancialContext]);
+  }, [financialAnalysisMode, isFinancialEnabled, materials, selectedStock, setFinancialContext]);
 
   useEffect(() => () => setFinancialContext(null), [setFinancialContext]);
 
@@ -324,10 +355,38 @@ const FinancialAnalysisPage = () => {
     }
   };
 
+  const startFinancialAnalysis = () => {
+    if (!isLoggedIn) {
+      setMessage('請先登入再使用財務分析。');
+      return;
+    }
+
+    if (!isFinancialEnabled) {
+      setFinancialAccessMessage('請先開通財務分析功能。');
+      return;
+    }
+
+    if (!selectedStock) {
+      setStockMessage('請先選擇本次要分析的股票。');
+      return;
+    }
+
+    if (!materials.length) {
+      setMessage('請先上傳財報、K 線圖、盤口截圖或走勢圖。');
+      return;
+    }
+
+    window.dispatchEvent(new CustomEvent('financial-analysis-start', {
+      detail: {
+        prompt: `请综合分析 ${selectedStock.name}（${selectedStock.code}）的本次上传材料，并结合该股票历史档案给出交易员视角的判断。`,
+      },
+    }));
+  };
+
   return (
     <main className="min-h-screen bg-slate-50">
       <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-4 sm:px-6">
-        <header className="flex flex-col gap-3 border-b bg-slate-50 pb-4 sm:flex-row sm:items-center sm:justify-between">
+        <header className="flex flex-col gap-4 border-b bg-slate-50 pb-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
             <Link className="inline-flex size-10 items-center justify-center rounded-xl border bg-white text-slate-600 hover:text-primary" href="/">
               <ArrowLeft className="size-5" />
@@ -343,16 +402,58 @@ const FinancialAnalysisPage = () => {
               <p className="mt-1 text-xs font-medium text-amber-700">該功能需要單獨開通；token 使用費按正常分析的 3 倍計算。</p>
             </div>
           </div>
-          <button
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
-            disabled={isUploading || !isLoggedIn || !isFinancialEnabled || materials.length >= 12}
-            onClick={() => fileInputRef.current?.click()}
-            type="button"
-          >
-            {isUploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
-            {isUploading ? '上傳中...' : '上傳材料'}
-          </button>
+          <div className="flex flex-col gap-3 sm:flex-row lg:items-center lg:justify-end">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border bg-white p-4 text-right shadow-sm">
+                <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
+                  <WalletCards className="size-4" /> Token 預估
+                </div>
+                <p className="mt-2 text-2xl font-semibold">{materials.length ? `${materials.length} 份` : '--'}</p>
+                <p className="mt-1 max-w-44 text-xs text-muted-foreground">
+                  {materials.length ? `${formatMaterialSize(materialSizeTotal)} 材料；提交後按實際消耗 ×3` : '上傳財報或圖片後開始分析。'}
+                </p>
+              </div>
+              <div className="rounded-2xl border bg-white p-4 text-right shadow-sm">
+                <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
+                  <WalletCards className="size-4" /> Token 餘額
+                </div>
+                <p className="mt-2 text-2xl font-semibold">{tokenAccount ? tokenAccount.tokenAvailable.toLocaleString() : '10,000'}</p>
+                <p className="mt-1 max-w-44 text-xs text-muted-foreground">
+                  {tokenAccount ? `${tokenAccount.tokenUsed.toLocaleString()} 已用 / ${tokenAccount.tokenBalance.toLocaleString()} 總額` : '預設帳戶額度'}
+                </p>
+              </div>
+            </div>
+            <button
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
+              disabled={isUploading || !isLoggedIn || !isFinancialEnabled || materials.length >= 12}
+              onClick={() => fileInputRef.current?.click()}
+              type="button"
+            >
+              {isUploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+              {isUploading ? '上傳中...' : '上傳材料'}
+            </button>
+          </div>
         </header>
+
+        <section className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            本網站不面向中國大陸用戶開放。
+          </div>
+          <div className="mt-4 grid gap-3 border-t pt-4 text-sm md:grid-cols-3">
+            <div>
+              <p className="font-medium">充值參考</p>
+              <p className="mt-1 text-muted-foreground">僅接受美元充值；US$1 ≈ 2,000,000 token，首登贈送 10,000 token。</p>
+            </div>
+            <div>
+              <p className="font-medium">財務扣費</p>
+              <p className="mt-1 text-muted-foreground">財務分析按模型實際輸入/輸出折算後，再按正常分析的 3 倍扣費。</p>
+            </div>
+            <div>
+              <p className="font-medium">材料說明</p>
+              <p className="mt-1 text-muted-foreground">可上傳多份財報 PDF、K 線圖、盤口截圖和走勢圖；歷史報告不保存原始上傳材料。</p>
+            </div>
+          </div>
+        </section>
 
         {!isFinancialEnabled ? (
           <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
@@ -399,6 +500,27 @@ const FinancialAnalysisPage = () => {
                   <option value="">請選擇股票</option>
                 )}
               </select>
+              <div className="flex rounded-xl border p-1">
+                {financialAnalysisModes.map((mode) => (
+                  <button
+                    className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-sm transition ${financialAnalysisMode === mode.id ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
+                    key={mode.id}
+                    onClick={() => setFinancialAnalysisMode(mode.id)}
+                    title={mode.description}
+                    type="button"
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                className="rounded-xl bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
+                disabled={!isLoggedIn || !isFinancialEnabled || !selectedStock || !materials.length}
+                onClick={startFinancialAnalysis}
+                type="button"
+              >
+                開始分析
+              </button>
               <button
                 className="rounded-xl border px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-70"
                 disabled={isQuotesLoading || !stockWatchlist.length}

@@ -1,7 +1,6 @@
 ﻿'use client';
 
 import { ArrowRight, FileText, Loader2, MessageSquareText, PenLine, Trash2, WalletCards } from 'lucide-react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
@@ -51,9 +50,24 @@ type ExtractedPaperMetadata = {
 };
 
 const readingModes: Array<{ id: PaperReadingMode; label: string; description: string }> = [
-  { id: 'reviewer', label: '審稿人模式', description: '重點檢查創新性、證據強度、可信度和侷限。' },
-  { id: 'reader', label: '讀者模式', description: '重點提煉思路、可複用方法、文獻定位和後續問題。' },
+  { id: 'quality', label: '高質量', description: '最高品質解讀；英文材料會先走英文精讀，再轉為中文輸出。' },
+  { id: 'detailed', label: '詳細', description: '直接用中文生成完整報告，不額外走翻譯鏈路。' },
+  { id: 'simple', label: '簡單', description: '直接用中文生成精簡速覽，適合快速了解。' },
 ];
+
+const normalizeResearchReadingMode = (mode?: PaperReadingMode): PaperReadingMode => {
+  if (mode === 'quality' || mode === 'detailed' || mode === 'simple') return mode;
+  if (mode === 'reviewer') return 'detailed';
+  if (mode === 'reader') return 'simple';
+
+  return 'detailed';
+};
+
+const getResearchReadingModeLabel = (mode: PaperReadingMode) => {
+  const normalizedMode = normalizeResearchReadingMode(mode);
+
+  return readingModes.find((item) => item.id === normalizedMode)?.label ?? '詳細';
+};
 
 const normalizeDownloadUrl = (downloadUrl: string) => {
   const trimmed = downloadUrl.trim();
@@ -103,8 +117,9 @@ const HomePage = () => {
   const [tokenEstimate, setTokenEstimate] = useState<TokenEstimate | null>(null);
   const [tokenEstimateMessage, setTokenEstimateMessage] = useState('Upload a PDF to estimate tokens.');
   const [tokenAccount, setTokenAccount] = useState<TokenAccount | null>(null);
-  const [readingMode, setReadingMode] = useState<PaperReadingMode>('reviewer');
+  const [readingMode, setReadingMode] = useState<PaperReadingMode>('detailed');
   const [detailedReport, setDetailedReport] = useState(false);
+  const [selectedPaperKey, setSelectedPaperKey] = useState('');
   const [writingTopic, setWritingTopic] = useState('');
   const [writingLanguage, setWritingLanguage] = useState<WritingLanguage>('chinese');
   const [writingSelectedPaperKeys, setWritingSelectedPaperKeys] = useState<string[]>([]);
@@ -121,12 +136,13 @@ const HomePage = () => {
   const isLoggedIn = Boolean(authUser);
   const papers = uploadedPapers;
   const getWritingPaperKey = (paper: PaperSummary) => paper.filePath ?? paper.id;
+  const selectedPaper = papers.find((paper) => getWritingPaperKey(paper) === selectedPaperKey) ?? papers.find((paper) => paper.filePath) ?? null;
   const selectedWritingPapers = uploadedPapers.filter((paper) => writingSelectedPaperKeys.includes(getWritingPaperKey(paper)));
   const selectedWritingArticles = writingArticles.filter((article) => writingSelectedArticlePaths.includes(article.storagePath));
   const selectedWritingMaterialCount = selectedWritingPapers.length + selectedWritingArticles.length;
 
   const applyViewerPreferences = (preferences?: ViewerPreferences | null) => {
-    if (preferences?.readingMode) setReadingMode(preferences.readingMode);
+    if (preferences?.readingMode) setReadingMode(normalizeResearchReadingMode(preferences.readingMode));
     if (typeof preferences?.detailedReport === 'boolean') setDetailedReport(preferences.detailedReport);
   };
 
@@ -155,6 +171,7 @@ const HomePage = () => {
       const result = await response.json();
       const papers = response.ok ? result.papers : [];
       setUploadedPapers(papers);
+      setSelectedPaperKey((current) => current || papers.find((paper: PaperSummary) => paper.filePath)?.filePath || '');
       if (!papers.some((paper: PaperSummary) => paper.filePath)) setTokenEstimateMessage('Upload a PDF to estimate tokens.');
     } catch {
       setUploadedPapers([]);
@@ -381,7 +398,7 @@ const HomePage = () => {
         journal: metadata.journal?.trim(),
         year: metadata.year?.trim(),
         readingMode,
-        detailedReport,
+        detailedReport: readingMode !== 'simple',
       };
 
       const saveResponse = await fetch('/api/auth/uploaded-papers', {
@@ -391,16 +408,31 @@ const HomePage = () => {
       });
       const saveResult = await saveResponse.json();
 
-      if (saveResponse.ok) setUploadedPapers(saveResult.papers);
+      if (saveResponse.ok) {
+        setUploadedPapers(saveResult.papers);
+        setSelectedPaperKey(uploadedPaper.filePath ?? uploadedPaper.id);
+      }
 
       void estimateTokenConsumption(uploadedPaper);
-
-      router.push(`/papers/${encodeURIComponent(paperId)}?pdfUrl=${encodeURIComponent(uploadedPaper.pdfUrl)}&filePath=${encodeURIComponent(uploadedPaper.filePath ?? '')}&title=${encodeURIComponent(uploadedPaper.title)}&authors=${encodeURIComponent(uploadedPaper.authors)}&journal=${encodeURIComponent(uploadedPaper.journal ?? '')}&year=${encodeURIComponent(uploadedPaper.year ?? '')}&readingMode=${readingMode}&detailedReport=${detailedReport ? '1' : '0'}`);
+      setUploadMessage('論文已上傳。請在列表中選定論文和模式，再點擊解讀。');
     } catch (error) {
       setUploadMessage(error instanceof Error ? error.message : 'Upload failed.');
     } finally {
       setIsUploading(false);
     }
+  };
+
+  const startPaperReading = (paper: PaperSummary | null = selectedPaper) => {
+    if (!paper?.filePath) {
+      setUploadMessage('請先選定一篇已上傳論文。');
+      return;
+    }
+
+    const normalizedMode = normalizeResearchReadingMode(readingMode);
+    const nextDetailedReport = normalizedMode !== 'simple';
+
+    saveReadingPreferences({ readingMode: normalizedMode, detailedReport: nextDetailedReport });
+    router.push(`/papers/${encodeURIComponent(paper.id)}?pdfUrl=${encodeURIComponent(paper.pdfUrl)}&filePath=${encodeURIComponent(paper.filePath)}&title=${encodeURIComponent(paper.title)}&authors=${encodeURIComponent(paper.authors)}&journal=${encodeURIComponent(paper.journal ?? '')}&year=${encodeURIComponent(paper.year ?? '')}&readingMode=${normalizedMode}&detailedReport=${nextDetailedReport ? '1' : '0'}&start=1`);
   };
 
   const handleRemovePaper = async (paper: PaperSummary) => {
@@ -1020,16 +1052,17 @@ const HomePage = () => {
                 type="button"
               >
                 {isUploading ? <Loader2 className="size-4 animate-spin" /> : null}
-                {isUploading ? 'Uploading...' : isLoggedIn ? 'Upload paper' : 'Login to upload'}
+                {isUploading ? '上傳中...' : isLoggedIn ? '上傳論文' : '登入後上傳'}
               </button>
               <div className="flex max-w-full rounded-xl border p-1">
                 {readingModes.map((mode) => (
                   <button
-                    className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-sm transition ${readingMode === mode.id ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
+                    className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-sm transition ${normalizeResearchReadingMode(readingMode) === mode.id ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
                     key={mode.id}
                     onClick={() => {
                       setReadingMode(mode.id);
-                      saveReadingPreferences({ readingMode: mode.id, detailedReport });
+                      setDetailedReport(mode.id !== 'simple');
+                      saveReadingPreferences({ readingMode: mode.id, detailedReport: mode.id !== 'simple' });
                     }}
                     title={mode.description}
                     type="button"
@@ -1039,32 +1072,28 @@ const HomePage = () => {
                 ))}
               </div>
               <button
-                className={`whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-medium transition ${detailedReport ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
-                onClick={() => {
-                  setDetailedReport((current) => {
-                    const nextDetailedReport = !current;
-                    saveReadingPreferences({ readingMode, detailedReport: nextDetailedReport });
-
-                    return nextDetailedReport;
-                  });
-                }}
-                title={detailedReport ? '生成完整閱讀報告' : '先生成極簡速覽'}
+                className="whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={!selectedPaper?.filePath}
+                onClick={() => startPaperReading()}
+                title={selectedPaper ? `解讀 ${selectedPaper.title}` : '請先選定論文'}
                 type="button"
               >
-                詳細報告 {detailedReport ? '開' : '關'}
+                解讀選定論文
               </button>
               {uploadMessage ? <p className="text-sm text-muted-foreground">{uploadMessage}</p> : null}
             </div>
             <div>
-              <h2 className="text-xl font-semibold">Your papers</h2>
+              <h2 className="text-xl font-semibold">你的論文</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {selectedPaper ? `已選定：${selectedPaper.title} · ${getResearchReadingModeLabel(readingMode)}` : '請先上傳並選定一篇論文。'}
+              </p>
             </div>
           </div>
 
           <div className="mt-6 grid gap-4">
             {papers.map((paper) => {
-              const paperHref = paper.filePath
-                ? `/papers/${encodeURIComponent(paper.id)}?pdfUrl=${encodeURIComponent(paper.pdfUrl)}&filePath=${encodeURIComponent(paper.filePath)}&title=${encodeURIComponent(paper.title)}&authors=${encodeURIComponent(paper.authors)}&journal=${encodeURIComponent(paper.journal ?? '')}&year=${encodeURIComponent(paper.year ?? '')}&readingMode=${readingMode}&detailedReport=${detailedReport ? '1' : '0'}`
-                : `/papers/${paper.id}?readingMode=${readingMode}&detailedReport=${detailedReport ? '1' : '0'}`;
+              const paperKey = getWritingPaperKey(paper);
+              const isSelectedForReading = paperKey === selectedPaperKey || (!selectedPaperKey && paper.filePath && selectedPaper?.filePath === paper.filePath);
               const canSelectForWriting = Boolean(isLoggedIn && paper.filePath);
               const isSelectedForWriting = canSelectForWriting && writingSelectedPaperKeys.includes(getWritingPaperKey(paper));
               const writingSelectControl = (
@@ -1089,31 +1118,52 @@ const HomePage = () => {
               );
               const content = (
                 <>
-                  <div>
+                  <div className="min-w-0">
                     <h3 className="font-semibold">{paper.title}</h3>
                     <p className="mt-1 text-sm text-muted-foreground">{paper.journal ? [paper.journal, paper.year].filter(Boolean).join(' · ') : paper.authors}</p>
                     <p className="mt-2 text-xs uppercase tracking-wide text-muted-foreground">
                       {paper.pages ? `${paper.pages} pages · ` : ''}{paper.status}
                     </p>
                   </div>
-                  <ArrowRight className="size-5 text-muted-foreground transition group-hover:translate-x-1 group-hover:text-primary" />
+                  <span className={`rounded-full px-3 py-1 text-xs font-medium ${isSelectedForReading ? 'bg-primary text-primary-foreground' : 'bg-slate-100 text-slate-600'}`}>
+                    {isSelectedForReading ? '已選定' : '待選定'}
+                  </span>
                 </>
               );
 
               return isLoggedIn ? (
                 <div
-                  className="group flex items-center justify-between gap-3 rounded-2xl border p-4 transition hover:border-primary hover:bg-slate-50"
+                  className={`group flex items-center justify-between gap-3 rounded-2xl border p-4 text-left transition hover:border-primary hover:bg-slate-50 ${isSelectedForReading ? 'border-primary bg-primary/5 ring-1 ring-primary' : ''}`}
                   key={`${paper.id}-${paper.filePath ?? 'sample'}`}
+                  onClick={() => setSelectedPaperKey(paperKey)}
+                  role="button"
+                  tabIndex={0}
                 >
                   {writingSelectControl}
-                  <Link className="flex min-w-0 flex-1 items-center justify-between gap-3" href={paperHref}>
+                  <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
                     {content}
-                  </Link>
+                  </div>
+                  {paper.filePath ? (
+                    <button
+                      className="rounded-xl border bg-white px-3 py-2 text-sm font-medium text-primary transition hover:bg-primary hover:text-primary-foreground"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setSelectedPaperKey(paperKey);
+                        startPaperReading(paper);
+                      }}
+                      type="button"
+                    >
+                      解讀
+                    </button>
+                  ) : null}
                   {paper.filePath ? (
                     <button
                       className="rounded-xl border p-2 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
                       disabled={deletingFilePath === paper.filePath}
-                      onClick={() => void handleRemovePaper(paper)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleRemovePaper(paper);
+                      }}
                       title="Remove from my account only"
                       type="button"
                     >

@@ -20,6 +20,7 @@ interface PaperPageProps {
     year?: string;
     readingMode?: string;
     detailedReport?: string;
+    start?: string;
   };
 }
 
@@ -38,7 +39,20 @@ const normalizePdfUrl = (pdfUrl: string) => {
   return `https://${trimmed}`;
 };
 
-const normalizeReadingMode = (mode?: string): PaperReadingMode => (mode === 'reader' ? 'reader' : 'reviewer');
+const normalizeReadingMode = (mode?: string): PaperReadingMode => {
+  if (mode === 'quality' || mode === 'detailed' || mode === 'simple') return mode;
+  if (mode === 'reviewer') return 'detailed';
+  if (mode === 'reader') return 'simple';
+
+  return 'detailed';
+};
+
+const getReadingModeLabel = (mode: PaperReadingMode) => {
+  if (mode === 'quality') return '高質量';
+  if (mode === 'simple' || mode === 'reader') return '簡單';
+
+  return '詳細';
+};
 
 const normalizeDetailedReport = (value?: string) => value !== '0' && value !== 'false';
 
@@ -63,9 +77,10 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
             year: searchParams.year,
             readingMode,
             detailedReport,
+            shouldAutoSummarize: searchParams.start === '1',
           }
         : null,
-    [params.paperId, readingMode, detailedReport, searchParams?.authors, searchParams?.filePath, searchParams?.journal, searchParams?.pdfUrl, searchParams?.title, searchParams?.year],
+    [params.paperId, readingMode, detailedReport, searchParams?.authors, searchParams?.filePath, searchParams?.journal, searchParams?.pdfUrl, searchParams?.start, searchParams?.title, searchParams?.year],
   );
 
   useEffect(() => {
@@ -96,9 +111,9 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
         <Link className="text-sm font-medium text-primary" href="/research">
           ← 論文庫
         </Link>
-        <div className="text-sm text-muted-foreground">PDF viewer + large floating chat</div>
-        <div className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">{readingMode === 'reviewer' ? '審稿人模式' : '讀者模式'}</div>
-        <div className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{detailedReport ? '詳細報告' : '極簡速覽'}</div>
+        <div className="text-sm text-muted-foreground">PDF 閱讀器 + 浮動聊天窗</div>
+        <div className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">{getReadingModeLabel(readingMode)}</div>
+        <div className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{paper?.shouldAutoSummarize ? '開始解讀' : '僅打開'}</div>
       </nav>
       {paper ? (
         <div className="flex h-full min-h-0 justify-center overflow-hidden">
