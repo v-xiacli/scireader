@@ -704,7 +704,13 @@ const HomePage = () => {
           <div className="mt-5 grid gap-3 border-t pt-4 text-sm md:grid-cols-3">
             <div>
               <p className="font-medium">充值參考</p>
-              <p className="mt-1 text-muted-foreground">僅接受美元充值；US$1 ≈ 2,000,000 token，首登贈送 10,000 token。</p>
+              <p className="mt-1 text-muted-foreground">
+                僅接受美元充值；US$1 ≈ 2,000,000 token，首登贈送 10,000 token。需要購買更多 token，請發郵件至{' '}
+                <a className="font-medium text-primary underline-offset-4 hover:underline" href="mailto:sanbangzi@mailfence.com">
+                  sci reader &lt;sanbangzi@mailfence.com&gt;
+                </a>
+                。
+              </p>
             </div>
             <div>
               <p className="font-medium">扣費規則</p>
