@@ -2098,7 +2098,7 @@ const inferStockMarket = (code: string, market?: 'A' | 'US' | 'HK' | 'FX') => {
   if (market) return market;
   if (normalizedCode.toLowerCase().startsWith('hf_')) return 'FX';
   if (/^HK\.?\d{1,5}$/.test(normalizedCode)) return 'HK';
-  if (/^\d{5}$/.test(normalizedCode)) return 'HK';
+  if (/^\d{1,5}$/.test(normalizedCode)) return 'HK';
   if (/^[a-z]+$/i.test(normalizedCode)) return 'US';
   return 'A';
 };
@@ -2187,7 +2187,7 @@ const fetchStockQuotes = async (watchlist: z.infer<typeof stockWatchlistItemSche
     const change = Number.isFinite(price) && Number.isFinite(prevClose) ? price - prevClose : 0;
 
     quotes.push({
-      name: stock.name || parts[1] || stock.code,
+      name: parts[1] || stock.name || stock.code,
       code: displayCode,
       market,
       price: Number.isFinite(price) ? price : null,

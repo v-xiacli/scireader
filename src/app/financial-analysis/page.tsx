@@ -83,21 +83,34 @@ const normalizeStockCode = (code: string, market?: StockWatchlistItem['market'])
   return normalizedCode;
 };
 
+const inferInputMarket = (code: string, explicitMarket?: string): StockWatchlistItem['market'] => {
+  const normalizedMarket = explicitMarket?.toUpperCase();
+  const normalizedCode = code.trim().toUpperCase().replace(/\s+/g, '');
+
+  if (normalizedMarket && ['A', 'US', 'HK', 'FX'].includes(normalizedMarket)) return normalizedMarket as StockWatchlistItem['market'];
+  if (/^HK\.?\d{1,5}$/i.test(normalizedCode)) return 'HK';
+  if (/^\d{1,5}$/.test(normalizedCode)) return 'HK';
+  if (/^[A-Z]+$/.test(normalizedCode)) return 'US';
+  if (normalizedCode.toLowerCase().startsWith('hf_')) return 'FX';
+
+  return 'A';
+};
+
 const parseStockWatchlistText = (text: string): StockWatchlistItem[] =>
   text
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      const [name = '', code = '', market = 'A'] = line.split(/[,\s，]+/).map((part) => part.trim()).filter(Boolean);
-      const codeLooksHongKong = /^HK\.?\d{1,5}$/i.test(code);
-      const normalizedMarket = codeLooksHongKong
-        ? 'HK'
-        : ['A', 'US', 'HK', 'FX'].includes(market.toUpperCase())
-          ? (market.toUpperCase() as StockWatchlistItem['market'])
-          : 'A';
+      const parts = line.split(/[,\s，]+/).map((part) => part.trim()).filter(Boolean);
+      const singleCodeOnly = parts.length === 1;
+      const rawName = singleCodeOnly ? parts[0] : parts[0] ?? '';
+      const rawCode = singleCodeOnly ? parts[0] : parts[1] ?? '';
+      const rawMarket = singleCodeOnly ? undefined : parts[2];
+      const normalizedMarket = inferInputMarket(rawCode, rawMarket);
+      const normalizedCode = normalizeStockCode(rawCode, normalizedMarket);
 
-      return { name, code: normalizeStockCode(code, normalizedMarket), market: normalizedMarket };
+      return { name: rawName || normalizedCode, code: normalizedCode, market: normalizedMarket };
     })
     .filter((item) => item.name && item.code)
     .slice(0, 80);
@@ -128,7 +141,12 @@ const FinancialAnalysisPage = () => {
   const [reportsMessage, setReportsMessage] = useState<string | null>(null);
 
   const isLoggedIn = Boolean(authUser);
-  const selectedStock = stockWatchlist.find((stock) => `${stock.market ?? 'A'}:${stock.code}` === selectedStockKey) ?? stockWatchlist[0] ?? null;
+  const displayStocks = stockWatchlist.map((stock) => {
+    const quote = stockQuotes.find((item) => `${item.market ?? 'A'}:${item.code}` === `${stock.market ?? 'A'}:${stock.code}`);
+
+    return quote ? { ...stock, name: quote.name } : stock;
+  });
+  const selectedStock = displayStocks.find((stock) => `${stock.market ?? 'A'}:${stock.code}` === selectedStockKey) ?? displayStocks[0] ?? null;
   const selectedReport = reports.find((report) => report.id === selectedReportId) ?? null;
   const materialSizeTotal = materials.reduce((total, file) => total + file.size, 0);
 
@@ -508,7 +526,7 @@ const FinancialAnalysisPage = () => {
                 onChange={(event) => setSelectedStockKey(event.target.value)}
                 value={selectedStockKey}
               >
-                {stockWatchlist.length ? stockWatchlist.map((stock) => (
+                {displayStocks.length ? displayStocks.map((stock) => (
                   <option key={`${stock.market ?? 'A'}:${stock.code}`} value={`${stock.market ?? 'A'}:${stock.code}`}>
                     分析：{stock.name} {stock.code}
                   </option>
@@ -587,7 +605,7 @@ const FinancialAnalysisPage = () => {
 
               return (
                 <button
-                  className={`min-h-24 w-[calc(50%-0.25rem)] rounded-xl border px-2 py-2 text-left transition sm:min-h-28 sm:w-28 ${isSelected ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'bg-slate-50 hover:border-primary/40'}`}
+                  className={`min-h-24 w-[calc((100%-1rem)/3)] rounded-xl border px-2 py-2 text-left transition sm:min-h-28 sm:w-28 ${isSelected ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'bg-slate-50 hover:border-primary/40'}`}
                   key={`${quote.market}-${quote.code}`}
                   onClick={() => setSelectedStockKey(quoteKey)}
                   type="button"

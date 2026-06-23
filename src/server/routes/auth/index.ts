@@ -83,7 +83,7 @@ const defaultStockWatchlist: z.infer<typeof stockWatchlistSchema> = [
 const normalizeStockWatchlistItem = (item: z.infer<typeof stockWatchlistItemSchema>): z.infer<typeof stockWatchlistItemSchema> => {
   const rawCode = item.code.trim().toUpperCase().replace(/\s+/g, '');
   const prefixedHongKongCode = rawCode.match(/^HK\.?(\d{1,5})$/);
-  const market = prefixedHongKongCode ? 'HK' : item.market;
+  const market = prefixedHongKongCode || (!item.market && /^\d{1,5}$/.test(rawCode)) ? 'HK' : item.market;
   const code = market === 'HK' && /^\d{1,5}$/.test(prefixedHongKongCode?.[1] ?? rawCode)
     ? (prefixedHongKongCode?.[1] ?? rawCode).padStart(5, '0')
     : rawCode;
