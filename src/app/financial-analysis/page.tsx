@@ -590,15 +590,6 @@ const FinancialAnalysisPage = () => {
                 </p>
               </div>
             </div>
-            <button
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
-              disabled={isUploading || !isLoggedIn || !isFinancialEnabled || materials.length >= 12}
-              onClick={() => fileInputRef.current?.click()}
-              type="button"
-            >
-              {isUploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
-              {isUploading ? '上傳中...' : '上傳材料'}
-            </button>
           </div>
         </header>
 
@@ -766,26 +757,37 @@ const FinancialAnalysisPage = () => {
 
         <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(280px,420px)_minmax(0,1fr)]">
           <aside className="rounded-2xl border bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <h2 className="font-semibold">本次資料</h2>
                 <p className="mt-1 text-sm text-muted-foreground">只會分析這裡的資料；可從歷史資料拖入或點擊加入。</p>
               </div>
-              {materials.length ? (
+              <div className="flex flex-wrap gap-2 sm:justify-end">
                 <button
-                  className="text-sm font-medium text-slate-500 hover:text-red-600"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
+                  disabled={isUploading || !isLoggedIn || !isFinancialEnabled || materials.length >= 12}
+                  onClick={() => fileInputRef.current?.click()}
+                  type="button"
+                >
+                  {isUploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+                  {isUploading ? '上傳中...' : '上傳材料'}
+                </button>
+                {materials.length ? (
+                <button
+                  className="rounded-xl border px-3 py-2 text-sm font-medium text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
                   onClick={() => setMaterials([])}
                   type="button"
                 >
                   清空本次
                 </button>
-              ) : null}
+                ) : null}
+              </div>
             </div>
             {message ? <p className="mt-2 text-sm text-muted-foreground">{message}</p> : null}
             <input
               accept="application/pdf,image/*"
               className="hidden"
-                disabled={isUploading || !isLoggedIn || !isFinancialEnabled}
+              disabled={isUploading || !isLoggedIn || !isFinancialEnabled}
               multiple
               onChange={(event) => {
                 const files = event.target.files;
