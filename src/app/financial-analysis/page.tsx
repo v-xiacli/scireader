@@ -619,6 +619,23 @@ const FinancialAnalysisPage = () => {
           </div>
         </section>
 
+        {!isSessionLoading && !isLoggedIn ? (
+          <section className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="font-semibold text-blue-950">請先登入</h2>
+                <p className="mt-1 text-sm text-blue-900">財務分析需要登入帳戶後使用；登入窗口已移到主頁，登入後再進入本頁即可看到自選股、歷史資料和報告。</p>
+              </div>
+              <Link
+                className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+                href="/"
+              >
+                回首頁登入
+              </Link>
+            </div>
+          </section>
+        ) : null}
+
         {!isFinancialEnabled ? (
           <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
