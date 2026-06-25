@@ -584,7 +584,7 @@ const FinancialAnalysisPage = () => {
                 <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
                   <WalletCards className="size-4" /> Token 餘額
                 </div>
-                <p className="mt-2 text-2xl font-semibold">{tokenAccount ? tokenAccount.tokenAvailable.toLocaleString() : '10,000'}</p>
+                <p className="mt-2 text-2xl font-semibold">{tokenAccount ? tokenAccount.tokenAvailable.toLocaleString() : '200,000'}</p>
                 <p className="mt-1 max-w-44 text-xs text-muted-foreground">
                   {tokenAccount ? `${tokenAccount.tokenUsed.toLocaleString()} 已用 / ${tokenAccount.tokenBalance.toLocaleString()} 總額` : '預設帳戶額度'}
                 </p>
@@ -601,7 +601,7 @@ const FinancialAnalysisPage = () => {
             <div>
               <p className="font-medium">充值參考</p>
               <p className="mt-1 text-muted-foreground">
-                僅接受美元充值；US$1 ≈ 2,000,000 token，首登贈送 10,000 token。需要購買更多 token，請發郵件至{' '}
+                僅接受美元充值；US$1 ≈ 2,000,000 token，首登贈送 200,000 token。需要購買更多 token，請發郵件至{' '}
                 <a className="font-medium text-primary underline-offset-4 hover:underline" href="mailto:sanbangzi@mailfence.com">
                   sci reader &lt;sanbangzi@mailfence.com&gt;
                 </a>

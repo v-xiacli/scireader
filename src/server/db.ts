@@ -3,7 +3,7 @@
 let client: ReturnType<typeof neon> | null = null;
 let initialized = false;
 
-export const DEFAULT_TOKEN_BALANCE = 10_000;
+export const DEFAULT_TOKEN_BALANCE = 200_000;
 
 export const getSql = () => {
   const databaseUrl = process.env.DATABASE_URL?.trim();
@@ -39,14 +39,14 @@ export const ensureAuthTables = async () => {
     )
   `;
 
-  await getSql()`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_balance BIGINT NOT NULL DEFAULT 10000`;
+  await getSql()`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_balance BIGINT NOT NULL DEFAULT 200000`;
   await getSql()`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_used BIGINT NOT NULL DEFAULT 0`;
   await getSql()`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false`;
   await getSql()`ALTER TABLE users ADD COLUMN IF NOT EXISTS financial_analysis_enabled BOOLEAN NOT NULL DEFAULT false`;
-  await getSql()`ALTER TABLE users ALTER COLUMN token_balance SET DEFAULT 10000`;
+  await getSql()`ALTER TABLE users ALTER COLUMN token_balance SET DEFAULT 200000`;
   await getSql()`
     UPDATE users
-    SET token_balance = 10000,
+    SET token_balance = 200000,
         updated_at = now()
     WHERE token_balance = 1000000
   `;
