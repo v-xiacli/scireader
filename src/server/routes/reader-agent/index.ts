@@ -4096,10 +4096,10 @@ Review requirements:
 - First identify the paper's technical field from the content. Do not force physics/electromagnetics if the paper is computer science, civil engineering, geoscience, medicine, management, etc.
 - If a target venue is not provided, state the assumed tier. Calibrate novelty/significance to the assumed venue tier, but keep honesty, soundness, and reproducibility standards fixed.
 - Evaluate the paper itself, not just the journal. A good venue does not automatically make the paper high-level; a weak venue does not automatically make the paper wrong.
-- If the venue is known, mention it as context only. A good venue does not automatically make the paper high-level; a low/ordinary venue does not automatically make the paper bad.
-- Be strict but evidence-based. If the paper looks like a weak or opportunistic publication, say so and explain the evidence. If uncertain, say uncertain and list what must be checked.
+- For strengths, credit genuine contributions concretely, including incremental but useful work.
+- For each major concern, include evidence/location when available, why it matters, severity, and what a revision would need.
 
-Innovation assessment requirements:
+- Integrity flags must explicitly report unsupported claims, implausible statistics, suspicious figure/data reuse, citation manipulation, salami-slicing, missing ethics/data/code statements, overclaimed novelty, or write "None observed" if clean.
 - Judge whether the novelty is mainly scientific mechanism, engineering system, algorithm/modeling, dataset/product, experimental demonstration, application scenario, or integration.
 - Say whether the contribution is strong, moderate, or incremental, with evidence.
 
