@@ -53,12 +53,12 @@ type ExtractedPaperMetadata = {
 const readingModes: Array<{ id: PaperReadingMode; label: string; description: string }> = [
   { id: 'quality', label: 'High Quality / 高质量', description: 'Highest-quality reading; English materials are read in English first, then converted to Chinese output. / 最高质量解读；英文材料会先走英文精读，再转为中文输出。' },
   { id: 'detailed', label: 'Detailed / 详细', description: 'Generate a full Chinese report directly without an extra translation route. / 直接用中文生成完整报告，不额外走翻译链路。' },
+  { id: 'reviewer', label: 'Reviewer / 审稿', description: 'Ask for a target journal first, then generate reviewer-style analysis and English review comments. / 先询问目标期刊，再生成审稿式分析和英文审稿意见。' },
   { id: 'simple', label: 'Simple / 简单', description: 'Generate a concise Chinese overview directly for quick understanding. / 直接用中文生成精简速览，适合快速了解。' },
 ];
 
 const normalizeResearchReadingMode = (mode?: PaperReadingMode): PaperReadingMode => {
-  if (mode === 'quality' || mode === 'detailed' || mode === 'simple') return mode;
-  if (mode === 'reviewer') return 'detailed';
+  if (mode === 'quality' || mode === 'detailed' || mode === 'simple' || mode === 'reviewer') return mode;
   if (mode === 'reader') return 'simple';
 
   return 'detailed';
@@ -423,13 +423,13 @@ const HomePage = () => {
     }
   };
 
-  const startPaperReading = (paper: PaperSummary | null = selectedPaper) => {
+  const startPaperReading = (paper: PaperSummary | null = selectedPaper, modeOverride?: PaperReadingMode) => {
     if (!paper?.filePath) {
       setUploadMessage('Please select one uploaded paper first. / 请先选定一篇已上传论文。');
       return;
     }
 
-    const normalizedMode = normalizeResearchReadingMode(readingMode);
+    const normalizedMode = normalizeResearchReadingMode(modeOverride ?? readingMode);
     const nextDetailedReport = normalizedMode !== 'simple';
 
     saveReadingPreferences({ readingMode: normalizedMode, detailedReport: nextDetailedReport });
@@ -989,7 +989,7 @@ const HomePage = () => {
                 {isUploading ? <Loader2 className="size-4 animate-spin" /> : null}
                 {isUploading ? 'Uploading... / 上传中...' : isLoggedIn ? 'Upload Paper / 上传论文' : 'Sign in to Upload / 登录后上传'}
               </button>
-              <div className="flex max-w-full rounded-xl border p-1">
+              <div className="flex max-w-full flex-wrap rounded-xl border p-1">
                 {readingModes.map((mode) => (
                   <button
                     className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-sm transition ${normalizeResearchReadingMode(readingMode) === mode.id ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
@@ -1014,6 +1014,15 @@ const HomePage = () => {
                 type="button"
               >
                 Read Selected Paper / 解读选定论文
+              </button>
+              <button
+                className="whitespace-nowrap rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={!selectedPaper?.filePath}
+                onClick={() => startPaperReading(selectedPaper, 'reviewer')}
+                title={selectedPaper ? `Review / 审稿 ${selectedPaper.title}` : 'Please select a paper first / 请先选定论文'}
+                type="button"
+              >
+                Review Selected Paper / 审稿选定论文
               </button>
               {uploadMessage ? <p className="text-sm text-muted-foreground">{uploadMessage}</p> : null}
             </div>
@@ -1079,17 +1088,30 @@ const HomePage = () => {
                     {content}
                   </div>
                   {paper.filePath ? (
-                    <button
-                      className="rounded-xl border bg-white px-3 py-2 text-sm font-medium text-primary transition hover:bg-primary hover:text-primary-foreground"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setSelectedPaperKey(paperKey);
-                        startPaperReading(paper);
-                      }}
-                      type="button"
-                    >
-                      Read / 解读
-                    </button>
+                    <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                      <button
+                        className="rounded-xl border bg-white px-3 py-2 text-sm font-medium text-primary transition hover:bg-primary hover:text-primary-foreground"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedPaperKey(paperKey);
+                          startPaperReading(paper);
+                        }}
+                        type="button"
+                      >
+                        Read / 解读
+                      </button>
+                      <button
+                        className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedPaperKey(paperKey);
+                          startPaperReading(paper, 'reviewer');
+                        }}
+                        type="button"
+                      >
+                        Review / 审稿
+                      </button>
+                    </div>
                   ) : null}
                   {paper.filePath ? (
                     <button
