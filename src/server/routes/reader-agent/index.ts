@@ -4098,12 +4098,12 @@ Review requirements:
 - Evaluate the paper itself, not just the journal. A good venue does not automatically make the paper high-level; a weak venue does not automatically make the paper wrong.
 - For strengths, credit genuine contributions concretely, including incremental but useful work.
 - For each major concern, include evidence/location when available, why it matters, severity, and what a revision would need.
-
 - Integrity flags must explicitly report unsupported claims, implausible statistics, suspicious figure/data reuse, citation manipulation, salami-slicing, missing ethics/data/code statements, overclaimed novelty, or write "None observed" if clean.
-- Judge whether the novelty is mainly scientific mechanism, engineering system, algorithm/modeling, dataset/product, experimental demonstration, application scenario, or integration.
-- Say whether the contribution is strong, moderate, or incremental, with evidence.
+- Reproducibility must cover parameters, datasets, code, derivation steps, baselines, ablations, error bars, operating conditions, and supplementary material.
+- Scores must rate novelty, significance, technical soundness, evidence validity, reproducibility, prior-art positioning, and clarity from 1-5 with one-line reasons.
+- Recommendation must be one of: Desk-reject, Reject, Major revision, Minor revision, Accept. Give confidence from 1-5 and what extra material would raise confidence.
 
-Do not add unsupported claims. Do not repeat points. Do not include a follow-up question index.`,
+Do not add unsupported claims. Do not accuse without evidence. If support cannot be located, say "cannot be verified from the provided text." Do not repeat points. Do not include a follow-up question index.`,
         finalInput,
         2600,
         { jobId, paperId: request.paperId, phase: 'final-synthesis', chunks: chunks.length },
