@@ -469,6 +469,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
   const [pendingImageReading, setPendingImageReading] = useState<PendingImageReading | null>(null);
   const [confirmedLargeSummaryKey, setConfirmedLargeSummaryKey] = useState('');
   const [isCheckingSummaryCost, setIsCheckingSummaryCost] = useState(false);
+  const [pendingReviewerTargetKey, setPendingReviewerTargetKey] = useState('');
+  const [reviewerTarget, setReviewerTarget] = useState<{ key: string; target: string } | null>(null);
   const hasPaper = Boolean(paper);
   const isFinancialChat = Boolean(financialContext?.active);
   const financialStockKey = financialContext?.selectedStock ? `${financialContext.selectedStock.market ?? 'A'}:${financialContext.selectedStock.code}` : '';
@@ -479,6 +481,12 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
   const readingModePrompt = paperReadingPrompts[readingMode];
   const detailedReport = paper?.detailedReport ?? false;
   const summaryRunKey = getSummaryRunKey(paperId, paperPdfUrl, readingMode, detailedReport);
+  const reviewerTargetJournal = reviewerTarget?.key === summaryRunKey ? reviewerTarget.target : undefined;
+  const reviewerTargetInstruction =
+    readingMode === 'reviewer' && reviewerTargetJournal !== undefined
+      ? `\n\nTarget journal/conference for reviewer calibration: ${reviewerTargetJournal.trim() || 'Not specified. Infer the appropriate venue tier from the paper evidence, and state the assumption explicitly.'}`
+      : '';
+  const summaryPrompt = `${readingModePrompt}${reviewerTargetInstruction}`;
   const readingModeLabel = `${getPaperReadingModeLabel(readingMode)} · ${paper?.shouldAutoSummarize ? 'Reading / 解读中' : 'Pending / 待解读'}`;
   const fontSizeIndex = chatFontSizeOrder.indexOf(chatFontSize);
   const fontSizeStyle = chatFontSizeStyles[chatFontSize];
@@ -711,8 +719,9 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
         year: paper?.year,
         prompt: 'Generate English reviewer comments.',
         readingMode,
-        modePrompt: readingModePrompt,
+        modePrompt: summaryPrompt,
         detailedReport,
+        reviewTargetJournal,
         scope: 'whole-paper',
         paperContextSummary,
         conversationHistory: buildConversationHistory(messages),
@@ -723,7 +732,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
     if (!response.ok) throw new Error(result.message ?? result.error ?? 'Reviewer comments failed.');
 
     return result;
-  }, [detailedReport, messages, paper?.authors, paper?.journal, paper?.year, paperContextSummary, paperId, paperPdfUrl, paperTitle, readingMode, readingModePrompt]);
+  }, [detailedReport, messages, paper?.authors, paper?.journal, paper?.year, paperContextSummary, paperId, paperPdfUrl, paperTitle, readingMode, reviewTargetJournal, summaryPrompt]);
 
   const loadFinancialHistory = useCallback(async () => {
     if (!financialContext?.selectedStock) return [];
@@ -817,10 +826,11 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
         authors: paper?.authors,
         journal: paper?.journal,
         year: paper?.year,
-        prompt: readingModePrompt,
+        prompt: summaryPrompt,
         readingMode,
-        modePrompt: readingModePrompt,
+        modePrompt: summaryPrompt,
         detailedReport,
+        reviewTargetJournal,
       }),
     });
     const result = (await response.json()) as TokenEstimateResponse & { message?: string; error?: string };
@@ -828,7 +838,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
     if (!response.ok) throw new Error(result.message ?? result.error ?? 'Token estimate failed.');
 
     return result;
-  }, [paperId, paperPdfUrl, paperTitle, paper?.authors, paper?.journal, paper?.year, readingModePrompt, readingMode, detailedReport]);
+  }, [paperId, paperPdfUrl, paperTitle, paper?.authors, paper?.journal, paper?.year, summaryPrompt, readingMode, detailedReport, reviewTargetJournal]);
 
   const estimateFigureReadingCost = useCallback(
     async (prompt: string, pageNumbers: number[]): Promise<FigureReadingEstimateResponse> => {
@@ -884,10 +894,11 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
           authors: paper?.authors,
           journal: paper?.journal,
           year: paper?.year,
-          prompt: readingModePrompt,
+          prompt: summaryPrompt,
           readingMode,
-          modePrompt: readingModePrompt,
+          modePrompt: summaryPrompt,
           detailedReport,
+          reviewTargetJournal,
           scope: 'whole-paper',
         }),
       });
@@ -916,7 +927,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
     }
 
     throw new Error('Paper summary is still processing. Please reopen this paper in a moment.');
-  }, [paperId, paperPdfUrl, paperTitle, readingMode, readingModePrompt, detailedReport, paper?.authors, paper?.journal, paper?.year]);
+  }, [paperId, paperPdfUrl, paperTitle, readingMode, summaryPrompt, detailedReport, reviewTargetJournal, paper?.authors, paper?.journal, paper?.year]);
 
   useEffect(() => {
     if (!paperId || !paperPdfUrl) {

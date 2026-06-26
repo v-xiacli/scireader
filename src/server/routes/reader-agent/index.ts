@@ -1,5 +1,5 @@
 ﻿import { promises as fs } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -171,6 +171,7 @@ const readerRequestSchema = z.object({
   readingMode: z.enum(['quality', 'detailed', 'simple', 'reviewer', 'reader']).optional(),
   modePrompt: z.string().optional(),
   detailedReport: z.boolean().optional(),
+  reviewTargetJournal: z.string().trim().max(200).optional(),
   conversationHistory: z
     .array(
       z.object({
@@ -555,8 +556,17 @@ const isQualityReadingMode = (request: Pick<z.infer<typeof readerRequestSchema>,
 
 const getSummaryDetailMode = (request: Pick<z.infer<typeof readerRequestSchema>, 'detailedReport'>) => request.detailedReport === true ? 'detailed' : 'brief';
 
+const getReviewTargetCacheSuffix = (request: Pick<z.infer<typeof readerRequestSchema>, 'readingMode' | 'reviewTargetJournal'>) => {
+  if (getReadingMode(request) !== 'reviewer') return '';
+
+  const normalizedTarget = request.reviewTargetJournal?.trim().toLowerCase() || 'unspecified';
+  const targetHash = createHash('sha1').update(normalizedTarget).digest('hex').slice(0, 10);
+
+  return `.target-${targetHash}`;
+};
+
 const getPaperSummaryStoragePath = (request: z.infer<typeof readerRequestSchema>, pdfStoragePath?: string | null) =>
-  `paper-cache/${getPaperIdentitySlug(request)}/${pdfStoragePath ? 'uploaded' : 'sample'}.reader-summary.${getReadingMode(request)}.${getSummaryDetailMode(request)}.review-v5.md`;
+  `paper-cache/${getPaperIdentitySlug(request)}/${pdfStoragePath ? 'uploaded' : 'sample'}.reader-summary.${getReadingMode(request)}.${getSummaryDetailMode(request)}${getReviewTargetCacheSuffix(request)}.review-v5.md`;
 
 const normalizeRequestedPageNumbers = (pageNumbers?: number[], pageNumber?: number) =>
   Array.from(new Set((pageNumbers?.length ? pageNumbers : pageNumber ? [pageNumber] : []).filter((value) => Number.isInteger(value) && value > 0)))
@@ -2071,6 +2081,7 @@ const generateReviewerCommentsFromSummary = async (
     `Title: ${request.title ?? request.paperId}`,
     request.authors ? `Authors: ${request.authors}` : null,
     request.journal ? `Venue: ${request.journal}` : null,
+    `Target journal/conference for this review: ${request.reviewTargetJournal?.trim() || 'Not specified; infer the appropriate venue tier from the summary and history.'}`,
     request.year ? `Year: ${request.year}` : null,
   ]
     .filter(Boolean)
