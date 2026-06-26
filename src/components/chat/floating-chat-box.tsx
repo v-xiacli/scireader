@@ -1563,11 +1563,11 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
         onPointerMove={drag}
         onPointerUp={stopDragging}
       >
-        <div className="flex items-center gap-2">
-          <div className="min-w-0">
-            <div className="flex items-baseline gap-2">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-primary">{readingModeLabel}</p>
-              <h2 className="text-sm font-semibold">{isFinancialChat ? 'Financial Analysis chat / 财务分析 chat' : hasPaper ? 'Paper chat / 论文 chat' : 'SCIReader chat'}</h2>
+        <div className="flex flex-wrap items-start gap-2">
+          <div className="min-w-0 flex-1 basis-48">
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <p className="max-w-full break-words text-[10px] font-medium uppercase leading-4 tracking-wide text-primary">{readingModeLabel}</p>
+              <h2 className="min-w-0 text-sm font-semibold leading-5">{isFinancialChat ? 'Financial Analysis chat / 财务分析 chat' : hasPaper ? 'Paper chat / 论文 chat' : 'SCIReader chat'}</h2>
             </div>
             <p className="truncate text-[11px] text-muted-foreground">
               {isFinancialChat
@@ -1575,11 +1575,11 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
                 : paper?.title ?? 'Ask without opening a paper'}
             </p>
           </div>
-          <div className="ml-auto flex shrink-0 items-center gap-1">
+          <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1">
             {exportableMessages.length ? (
               <button
                 aria-label={isExportMode ? 'Exit export selection / 退出导出选择' : 'Select answers to export PDF / 选择回答导出 PDF'}
-                className={`${isExportMode ? 'border-primary bg-primary/10 text-primary' : 'border text-slate-700 hover:bg-slate-50'} inline-flex h-9 items-center justify-center rounded-lg text-xs font-medium ${isMobileViewport ? 'w-9' : 'gap-1 px-2'}`}
+                className={`${isExportMode ? 'border-primary bg-primary/10 text-primary' : 'border text-slate-700 hover:bg-slate-50'} inline-flex h-9 items-center justify-center rounded-lg text-xs font-medium ${isMobileViewport ? 'w-9' : 'gap-1 px-2 max-[520px]:w-9 max-[520px]:px-0'}`}
                 onClick={(event) => {
                   event.stopPropagation();
                   setIsExportMode((current) => {
@@ -1592,12 +1592,12 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
                 type="button"
               >
                 {isExportMode ? <X className="size-4" /> : <Download className="size-4" />}
-                <span className={isMobileViewport ? 'sr-only' : ''}>{isExportMode ? 'Cancel / 取消' : 'Export / 导出'}</span>
+                <span className={isMobileViewport ? 'sr-only' : 'max-[520px]:sr-only'}>{isExportMode ? 'Cancel / 取消' : 'Export / 导出'}</span>
               </button>
             ) : null}
             <button
               aria-label={isChatCollapsed ? 'Expand chat box / 展开聊天框' : 'Minimize chat box / 最小化聊天框'}
-              className={`inline-flex h-9 items-center justify-center rounded-lg border text-xs font-medium text-slate-700 hover:bg-slate-50 ${isMobileViewport ? 'w-9' : 'gap-1 px-2'}`}
+              className={`inline-flex h-9 items-center justify-center rounded-lg border text-xs font-medium text-slate-700 hover:bg-slate-50 ${isMobileViewport ? 'w-9' : 'gap-1 px-2 max-[520px]:w-9 max-[520px]:px-0'}`}
               onClick={(event) => {
                 event.stopPropagation();
                 if (isMobileViewport) setIsMobileChatExpanded((current) => !current);
@@ -1608,11 +1608,11 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
               type="button"
             >
               {isChatCollapsed ? <Maximize2 className="size-4" /> : <Minimize2 className="size-4" />}
-              <span className={isMobileViewport ? 'sr-only' : ''}>{isChatCollapsed ? 'Expand / 展开' : 'Collapse / 收起'}</span>
+              <span className={isMobileViewport ? 'sr-only' : 'max-[520px]:sr-only'}>{isChatCollapsed ? 'Expand / 展开' : 'Collapse / 收起'}</span>
             </button>
             <button
               aria-label="Decrease chat font size / 缩小聊天字体"
-              className={`inline-flex h-9 items-center justify-center rounded-lg border text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35 ${isMobileViewport ? 'w-9' : 'gap-1 px-2'}`}
+              className={`inline-flex h-9 items-center justify-center rounded-lg border text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35 ${isMobileViewport ? 'w-9' : 'gap-1 px-2 max-[520px]:w-9 max-[520px]:px-0'}`}
               disabled={!canDecreaseFontSize}
               onClick={(event) => {
                 event.stopPropagation();
@@ -1630,7 +1630,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
             </span>
             <button
               aria-label="Increase chat font size / 放大聊天字体"
-              className={`inline-flex h-9 items-center justify-center rounded-lg border text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35 ${isMobileViewport ? 'w-9' : 'gap-1 px-2'}`}
+              className={`inline-flex h-9 items-center justify-center rounded-lg border text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35 ${isMobileViewport ? 'w-9' : 'gap-1 px-2 max-[520px]:w-9 max-[520px]:px-0'}`}
               disabled={!canIncreaseFontSize}
               onClick={(event) => {
                 event.stopPropagation();

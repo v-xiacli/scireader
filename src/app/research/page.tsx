@@ -1,6 +1,7 @@
 ﻿'use client';
 
-import { ArrowRight, FileText, Loader2, MessageSquareText, PenLine, Trash2, WalletCards } from 'lucide-react';
+import { ArrowLeft, ArrowRight, FileText, Loader2, MessageSquareText, PenLine, Trash2, WalletCards } from 'lucide-react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
@@ -667,7 +668,16 @@ const HomePage = () => {
         <header className="rounded-3xl bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <p className="text-sm font-medium uppercase tracking-wide text-primary">SCIReader</p>
+              <div className="flex flex-wrap items-center gap-3">
+                <Link
+                  className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-primary/40 hover:text-primary"
+                  href="/"
+                >
+                  <ArrowLeft className="size-4" />
+                  Back to Home / 回到主页
+                </Link>
+                <p className="text-sm font-medium uppercase tracking-wide text-primary">SCIReader</p>
+              </div>
               <h1 className="mt-2 text-3xl font-semibold">Read Papers with AI / AI 阅读论文</h1>
               <p className="mt-2 max-w-2xl text-muted-foreground">
                 Upload a PDF, read it on the left, and ask questions in the chat on the right. / 上传 PDF，在左侧阅读，并在右侧聊天窗口提问。
