@@ -590,7 +590,7 @@ const HomePage = () => {
       }
       if (result.tokenAccount) setTokenAccount(result.tokenAccount);
       setWritingFollowUp('');
-      setWritingMessage(result.needsSupplementalReading ? result.draft : `已更新並儲存：${result.storagePath}`);
+      setWritingMessage(result.needsSupplementalReading ? result.draft : `Updated and saved / 已更新并保存：${result.storagePath}`);
     } catch (error) {
       setWritingMessage(error instanceof Error ? error.message : 'Writing follow-up failed.');
     } finally {
@@ -759,16 +759,16 @@ const HomePage = () => {
                 <textarea
                   className="mt-2 min-h-24 w-full rounded-xl border px-4 py-3 text-sm outline-none transition focus:border-primary"
                   onChange={(event) => setWritingTopic(event.target.value)}
-                  placeholder="例如：面向複雜環境感知的多模態融合方法研究"
+                  placeholder="Example: multimodal fusion for complex-environment perception / 例如：面向复杂环境感知的多模态融合方法研究"
                   value={writingTopic}
                 />
               </label>
 
               <div>
-                <p className="text-sm font-medium">輸出語言</p>
+                <p className="text-sm font-medium">Output Language / 输出语言</p>
                 <div className="mt-2 inline-flex rounded-xl border p-1">
                   {([
-                    ['chinese', '中文'],
+                    ['chinese', 'Chinese / 中文'],
                     ['english', 'English'],
                   ] as const).map(([id, label]) => (
                     <button
@@ -784,7 +784,7 @@ const HomePage = () => {
               </div>
 
               <div>
-                <p className="text-sm font-medium">已選素材</p>
+                <p className="text-sm font-medium">Selected Materials / 已选素材</p>
                 <div className="mt-2 min-h-20 rounded-xl border p-3">
                   {selectedWritingMaterialCount ? (
                     <div className="flex flex-wrap gap-2">
@@ -830,7 +830,7 @@ const HomePage = () => {
                 type="button"
               >
                 {isWriting ? <Loader2 className="size-4 animate-spin" /> : <PenLine className="size-4" />}
-                {isWriting ? '正在生成...' : '生成 Introduction'}
+                {isWriting ? 'Generating... / 正在生成...' : 'Generate Introduction / 生成 Introduction'}
               </button>
               {writingMessage ? <p className="text-sm text-muted-foreground">{writingMessage}</p> : null}
             </div>
@@ -853,7 +853,7 @@ const HomePage = () => {
                 <input
                   className="min-w-0 flex-1 rounded-xl border px-4 py-2 text-sm outline-none transition focus:border-primary"
                   onChange={(event) => setWritingFollowUp(event.target.value)}
-                  placeholder="繼續追問或提出修改要求；需要補讀時會先判斷，不會自動重讀"
+                  placeholder="Ask a follow-up or request edits; if more reading is needed, I will check first and will not reread automatically. / 继续追问或提出修改要求；需要补读时会先判断，不会自动重读"
                   value={writingFollowUp}
                 />
                 <button
@@ -863,7 +863,7 @@ const HomePage = () => {
                   type="button"
                 >
                   {isWritingFollowUp ? <Loader2 className="size-4 animate-spin" /> : null}
-                  {isWritingFollowUp ? '處理中...' : '追問/修改'}
+                  {isWritingFollowUp ? 'Processing... / 处理中...' : 'Follow up / Edit / 追问/修改'}
                 </button>
               </div> : null}
             </div>
@@ -1048,7 +1048,7 @@ const HomePage = () => {
                     </p>
                   </div>
                   <span className={`rounded-full px-3 py-1 text-xs font-medium ${isSelectedForReading ? 'bg-primary text-primary-foreground' : 'bg-slate-100 text-slate-600'}`}>
-                    {isSelectedForReading ? '已選定' : '待選定'}
+                    {isSelectedForReading ? 'Selected / 已选定' : 'Pending / 待选定'}
                   </span>
                 </>
               );
