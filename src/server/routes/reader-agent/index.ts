@@ -3165,7 +3165,7 @@ const getCompactSummaryInstruction = (mode: PaperReadingMode) => {
     return 'You are a fast cross-disciplinary research reader. Extract only the core technical idea, mechanism, key numbers with units, reusable design insight, and limits. Be terse.';
   }
 
-  return 'You are a cross-disciplinary engineering and applied-science reviewer. Extract the real technical mechanism, novelty, key numbers with units, evidence strength, and the largest credibility risk. Be terse.';
+  return 'You are a senior peer reviewer for natural-science and engineering journals. Extract evidence-anchored notes on real contribution, venue-fit novelty, technical mechanism, key numbers with units, evidence strength, reproducibility gaps, integrity or padding red flags, and the largest credibility risk. Be terse and do not accuse without evidence.';
 };
 
 const getSummaryLanguageInstruction = (language: 'english' | 'chinese') =>
@@ -3919,17 +3919,17 @@ ${extractedPdf.text}`,
           ? `${compactInstruction}
 
 ${summaryLanguageInstruction}
-This is batch ${index + 1} of ${chunks.length}. Write compact but useful notes for a detailed review.
+This is batch ${index + 1} of ${chunks.length}. Write compact but useful notes for a detailed peer-review report.
 Use 7-10 bullets, each under 45 words. Capture only evidence present in this batch:
-- venue/journal/conference or publication clues if visible
-- technical mechanism and assumptions
-- method/model/processing pipeline
-- experimental setup, validation source, or baseline
-- strongest numerical results with units
-- figures/tables/equations only if central
-- uncertainty, error source, limitation, or credibility concern
-- innovation type if this batch supports it
-Do not write a full report. Do not mention pages outside this batch.`
+- concrete claim or contribution and where the batch supports it
+- venue/journal/conference or publication-tier clues if visible
+- technical mechanism, assumptions, method, model, or processing pipeline
+- experimental setup, validation source, baseline, ablation, statistics, or deployment evidence
+- strongest numerical results with units and operating conditions
+- reproducibility gaps: missing parameters, data, code, derivation steps, baselines, error bars, or conditions
+- integrity/padding flags: overclaiming, implausible statistics, suspicious figure/data reuse, citation manipulation, salami-slicing, or filler content; label as OBSERVED or POSSIBLE-NEEDS-VERIFICATION
+- innovation type and whether it appears strong, moderate, or incremental if supported by this batch
+Do not write a full report. Do not mention pages outside this batch. Do not accuse without evidence.`
           : `${compactInstruction}
 
 ${summaryLanguageInstruction}
@@ -4080,20 +4080,22 @@ ${chunkNotes.join('\n\n---\n\n')}`;
         `${compactInstruction}
 
 ${summaryLanguageInstruction}
-Synthesize the batch notes into a structured detailed cross-disciplinary paper review under 1500 words.
+Synthesize the batch notes into a detailed senior peer-review report under 1800 words.
 Use exactly these sections:
-1. Paper tier / publication-level assessment
-2. Verdict
-3. Core technical mechanism
-4. Key numbers
-5. Evidence and credibility
-6. Innovation assessment
-7. Main limitations
+1. Summary
+2. Venue-fit / publication-level assessment
+3. Genuine strengths
+4. Major concerns
+5. Minor concerns
+6. Integrity flags
+7. Reproducibility
+8. Per-dimension scores
+9. Overall recommendation and confidence
 
-Paper tier / publication-level assessment requirements:
+Review requirements:
 - First identify the paper's technical field from the content. Do not force physics/electromagnetics if the paper is computer science, civil engineering, geoscience, medicine, management, etc.
-- Evaluate the paper itself, not just the journal. Estimate the likely publication level from the quality of contribution, evidence, novelty, validation, venue metadata, and writing.
-- Classify into one of: CAS Q1-level paper, CAS Q2-level paper, CAS Q3-level paper, CAS Q4-level paper, Chinese Core-level paper, ordinary Open Access paper, conference paper, preprint/unpublished work, possible opportunistic/weak publication, unknown/needs lookup.
+- If a target venue is not provided, state the assumed tier. Calibrate novelty/significance to the assumed venue tier, but keep honesty, soundness, and reproducibility standards fixed.
+- Evaluate the paper itself, not just the journal. A good venue does not automatically make the paper high-level; a weak venue does not automatically make the paper wrong.
 - If the venue is known, mention it as context only. A good venue does not automatically make the paper high-level; a low/ordinary venue does not automatically make the paper bad.
 - Be strict but evidence-based. If the paper looks like a weak or opportunistic publication, say so and explain the evidence. If uncertain, say uncertain and list what must be checked.
 
