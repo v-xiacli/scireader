@@ -721,7 +721,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
         readingMode,
         modePrompt: summaryPrompt,
         detailedReport,
-        reviewTargetJournal,
+        reviewTargetJournal: reviewerTargetJournal,
         scope: 'whole-paper',
         paperContextSummary,
         conversationHistory: buildConversationHistory(messages),
@@ -732,7 +732,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
     if (!response.ok) throw new Error(result.message ?? result.error ?? 'Reviewer comments failed.');
 
     return result;
-  }, [detailedReport, messages, paper?.authors, paper?.journal, paper?.year, paperContextSummary, paperId, paperPdfUrl, paperTitle, readingMode, reviewTargetJournal, summaryPrompt]);
+  }, [detailedReport, messages, paper?.authors, paper?.journal, paper?.year, paperContextSummary, paperId, paperPdfUrl, paperTitle, readingMode, reviewerTargetJournal, summaryPrompt]);
 
   const loadFinancialHistory = useCallback(async () => {
     if (!financialContext?.selectedStock) return [];
@@ -830,7 +830,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
         readingMode,
         modePrompt: summaryPrompt,
         detailedReport,
-        reviewTargetJournal,
+        reviewTargetJournal: reviewerTargetJournal,
       }),
     });
     const result = (await response.json()) as TokenEstimateResponse & { message?: string; error?: string };
@@ -838,7 +838,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
     if (!response.ok) throw new Error(result.message ?? result.error ?? 'Token estimate failed.');
 
     return result;
-  }, [paperId, paperPdfUrl, paperTitle, paper?.authors, paper?.journal, paper?.year, summaryPrompt, readingMode, detailedReport, reviewTargetJournal]);
+  }, [paperId, paperPdfUrl, paperTitle, paper?.authors, paper?.journal, paper?.year, summaryPrompt, readingMode, detailedReport, reviewerTargetJournal]);
 
   const estimateFigureReadingCost = useCallback(
     async (prompt: string, pageNumbers: number[]): Promise<FigureReadingEstimateResponse> => {
@@ -898,7 +898,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
           readingMode,
           modePrompt: summaryPrompt,
           detailedReport,
-          reviewTargetJournal,
+          reviewTargetJournal: reviewerTargetJournal,
           scope: 'whole-paper',
         }),
       });
@@ -927,7 +927,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
     }
 
     throw new Error('Paper summary is still processing. Please reopen this paper in a moment.');
-  }, [paperId, paperPdfUrl, paperTitle, readingMode, summaryPrompt, detailedReport, reviewTargetJournal, paper?.authors, paper?.journal, paper?.year]);
+  }, [paperId, paperPdfUrl, paperTitle, readingMode, summaryPrompt, detailedReport, reviewerTargetJournal, paper?.authors, paper?.journal, paper?.year]);
 
   useEffect(() => {
     if (!paperId || !paperPdfUrl) {
