@@ -125,6 +125,9 @@ const HomePage = () => {
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
             Sign in or create an account here, then enter Research Papers or Financial Analysis. / 先在主页登录或注册，再进入科研论文或财务分析工作区。
           </p>
+          <div className="mt-3 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
+            Language: English first, Singapore Chinese in Simplified script. / 语言：英文在前，新加坡中文（简体）在后。
+          </div>
         </header>
 
         <section className="mb-5 rounded-2xl border bg-white p-5 shadow-sm">

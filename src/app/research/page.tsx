@@ -672,6 +672,9 @@ const HomePage = () => {
               <p className="mt-2 max-w-2xl text-muted-foreground">
                 Upload a PDF, read it on the left, and ask questions in the chat on the right. / 上传 PDF，在左侧阅读，并在右侧聊天窗口提问。
               </p>
+              <div className="mt-3 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
+                Language: English first, Singapore Chinese in Simplified script. / 语言：英文在前，新加坡中文（简体）在后。
+              </div>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row lg:justify-end">
               <div className="rounded-2xl border bg-slate-50 p-4 text-right">
@@ -699,7 +702,7 @@ const HomePage = () => {
             </div>
           </div>
           <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-            This website is not available to users in Mainland China. / 本网站不面向中国内地用户开放。
+            This website is not available to users in Mainland China and is intended only for overseas Chinese users. / 本网站不面向中国内地用户开放，仅针对海外华人。
           </div>
           <div className="mt-5 grid gap-3 border-t pt-4 text-sm md:grid-cols-3">
             <div>

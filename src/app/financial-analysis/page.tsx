@@ -567,6 +567,9 @@ const FinancialAnalysisPage = () => {
                 {authUser ? `Current account / 当前账号: ${authUser.email}` : isSessionLoading ? 'Checking sign-in status... / 正在检查登录状态...' : 'Please return to the home page and sign in first. / 请先回到主页登录后使用。'}
               </p>
               <p className="mt-1 text-xs font-medium text-amber-700">This feature must be enabled separately; token usage is billed at 3x the normal analysis rate. / 该功能需要单独开通；token 使用费按正常分析的 3 倍计算。</p>
+              <div className="mt-3 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
+                Language: English first, Singapore Chinese in Simplified script. / 语言：英文在前，新加坡中文（简体）在后。
+              </div>
             </div>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row lg:items-center lg:justify-end">
@@ -595,7 +598,7 @@ const FinancialAnalysisPage = () => {
 
         <section className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-            This website is not available to users in Mainland China. / 本网站不面向中国内地用户开放。
+            This website is not available to users in Mainland China and is intended only for overseas Chinese users. / 本网站不面向中国内地用户开放，仅针对海外华人。
           </div>
           <div className="mt-4 grid gap-3 border-t pt-4 text-sm md:grid-cols-3">
             <div>
