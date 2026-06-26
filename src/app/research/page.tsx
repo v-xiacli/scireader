@@ -53,12 +53,17 @@ type ExtractedPaperMetadata = {
 const readingModes: Array<{ id: PaperReadingMode; label: string; description: string }> = [
   { id: 'quality', label: 'High Quality / 高质量', description: 'Highest-quality reading; English materials are read in English first, then converted to Chinese output. / 最高质量解读；英文材料会先走英文精读，再转为中文输出。' },
   { id: 'detailed', label: 'Detailed / 详细', description: 'Generate a full Chinese report directly without an extra translation route. / 直接用中文生成完整报告，不额外走翻译链路。' },
-  { id: 'reviewer', label: 'Reviewer / 审稿', description: 'Ask for a target journal first, then generate reviewer-style analysis and English review comments. / 先询问目标期刊，再生成审稿式分析和英文审稿意见。' },
   { id: 'simple', label: 'Simple / 简单', description: 'Generate a concise Chinese overview directly for quick understanding. / 直接用中文生成精简速览，适合快速了解。' },
 ];
 
+const taskModes: Array<{ id: 'read' | 'review'; label: string; description: string }> = [
+  { id: 'read', label: 'Read / 阅读', description: 'Read and explain the paper. / 阅读并解释论文。' },
+  { id: 'review', label: 'Review / 审稿', description: 'Ask for a target journal first, then generate reviewer-style analysis and English review comments. / 先询问目标期刊，再生成审稿式分析和英文审稿意见。' },
+];
+
 const normalizeResearchReadingMode = (mode?: PaperReadingMode): PaperReadingMode => {
-  if (mode === 'quality' || mode === 'detailed' || mode === 'simple' || mode === 'reviewer') return mode;
+  if (mode === 'quality' || mode === 'detailed' || mode === 'simple') return mode;
+  if (mode === 'reviewer') return 'detailed';
   if (mode === 'reader') return 'simple';
 
   return 'detailed';
@@ -119,6 +124,7 @@ const HomePage = () => {
   const [tokenEstimateMessage, setTokenEstimateMessage] = useState('Upload a PDF to estimate tokens.');
   const [tokenAccount, setTokenAccount] = useState<TokenAccount | null>(null);
   const [readingMode, setReadingMode] = useState<PaperReadingMode>('detailed');
+  const [paperTaskMode, setPaperTaskMode] = useState<'read' | 'review'>('read');
   const [detailedReport, setDetailedReport] = useState(false);
   const [selectedPaperKey, setSelectedPaperKey] = useState('');
   const [writingTopic, setWritingTopic] = useState('');
@@ -423,17 +429,19 @@ const HomePage = () => {
     }
   };
 
-  const startPaperReading = (paper: PaperSummary | null = selectedPaper, modeOverride?: PaperReadingMode) => {
+  const startPaperReading = (paper: PaperSummary | null = selectedPaper, taskModeOverride?: 'read' | 'review') => {
     if (!paper?.filePath) {
       setUploadMessage('Please select one uploaded paper first. / 请先选定一篇已上传论文。');
       return;
     }
 
-    const normalizedMode = normalizeResearchReadingMode(modeOverride ?? readingMode);
-    const nextDetailedReport = normalizedMode !== 'simple';
+    const normalizedDepth = normalizeResearchReadingMode(readingMode);
+    const selectedTaskMode = taskModeOverride ?? paperTaskMode;
+    const requestMode: PaperReadingMode = selectedTaskMode === 'review' ? 'reviewer' : normalizedDepth;
+    const nextDetailedReport = normalizedDepth !== 'simple';
 
-    saveReadingPreferences({ readingMode: normalizedMode, detailedReport: nextDetailedReport });
-    router.push(`/papers/${encodeURIComponent(paper.id)}?pdfUrl=${encodeURIComponent(paper.pdfUrl)}&filePath=${encodeURIComponent(paper.filePath)}&title=${encodeURIComponent(paper.title)}&authors=${encodeURIComponent(paper.authors)}&journal=${encodeURIComponent(paper.journal ?? '')}&year=${encodeURIComponent(paper.year ?? '')}&readingMode=${normalizedMode}&detailedReport=${nextDetailedReport ? '1' : '0'}&start=1`);
+    saveReadingPreferences({ readingMode: normalizedDepth, detailedReport: nextDetailedReport });
+    router.push(`/papers/${encodeURIComponent(paper.id)}?pdfUrl=${encodeURIComponent(paper.pdfUrl)}&filePath=${encodeURIComponent(paper.filePath)}&title=${encodeURIComponent(paper.title)}&authors=${encodeURIComponent(paper.authors)}&journal=${encodeURIComponent(paper.journal ?? '')}&year=${encodeURIComponent(paper.year ?? '')}&readingMode=${requestMode}&detailedReport=${nextDetailedReport ? '1' : '0'}&start=1`);
   };
 
   const handleRemovePaper = async (paper: PaperSummary) => {
@@ -989,47 +997,53 @@ const HomePage = () => {
                 {isUploading ? <Loader2 className="size-4 animate-spin" /> : null}
                 {isUploading ? 'Uploading... / 上传中...' : isLoggedIn ? 'Upload Paper / 上传论文' : 'Sign in to Upload / 登录后上传'}
               </button>
-              <div className="flex max-w-full flex-wrap rounded-xl border p-1">
-                {readingModes.map((mode) => (
-                  <button
-                    className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-sm transition ${normalizeResearchReadingMode(readingMode) === mode.id ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
-                    key={mode.id}
-                    onClick={() => {
-                      setReadingMode(mode.id);
-                      setDetailedReport(mode.id !== 'simple');
-                      saveReadingPreferences({ readingMode: mode.id, detailedReport: mode.id !== 'simple' });
-                    }}
-                    title={mode.description}
-                    type="button"
-                  >
-                    {mode.label}
-                  </button>
-                ))}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex max-w-full flex-wrap rounded-xl border p-1" title="Depth / 深度">
+                  {readingModes.map((mode) => (
+                    <button
+                      className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-sm transition ${normalizeResearchReadingMode(readingMode) === mode.id ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
+                      key={mode.id}
+                      onClick={() => {
+                        setReadingMode(mode.id);
+                        setDetailedReport(mode.id !== 'simple');
+                        saveReadingPreferences({ readingMode: mode.id, detailedReport: mode.id !== 'simple' });
+                      }}
+                      title={mode.description}
+                      type="button"
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex max-w-full flex-wrap rounded-xl border p-1" title="Mode / 模式">
+                  {taskModes.map((mode) => (
+                    <button
+                      className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-sm transition ${paperTaskMode === mode.id ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
+                      key={mode.id}
+                      onClick={() => setPaperTaskMode(mode.id)}
+                      title={mode.description}
+                      type="button"
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                </div>
               </div>
               <button
-                className="whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                className="whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-medium text-primary transition hover:bg-primary hover:text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={!selectedPaper?.filePath}
                 onClick={() => startPaperReading()}
-                title={selectedPaper ? `Read / 解读 ${selectedPaper.title}` : 'Please select a paper first / 请先选定论文'}
+                title={selectedPaper ? `${paperTaskMode === 'review' ? 'Review / 审稿' : 'Read / 解读'} ${selectedPaper.title}` : 'Please select a paper first / 请先选定论文'}
                 type="button"
               >
-                Read Selected Paper / 解读选定论文
-              </button>
-              <button
-                className="whitespace-nowrap rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={!selectedPaper?.filePath}
-                onClick={() => startPaperReading(selectedPaper, 'reviewer')}
-                title={selectedPaper ? `Review / 审稿 ${selectedPaper.title}` : 'Please select a paper first / 请先选定论文'}
-                type="button"
-              >
-                Review Selected Paper / 审稿选定论文
+                {paperTaskMode === 'review' ? 'Review Selected Paper / 审稿选定论文' : 'Read Selected Paper / 解读选定论文'}
               </button>
               {uploadMessage ? <p className="text-sm text-muted-foreground">{uploadMessage}</p> : null}
             </div>
             <div>
               <h2 className="text-xl font-semibold">Your Papers / 你的论文</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                {selectedPaper ? `Selected / 已选定：${selectedPaper.title} · ${getResearchReadingModeLabel(readingMode)}` : 'Please upload and select one paper first. / 请先上传并选定一篇论文。'}
+                {selectedPaper ? `Selected / 已选定：${selectedPaper.title} · ${getResearchReadingModeLabel(readingMode)} · ${paperTaskMode === 'review' ? 'Review / 审稿' : 'Read / 阅读'}` : 'Please upload and select one paper first. / 请先上传并选定一篇论文。'}
               </p>
             </div>
           </div>
@@ -1094,7 +1108,7 @@ const HomePage = () => {
                         onClick={(event) => {
                           event.stopPropagation();
                           setSelectedPaperKey(paperKey);
-                          startPaperReading(paper);
+                          startPaperReading(paper, 'read');
                         }}
                         type="button"
                       >
@@ -1105,7 +1119,7 @@ const HomePage = () => {
                         onClick={(event) => {
                           event.stopPropagation();
                           setSelectedPaperKey(paperKey);
-                          startPaperReading(paper, 'reviewer');
+                          startPaperReading(paper, 'review');
                         }}
                         type="button"
                       >
