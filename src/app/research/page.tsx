@@ -754,7 +754,7 @@ const HomePage = () => {
           </div>
         </div>
 
-        <section className="rounded-3xl bg-white p-4 shadow-sm sm:p-6">
+        <section className="order-2 rounded-3xl bg-white p-4 shadow-sm sm:p-6">
           <div className="flex flex-col gap-2">
             <div className="flex items-center gap-2">
               <PenLine className="size-5 text-primary" />
@@ -883,7 +883,7 @@ const HomePage = () => {
           ) : null}
         </section>
 
-        <section className="rounded-3xl bg-white p-4 shadow-sm sm:p-6">
+        <section className="order-3 rounded-3xl bg-white p-4 shadow-sm sm:p-6">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-xl font-semibold">Your articles</h2>
@@ -958,7 +958,7 @@ const HomePage = () => {
           </div>
         </section>
 
-        <section className="rounded-3xl bg-white p-4 shadow-sm sm:p-6">
+        <section className="order-1 rounded-3xl bg-white p-4 shadow-sm sm:p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-center">
             <div className="flex max-w-full flex-wrap items-center gap-3">
               <input
