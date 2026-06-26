@@ -139,6 +139,7 @@ type FinancialStockArchiveEntry = {
 };
 
 type PaperReadingMode = 'quality' | 'detailed' | 'simple' | 'reviewer' | 'reader';
+type ConversationTurn = { role: 'user' | 'assistant'; content: string };
 
 const MAX_EXTRACTED_TEXT_CHARS = 600_000;
 const MAX_DIRECT_READER_TEXT_CHARS = 140_000;
@@ -544,7 +545,7 @@ const getPaperIdentitySlug = (request: Pick<z.infer<typeof readerRequestSchema>,
   });
 
 const getReadingMode = (request: Pick<z.infer<typeof readerRequestSchema>, 'readingMode'>): PaperReadingMode => {
-  if (request.readingMode === 'quality' || request.readingMode === 'detailed' || request.readingMode === 'simple') return request.readingMode;
+  if (request.readingMode === 'quality' || request.readingMode === 'detailed' || request.readingMode === 'simple' || request.readingMode === 'reviewer') return request.readingMode;
   if (request.readingMode === 'reader') return 'simple';
 
   return 'detailed';
@@ -2059,6 +2060,64 @@ const askGeneralChat = async (request: z.infer<typeof readerRequestSchema>) => {
   };
 };
 
+const generateReviewerCommentsFromSummary = async (
+  request: z.infer<typeof readerRequestSchema>,
+  summary: string,
+  history: ConversationTurn[] = [],
+) => {
+  const modelSelection = selectCheapTriageModel();
+  const client = createAnthropicClient(modelSelection.target);
+  const metadata = [
+    `Title: ${request.title ?? request.paperId}`,
+    request.authors ? `Authors: ${request.authors}` : null,
+    request.journal ? `Venue: ${request.journal}` : null,
+    request.year ? `Year: ${request.year}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const conversation = history
+    .slice(-12)
+    .map((turn) => `${turn.role.toUpperCase()}: ${turn.content.slice(0, 1800)}`)
+    .join('\n\n');
+
+  const response = await client.messages.create({
+    model: modelSelection.model,
+    max_tokens: 1800,
+    system: `You generate formal peer-review comments in English from an existing paper summary and prior chat history. Do not re-read the PDF and do not invent evidence.
+
+Output exactly three main paragraphs:
+
+Paragraph 1: explain what the article does and what its innovation or contribution is. Keep it professional and evidence-based.
+
+Paragraph 2: state what should be revised. Use a numbered list with 1 to 4 items maximum. Each item should be concrete, actionable, and based only on the summary/history.
+
+Paragraph 3: give one final recommendation: Reject, Accept, Major revision, or Minor revision. Briefly justify it.
+
+Rules: English only. Do not add extra sections, headings, Chinese text, markdown tables, or more than four revision points. If evidence is insufficient, say so politely and recommend what information is needed.`,
+    messages: [
+      {
+        role: 'user',
+        content: `${metadata}
+
+First-round paper summary:
+${summary.slice(0, 24_000)}
+
+Prior chat history:
+${conversation || 'None.'}
+
+Generate reviewer comments now.`,
+      },
+    ],
+  });
+
+  return {
+    answer: textFromResponse(response),
+    model: modelSelection.model,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+  };
+};
+
 const generateImage = async (request: z.infer<typeof imageRequestSchema>) => {
   const modelSelection = selectImageModel(request);
   const client = createAnthropicClient(modelSelection.target);
@@ -3155,7 +3214,7 @@ const SUMMARY_CHUNK_TIMEOUT_MS = 90_000;
 const SUMMARY_FINAL_TIMEOUT_MS = 120_000;
 
 const getCompactSummaryInstruction = (mode: PaperReadingMode) => {
-  const normalizedMode = mode === 'reader' ? 'simple' : mode === 'reviewer' ? 'detailed' : mode;
+  const normalizedMode = mode === 'reader' ? 'simple' : mode;
 
   if (normalizedMode === 'quality') {
     return 'You are SCIReader high-quality academic analyst. Extract the real technical mechanism, novelty, key numbers with units, evidence strength, publication-level clues, innovation type, transfer value, and credibility risk. Be strict and evidence-based.';
@@ -3163,6 +3222,10 @@ const getCompactSummaryInstruction = (mode: PaperReadingMode) => {
 
   if (normalizedMode === 'simple') {
     return 'You are a fast cross-disciplinary research reader. Extract only the core technical idea, mechanism, key numbers with units, reusable design insight, and limits. Be terse.';
+  }
+
+  if (normalizedMode === 'reviewer') {
+    return 'You are a cross-disciplinary engineering and applied-science reviewer. Extract the verdict, real technical mechanism, key numbers with units, evidence strength, and the largest weakness. Be terse, skeptical, and evidence-based.';
   }
 
   return 'You are a senior peer reviewer for natural-science and engineering journals. Extract evidence-anchored notes on real contribution, venue-fit novelty, technical mechanism, key numbers with units, evidence strength, reproducibility gaps, integrity or padding red flags, and the largest credibility risk. Be terse and do not accuse without evidence.';
@@ -4691,6 +4754,89 @@ const app = new Hono()
       });
 
       return c.json({ error: 'Writing follow-up failed.', message }, status);
+    }
+  })
+  .post('/review-opinion', zValidator('json', readerRequestSchema), async (c) => {
+    const request = c.req.valid('json');
+
+    try {
+      const { user, storagePath } = await requirePaperAccess(c, request.pdfUrl);
+
+      await ensurePositiveTokenBalance(user.id);
+
+      const paperKey = getPaperIdentitySlug(request);
+      const summaryStoragePath = getPaperSummaryStoragePath(request, storagePath ?? resolveUploadedPdfStoragePath(request.pdfUrl));
+      const cachedSummary = (await downloadTextIfExists(summaryStoragePath)) ?? '';
+      const summary = request.paperContextSummary?.trim() || cachedSummary.trim();
+
+      if (!summary) {
+        return c.json({ error: 'Reviewer comments failed.', message: 'Please generate the first paper summary before creating reviewer comments.' }, 409);
+      }
+
+      const storedHistory = await loadDialogHistory(user.id, paperKey);
+      const history: ConversationTurn[] = [
+        ...storedHistory.slice(-8).map((turn) => ({ role: turn.role, content: turn.content })),
+        ...(request.conversationHistory ?? []).slice(-8),
+      ];
+      const result = await generateReviewerCommentsFromSummary(request, summary, history);
+      const billableTokens = getUsageBillableTokens(result, result.model);
+      const tokenAccount = await recordUserTokenUsage({
+        userId: user.id,
+        paperId: request.paperId,
+        action: 'review-opinion:cheap',
+        model: result.model,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        billableTokens,
+        metadata: {
+          routedBy: 'cheap-context',
+          readingMode: getReadingMode(request),
+          basedOnSummary: Boolean(summary),
+          historyTurns: history.length,
+        },
+      });
+      const now = new Date().toISOString();
+      const userPrompt = request.prompt?.trim() || 'Generate English reviewer comments.';
+
+      await appendDialogTurns(user.id, paperKey, [
+        { role: 'user', content: userPrompt, createdAt: now, readingMode: getReadingMode(request) },
+        {
+          role: 'assistant',
+          content: result.answer,
+          createdAt: now,
+          model: result.model,
+          routedBy: 'cheap-context',
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          readingMode: getReadingMode(request),
+          modePrompt: request.modePrompt,
+          answerChinese: result.answer,
+        },
+      ]);
+
+      return c.json({
+        answer: result.answer,
+        model: result.model,
+        paperId: request.paperId,
+        routedBy: 'cheap-context',
+        usage: {
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          billableTokens,
+        },
+        tokenAccount,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Reviewer comments failed.';
+      const status = message === 'Not authenticated.' ? 401 : isInsufficientTokenBalanceError(error) ? 402 : 500;
+
+      console.error('[reader-agent:review-opinion] request failed', {
+        paperId: request.paperId,
+        status,
+        message,
+      });
+
+      return c.json({ error: 'Reviewer comments failed.', message }, status);
     }
   })
   .post('/ask', zValidator('json', readerRequestSchema), async (c) => {

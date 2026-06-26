@@ -87,6 +87,16 @@ type FigureReadingEstimateResponse = {
   cachePath?: string;
 };
 
+type ReviewOpinionResponse = {
+  answer: string;
+  model?: string;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    billableTokens: number;
+  };
+};
+
 type LargeSummaryWarning = {
   summaryKey: string;
   inputTokens: number;
@@ -151,6 +161,19 @@ For a whole-paper summary, produce a detailed Chinese peer-review style report w
 
 Rules: calibrate novelty to venue tier but keep integrity and reproducibility standards fixed; do not accuse without evidence; if support cannot be located, say "cannot be verified from the provided text"; do not invent missing citations, flaws, or misconduct; avoid section-by-section narration and broad literature essays.`;
 
+const compactReviewerPrompt = `You are a cross-disciplinary engineering and applied-science paper reviewer. Be skeptical, concise, and evidence-based.
+
+For normal chat questions, answer only the user's question. Do not generate a full report unless the user asks for a whole-paper summary.
+
+For a whole-paper summary, produce a compact review report with these five short sections:
+1. Verdict: what problem is solved, whether it is worth reading, and the evidence level (High/Medium/Low).
+2. Core mechanism: the actual physical, algorithmic, data, system, or engineering mechanism, including key assumptions and boundary conditions.
+3. Key numbers: only the 3-6 most important reported values, with units and operating conditions.
+4. Credibility check: whether experiments, simulations, measurements, baselines, ablations, statistics, deployment evidence, or domain logic support the claims.
+5. Main weaknesses: the largest missing evidence, hidden cost, narrow condition, or reproducibility risk.
+
+Rules: no section-by-section narration; no long literature survey; no accusations without evidence; if evidence is missing, say "The paper does not provide sufficient information to determine." Keep the whole report short, dense, and anchored to paper text.`;
+
 const paperReadingPrompts: Record<PaperReadingMode, string> = {
   quality: `You are SCIReader's high-quality academic paper analyst. Use the strongest available evidence in the paper and preserve technical precision.
 
@@ -179,7 +202,7 @@ For a whole-paper summary, produce a short Chinese reading note with five compac
 5. Limits.
 
 Rules: no broad literature essay; explain equations and figures only when they change the technical interpretation; keep the result short and anchored to paper text.`,
-  reviewer: detailedReviewerPrompt,
+  reviewer: compactReviewerPrompt,
   reader: `You are a cross-disciplinary engineering and applied-science research reader. Be concise and focus on transferable understanding.
 
 For normal chat questions, answer only the user's question. Do not generate a full report unless the user asks for a whole-paper summary.
@@ -196,6 +219,7 @@ Rules: no section-by-section narration; no broad literature essay; explain equat
 
 const normalizePaperReadingMode = (mode: PaperReadingMode): PaperReadingMode => {
   if (mode === 'quality' || mode === 'detailed' || mode === 'simple') return mode;
+  if (mode === 'reviewer') return 'reviewer';
   if (mode === 'reader') return 'simple';
 
   return 'detailed';
@@ -206,6 +230,7 @@ const getPaperReadingModeLabel = (mode: PaperReadingMode) => {
 
   if (normalizedMode === 'quality') return 'High Quality / 高质量';
   if (normalizedMode === 'simple') return 'Simple / 简单';
+  if (normalizedMode === 'reviewer') return 'Reviewer / 审稿';
 
   return 'Detailed / 详细';
 };
@@ -669,6 +694,36 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
     },
     [financialContext, messages],
   );
+
+  const requestReviewOpinion = useCallback(async (): Promise<ReviewOpinionResponse> => {
+    if (!paperId || !paperPdfUrl) throw new Error('Paper is missing.');
+    if (!paperContextSummary.trim()) throw new Error('Please generate the first paper summary before creating reviewer comments.');
+
+    const response = await fetch('/api/reader-agent/review-opinion', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        paperId,
+        pdfUrl: paperPdfUrl,
+        title: paperTitle,
+        authors: paper?.authors,
+        journal: paper?.journal,
+        year: paper?.year,
+        prompt: 'Generate English reviewer comments.',
+        readingMode,
+        modePrompt: readingModePrompt,
+        detailedReport,
+        scope: 'whole-paper',
+        paperContextSummary,
+        conversationHistory: buildConversationHistory(messages),
+      }),
+    });
+    const result = (await response.json()) as ReviewOpinionResponse & { message?: string; error?: string };
+
+    if (!response.ok) throw new Error(result.message ?? result.error ?? 'Reviewer comments failed.');
+
+    return result;
+  }, [detailedReport, messages, paper?.authors, paper?.journal, paper?.year, paperContextSummary, paperId, paperPdfUrl, paperTitle, readingMode, readingModePrompt]);
 
   const loadFinancialHistory = useCallback(async () => {
     if (!financialContext?.selectedStock) return [];
@@ -1307,6 +1362,47 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
     }
   };
 
+  const generateReviewerComments = async () => {
+    if (isThinking || readingMode !== 'reviewer') return;
+
+    const loadingId = crypto.randomUUID();
+    const userMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: 'Generate reviewer comments in English.',
+      contextLabel: 'Reviewer comments request',
+    };
+
+    setMessages((current) => [
+      ...current,
+      userMessage,
+      { id: loadingId, role: 'assistant', content: 'Generating reviewer comments with the low-cost model...', contextLabel: 'Reviewer comments' },
+    ]);
+    setIsThinking(true);
+
+    try {
+      const result = await requestReviewOpinion();
+      const usageLabel = result.usage?.inputTokens ? ` · ${result.usage.inputTokens.toLocaleString()} in / ${(result.usage.outputTokens ?? 0).toLocaleString()} out` : '';
+      const modelLabel = result.model ? ` · ${result.model}` : '';
+
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === loadingId ? { ...message, content: result.answer, contextLabel: `Reviewer comments · cheap model${modelLabel}${usageLabel}` } : message,
+        ),
+      );
+    } catch (error) {
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === loadingId
+            ? { ...message, content: error instanceof Error ? error.message : 'Reviewer comments failed.' }
+            : message,
+        ),
+      );
+    } finally {
+      setIsThinking(false);
+    }
+  };
+
   const sendMessage = async (overrideInput?: string) => {
     const trimmed = (overrideInput ?? input).trim();
     if (!trimmed || isThinking) return;
@@ -1825,6 +1921,22 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
       </div>
 
       <footer className={isChatCollapsed ? 'hidden' : 'border-t p-3'}>
+        {readingMode === 'reviewer' && !isFinancialChat ? (
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+            <span className="min-w-0 flex-1">
+              Reviewer mode: generate English reviewer comments from the first summary and chat history.
+            </span>
+            <button
+              className="rounded-lg bg-white px-3 py-1.5 font-medium text-blue-700 shadow-sm ring-1 ring-blue-200 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isThinking || !paperContextSummary.trim()}
+              onClick={() => void generateReviewerComments()}
+              title={paperContextSummary.trim() ? 'Generate reviewer comments' : 'Please generate the first paper summary first.'}
+              type="button"
+            >
+              Generate review
+            </button>
+          </div>
+        ) : null}
         <textarea
           className={`max-h-48 min-h-20 w-full resize-y rounded-xl border bg-slate-50 p-2.5 outline-none focus:border-primary ${fontSizeStyle.textarea}`}
           disabled={isThinking}

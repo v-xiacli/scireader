@@ -40,8 +40,7 @@ const normalizePdfUrl = (pdfUrl: string) => {
 };
 
 const normalizeReadingMode = (mode?: string): PaperReadingMode => {
-  if (mode === 'quality' || mode === 'detailed' || mode === 'simple') return mode;
-  if (mode === 'reviewer') return 'detailed';
+  if (mode === 'quality' || mode === 'detailed' || mode === 'simple' || mode === 'reviewer') return mode;
   if (mode === 'reader') return 'simple';
 
   return 'detailed';
@@ -50,6 +49,7 @@ const normalizeReadingMode = (mode?: string): PaperReadingMode => {
 const getReadingModeLabel = (mode: PaperReadingMode) => {
   if (mode === 'quality') return 'High Quality / 高质量';
   if (mode === 'simple' || mode === 'reader') return 'Simple / 简单';
+  if (mode === 'reviewer') return 'Reviewer / 审稿';
 
   return 'Detailed / 详细';
 };
