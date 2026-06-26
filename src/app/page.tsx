@@ -13,14 +13,14 @@ type TokenAccount = { tokenBalance: number; tokenUsed: number; tokenAvailable: n
 const modules = [
   {
     href: '/financial-analysis',
-    title: '財務分析',
-    description: '上傳財報 PDF、K 線圖、盤口截圖和走勢圖，透過浮動聊天窗進行股票分析。',
+    title: 'Financial Analysis / 财务分析',
+    description: 'Upload financial reports, K-line charts, order-book screenshots, and trend images for stock analysis in the floating chat window. / 上传财报 PDF、K 线图、盘口截图和走势图，通过浮动聊天窗进行股票分析。',
     icon: BarChart3,
   },
   {
     href: '/research',
-    title: '科研論文',
-    description: '上傳 PDF 論文、生成讀書筆記、進行文獻問答，並使用寫作模式整理 Introduction。',
+    title: 'Research Papers / 科研论文',
+    description: 'Upload PDF papers, generate reading notes, ask literature questions, and prepare Introduction drafts in writing mode. / 上传 PDF 论文、生成读书笔记、进行文献问答，并使用写作模式整理 Introduction。',
     icon: FileText,
   },
 ];
@@ -71,15 +71,15 @@ const HomePage = () => {
       });
       const result = await response.json();
 
-      if (!response.ok) throw new Error(result.error ?? result.message ?? '登入失敗。');
+      if (!response.ok) throw new Error(result.error ?? result.message ?? 'Login failed. / 登录失败。');
 
       setAuthUser(result.user);
       setTokenAccount(result.tokenAccount ?? null);
-      setAuthMessage(`${authMode === 'signup' ? '帳戶已建立' : '已登入'}：${result.user.email}`);
+      setAuthMessage(`${authMode === 'signup' ? 'Account created / 账号已建立' : 'Signed in / 已登录'}: ${result.user.email}`);
       setPassword('');
       setVerificationCode('');
     } catch (error) {
-      setAuthMessage(error instanceof Error ? error.message : '登入失敗。');
+      setAuthMessage(error instanceof Error ? error.message : 'Login failed. / 登录失败。');
     } finally {
       setIsAuthLoading(false);
     }
@@ -97,11 +97,11 @@ const HomePage = () => {
       });
       const result = await response.json();
 
-      if (!response.ok) throw new Error(result.message ?? result.error ?? '無法發送驗證碼。');
+      if (!response.ok) throw new Error(result.message ?? result.error ?? 'Could not send verification code. / 无法发送验证码。');
 
-      setAuthMessage('驗證碼已發送，請查看郵箱。');
+      setAuthMessage('Verification code sent. Please check your email. / 验证码已发送，请查看邮箱。');
     } catch (error) {
-      setAuthMessage(error instanceof Error ? error.message : '無法發送驗證碼。');
+      setAuthMessage(error instanceof Error ? error.message : 'Could not send verification code. / 无法发送验证码。');
     } finally {
       setIsSendingVerificationCode(false);
     }
@@ -113,7 +113,7 @@ const HomePage = () => {
     setTokenAccount(null);
     setPassword('');
     setVerificationCode('');
-    setAuthMessage('已登出。');
+    setAuthMessage('Signed out. / 已登出。');
   };
 
   return (
@@ -121,9 +121,9 @@ const HomePage = () => {
       <div className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-4xl flex-col justify-center">
         <header className="mb-6">
           <p className="text-sm font-medium text-primary">SCIReader</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-normal text-slate-950">選擇工作模組</h1>
+          <h1 className="mt-2 text-3xl font-semibold tracking-normal text-slate-950">Choose a Workspace / 选择工作模块</h1>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            先在主頁登入或註冊，再進入科研論文或財務分析工作區。
+            Sign in or create an account here, then enter Research Papers or Financial Analysis. / 先在主页登录或注册，再进入科研论文或财务分析工作区。
           </p>
         </header>
 
@@ -132,9 +132,9 @@ const HomePage = () => {
             <div>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h2 className="text-xl font-semibold">帳戶</h2>
+                  <h2 className="text-xl font-semibold">Account / 账号</h2>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    {isSessionLoading ? '正在檢查登入狀態...' : authUser ? `目前帳戶：${authUser.email}` : '登入或註冊後即可使用 SCIReader。'}
+                    {isSessionLoading ? 'Checking sign-in status... / 正在检查登录状态...' : authUser ? `Current account / 当前账号: ${authUser.email}` : 'Sign in or create an account to use SCIReader. / 登录或注册后即可使用 SCIReader。'}
                   </p>
                 </div>
                 {authUser ? (
@@ -143,7 +143,7 @@ const HomePage = () => {
                     onClick={() => void handleLogout()}
                     type="button"
                   >
-                    登出
+                    Sign out / 登出
                   </button>
                 ) : null}
               </div>
@@ -156,14 +156,14 @@ const HomePage = () => {
                       onClick={() => setAuthMode('login')}
                       type="button"
                     >
-                      登入
+                      Sign in / 登录
                     </button>
                     <button
                       className={`rounded-lg px-3 py-1.5 text-sm ${authMode === 'signup' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
                       onClick={() => setAuthMode('signup')}
                       type="button"
                     >
-                      註冊
+                      Sign up / 注册
                     </button>
                   </div>
                   <input
@@ -187,7 +187,7 @@ const HomePage = () => {
                     type="button"
                   >
                     {isAuthLoading ? <Loader2 className="size-4 animate-spin" /> : null}
-                    {isAuthLoading ? '請稍候...' : authMode === 'signup' ? '註冊' : '登入'}
+                    {isAuthLoading ? 'Please wait... / 请稍候...' : authMode === 'signup' ? 'Sign up / 注册' : 'Sign in / 登录'}
                   </button>
                   {authMode === 'signup' && isSignupVerificationEnabled ? (
                     <div className="md:col-span-4 flex flex-col gap-2 sm:flex-row">
@@ -196,7 +196,7 @@ const HomePage = () => {
                         inputMode="numeric"
                         maxLength={6}
                         onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
-                        placeholder="6 位驗證碼"
+                        placeholder="6-digit code / 6 位验证码"
                         value={verificationCode}
                       />
                       <button
@@ -205,7 +205,7 @@ const HomePage = () => {
                         onClick={() => void handleSendVerificationCode()}
                         type="button"
                       >
-                        {isSendingVerificationCode ? '發送中...' : '發送驗證碼'}
+                        {isSendingVerificationCode ? 'Sending... / 发送中...' : 'Send code / 发送验证码'}
                       </button>
                     </div>
                   ) : null}
@@ -216,11 +216,11 @@ const HomePage = () => {
 
             <div className="rounded-2xl border bg-slate-50 p-4 text-right">
               <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-                <WalletCards className="size-4" /> Token 餘額
+                <WalletCards className="size-4" /> Token Balance / Token 余额
               </div>
               <p className="mt-2 text-3xl font-semibold">{tokenAccount ? tokenAccount.tokenAvailable.toLocaleString() : '200,000'}</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {tokenAccount ? `${tokenAccount.tokenUsed.toLocaleString()} 已用 / ${tokenAccount.tokenBalance.toLocaleString()} 總額` : '預設帳戶額度'}
+                {tokenAccount ? `${tokenAccount.tokenUsed.toLocaleString()} used / 已用 · ${tokenAccount.tokenBalance.toLocaleString()} total / 总额` : 'Default account quota / 预设账号额度'}
               </p>
             </div>
           </div>

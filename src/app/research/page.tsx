@@ -50,9 +50,9 @@ type ExtractedPaperMetadata = {
 };
 
 const readingModes: Array<{ id: PaperReadingMode; label: string; description: string }> = [
-  { id: 'quality', label: '高質量', description: '最高品質解讀；英文材料會先走英文精讀，再轉為中文輸出。' },
-  { id: 'detailed', label: '詳細', description: '直接用中文生成完整報告，不額外走翻譯鏈路。' },
-  { id: 'simple', label: '簡單', description: '直接用中文生成精簡速覽，適合快速了解。' },
+  { id: 'quality', label: 'High Quality / 高质量', description: 'Highest-quality reading; English materials are read in English first, then converted to Chinese output. / 最高质量解读；英文材料会先走英文精读，再转为中文输出。' },
+  { id: 'detailed', label: 'Detailed / 详细', description: 'Generate a full Chinese report directly without an extra translation route. / 直接用中文生成完整报告，不额外走翻译链路。' },
+  { id: 'simple', label: 'Simple / 简单', description: 'Generate a concise Chinese overview directly for quick understanding. / 直接用中文生成精简速览，适合快速了解。' },
 ];
 
 const normalizeResearchReadingMode = (mode?: PaperReadingMode): PaperReadingMode => {
@@ -66,7 +66,7 @@ const normalizeResearchReadingMode = (mode?: PaperReadingMode): PaperReadingMode
 const getResearchReadingModeLabel = (mode: PaperReadingMode) => {
   const normalizedMode = normalizeResearchReadingMode(mode);
 
-  return readingModes.find((item) => item.id === normalizedMode)?.label ?? '詳細';
+  return readingModes.find((item) => item.id === normalizedMode)?.label ?? 'Detailed / 详细';
 };
 
 const normalizeDownloadUrl = (downloadUrl: string) => {
@@ -325,7 +325,7 @@ const HomePage = () => {
           title: paper.title,
           journal: paper.journal,
           year: paper.year,
-          prompt: '請總結這篇文檔',
+          prompt: 'Please summarize this document. / 请总结这篇文档。',
         }),
       });
       const result = await response.json();
@@ -414,7 +414,7 @@ const HomePage = () => {
       }
 
       void estimateTokenConsumption(uploadedPaper);
-      setUploadMessage('論文已上傳。請在列表中選定論文和模式，再點擊解讀。');
+      setUploadMessage('Paper uploaded. Select a paper and mode from the list, then click Read. / 论文已上传。请在列表中选定论文和模式，再点击解读。');
     } catch (error) {
       setUploadMessage(error instanceof Error ? error.message : 'Upload failed.');
     } finally {
@@ -424,7 +424,7 @@ const HomePage = () => {
 
   const startPaperReading = (paper: PaperSummary | null = selectedPaper) => {
     if (!paper?.filePath) {
-      setUploadMessage('請先選定一篇已上傳論文。');
+      setUploadMessage('Please select one uploaded paper first. / 请先选定一篇已上传论文。');
       return;
     }
 
@@ -482,12 +482,12 @@ const HomePage = () => {
     }
 
     if (!writingTopic.trim()) {
-      setWritingMessage('請輸入寫作題目或方向。');
+      setWritingMessage('Please enter a writing topic or direction. / 请输入写作题目或方向。');
       return;
     }
 
     if (!selectedWritingMaterialCount) {
-      setWritingMessage('請選擇至少一篇已讀檔案或已生成文章。');
+      setWritingMessage('Please select at least one read file or generated article. / 请选择至少一篇已读文件或已生成文章。');
       return;
     }
 
@@ -523,7 +523,7 @@ const HomePage = () => {
       if (!response.ok) {
         const message = result.message ?? result.error ?? 'Writing mode failed.';
         setWritingResult({
-          draft: `## 寫作模式暫時無法生成\n\n${message}`,
+          draft: `## Writing mode is temporarily unavailable / 写作模式暂时无法生成\n\n${message}`,
           references: [],
           storagePath: '',
           savedAt: new Date().toISOString(),
@@ -534,10 +534,10 @@ const HomePage = () => {
       setWritingResult(result);
       if (result.article) setWritingArticles((current) => [result.article, ...current.filter((article) => article.storagePath !== result.article.storagePath)]);
       if (result.tokenAccount) setTokenAccount(result.tokenAccount);
-      setWritingMessage(result.processing ? '正在自動生成缺失的讀書筆記，完成後請再次生成 Introduction。' : `已生成並儲存：${result.storagePath}`);
+      setWritingMessage(result.processing ? 'Missing reading notes are being generated automatically. Please generate the Introduction again after it finishes. / 正在自动生成缺失的读书笔记，完成后请再次生成 Introduction。' : `Generated and saved / 已生成并保存：${result.storagePath}`);
     } catch (error) {
       setWritingResult((current) => current ?? {
-        draft: `## 寫作模式暫時無法生成\n\n${error instanceof Error ? error.message : 'Writing mode failed.'}`,
+        draft: `## Writing mode is temporarily unavailable / 写作模式暂时无法生成\n\n${error instanceof Error ? error.message : 'Writing mode failed.'}`,
         references: [],
         storagePath: '',
         savedAt: new Date().toISOString(),
@@ -626,7 +626,7 @@ const HomePage = () => {
       setWritingSelectedArticlePaths((current) =>
         current.includes(article.storagePath) ? current : [...current, article.storagePath],
       );
-      setWritingMessage(`已打開歷史寫作：${article.topic}`);
+      setWritingMessage(`Opened saved writing / 已打开历史写作：${article.topic}`);
     } catch (error) {
       setWritingMessage(error instanceof Error ? error.message : 'Could not open article.');
     } finally {
@@ -668,15 +668,15 @@ const HomePage = () => {
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <p className="text-sm font-medium uppercase tracking-wide text-primary">SCIReader</p>
-              <h1 className="mt-2 text-3xl font-semibold">Read papers with AI</h1>
+              <h1 className="mt-2 text-3xl font-semibold">Read Papers with AI / AI 阅读论文</h1>
               <p className="mt-2 max-w-2xl text-muted-foreground">
-                Upload a PDF, read it on the left, and ask questions in the chat on the right.
+                Upload a PDF, read it on the left, and ask questions in the chat on the right. / 上传 PDF，在左侧阅读，并在右侧聊天窗口提问。
               </p>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row lg:justify-end">
               <div className="rounded-2xl border bg-slate-50 p-4 text-right">
                 <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-                  <WalletCards className="size-4" /> Token estimate
+                  <WalletCards className="size-4" /> Token Estimate / Token 预估
                 </div>
                 <p className="mt-2 text-2xl font-semibold">
                   {tokenEstimate ? (tokenEstimate.billableTokens ?? tokenEstimate.inputTokens).toLocaleString() : '--'}
@@ -689,23 +689,23 @@ const HomePage = () => {
               </div>
               <div className="rounded-2xl border bg-slate-50 p-4 text-right">
                 <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-                  <WalletCards className="size-4" /> Token balance
+                  <WalletCards className="size-4" /> Token Balance / Token 余额
                 </div>
                 <p className="mt-2 text-2xl font-semibold">{tokenAccount ? tokenAccount.tokenAvailable.toLocaleString() : '200,000'}</p>
                 <p className="mt-1 max-w-44 text-xs text-muted-foreground">
-                  {tokenAccount ? `${tokenAccount.tokenUsed.toLocaleString()} used / ${tokenAccount.tokenBalance.toLocaleString()} total` : 'Default account quota'}
+                  {tokenAccount ? `${tokenAccount.tokenUsed.toLocaleString()} used / 已用 · ${tokenAccount.tokenBalance.toLocaleString()} total / 总额` : 'Default account quota / 预设账号额度'}
                 </p>
               </div>
             </div>
           </div>
           <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-            本網站不面向中國大陸用戶開放。
+            This website is not available to users in Mainland China. / 本网站不面向中国内地用户开放。
           </div>
           <div className="mt-5 grid gap-3 border-t pt-4 text-sm md:grid-cols-3">
             <div>
-              <p className="font-medium">充值參考</p>
+              <p className="font-medium">Top-up Reference / 充值参考</p>
               <p className="mt-1 text-muted-foreground">
-                僅接受美元充值；US$1 ≈ 2,000,000 token，首登贈送 200,000 token。需要購買更多 token，請發郵件至{' '}
+                USD top-ups only; US$1 ≈ 2,000,000 tokens, and new accounts receive 200,000 tokens. Need more tokens? Email / 仅接受美元充值；US$1 ≈ 2,000,000 token，首登赠送 200,000 token。需要购买更多 token，请发邮件至{' '}
                 <a className="font-medium text-primary underline-offset-4 hover:underline" href="mailto:sanbangzi@mailfence.com">
                   sci reader &lt;sanbangzi@mailfence.com&gt;
                 </a>
@@ -713,12 +713,12 @@ const HomePage = () => {
               </p>
             </div>
             <div>
-              <p className="font-medium">扣費規則</p>
-              <p className="mt-1 text-muted-foreground">按模型實際輸入/輸出單價折算；輸入價格約為輸出價格的 1/6。</p>
+              <p className="font-medium">Billing Rules / 扣费规则</p>
+              <p className="mt-1 text-muted-foreground">Calculated from actual model input/output prices; input price is about 1/6 of output price. / 按模型实际输入/输出单价折算；输入价格约为输出价格的 1/6。</p>
             </div>
             <div>
-              <p className="font-medium">閱讀估算</p>
-              <p className="mt-1 text-muted-foreground">US$1 約可精讀 80-160 篇 5000 words 英文文獻，超長論文按實際 token 扣費。</p>
+              <p className="font-medium">Reading Estimate / 阅读估算</p>
+              <p className="mt-1 text-muted-foreground">US$1 can deeply read about 80-160 English papers of 5,000 words; very long papers are billed by actual token usage. / US$1 约可精读 80-160 篇 5000 words 英文文献，超长论文按实际 token 扣费。</p>
             </div>
           </div>
         </header>
@@ -745,17 +745,17 @@ const HomePage = () => {
           <div className="flex flex-col gap-2">
             <div className="flex items-center gap-2">
               <PenLine className="size-5 text-primary" />
-              <h2 className="text-xl font-semibold">寫作模式</h2>
+              <h2 className="text-xl font-semibold">Writing Mode / 写作模式</h2>
             </div>
             <p className="text-sm text-muted-foreground">
-              基於已儲存的讀書筆記組織 Introduction，並按首次出現順序生成引用編號；寫作模式按 1.5 倍 token 計費。
+              Organize an Introduction from saved reading notes and generate citation numbers by first appearance; Writing Mode is billed at 1.5x tokens. / 基于已保存的读书笔记组织 Introduction，并按首次出现顺序生成引用编号；写作模式按 1.5 倍 token 计费。
             </p>
           </div>
 
           <div className="mt-5 grid gap-4">
             <div className="space-y-4">
               <label className="block">
-                <span className="text-sm font-medium">寫作題目或方向</span>
+                <span className="text-sm font-medium">Writing Topic or Direction / 写作题目或方向</span>
                 <textarea
                   className="mt-2 min-h-24 w-full rounded-xl border px-4 py-3 text-sm outline-none transition focus:border-primary"
                   onChange={(event) => setWritingTopic(event.target.value)}
@@ -793,7 +793,7 @@ const HomePage = () => {
                           className="max-w-full rounded-lg border bg-slate-50 px-3 py-2 text-left text-sm transition hover:border-primary hover:bg-white"
                           key={getWritingPaperKey(paper)}
                           onClick={() => toggleWritingPaper(paper)}
-                          title="取消選擇"
+                          title="Remove selection / 取消选择"
                           type="button"
                         >
                           <span className="block truncate font-medium">{paper.title}</span>
@@ -807,7 +807,7 @@ const HomePage = () => {
                           className="max-w-full rounded-lg border bg-indigo-50 px-3 py-2 text-left text-sm transition hover:border-primary hover:bg-white"
                           key={article.storagePath}
                           onClick={() => toggleWritingArticle(article)}
-                          title="取消選擇"
+                          title="Remove selection / 取消选择"
                           type="button"
                         >
                           <span className="block truncate font-medium">{article.topic}</span>
@@ -818,7 +818,7 @@ const HomePage = () => {
                       ))}
                     </div>
                   ) : (
-                    <p className="text-sm text-muted-foreground">請在下面的 Your papers 或 Your articles 列表裡勾選要用於寫作的素材。</p>
+                    <p className="text-sm text-muted-foreground">Select writing materials from the Your Papers or Your Articles lists below. / 请在下面的 Your Papers 或 Your Articles 列表里勾选要用于写作的素材。</p>
                   )}
                 </div>
               </div>
@@ -874,7 +874,7 @@ const HomePage = () => {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-xl font-semibold">Your articles</h2>
-              <p className="mt-1 text-sm text-muted-foreground">寫作模式生成的 Introduction 和修改稿會儲存在這裡。</p>
+              <p className="mt-1 text-sm text-muted-foreground">Introductions and revisions generated in Writing Mode are saved here. / 写作模式生成的 Introduction 和修改稿会保存在这里。</p>
             </div>
           </div>
 
@@ -889,7 +889,7 @@ const HomePage = () => {
                 >
                   <label
                     className="flex shrink-0 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm transition hover:border-primary hover:bg-white"
-                    title={isSelectedForWriting ? '取消加入寫作模式' : '加入寫作模式'}
+                    title={isSelectedForWriting ? 'Remove from Writing Mode / 取消加入写作模式' : 'Add to Writing Mode / 加入写作模式'}
                   >
                     <input
                       checked={isSelectedForWriting}
@@ -897,7 +897,7 @@ const HomePage = () => {
                       onChange={() => toggleWritingArticle(article)}
                       type="checkbox"
                     />
-                    <span className="hidden sm:inline">寫作</span>
+                    <span className="hidden sm:inline">Writing / 写作</span>
                   </label>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -939,7 +939,7 @@ const HomePage = () => {
               );
             }) : (
               <div className="rounded-2xl border bg-slate-50 p-4 text-sm text-muted-foreground">
-                還沒有寫作結果。生成 Introduction 後會自動出現在這裡。
+                No writing results yet. Generated Introductions will appear here automatically. / 还没有写作结果。生成 Introduction 后会自动出现在这里。
               </div>
             )}
           </div>
@@ -974,7 +974,7 @@ const HomePage = () => {
                 type="button"
               >
                 {isUploading ? <Loader2 className="size-4 animate-spin" /> : null}
-                {isUploading ? '上傳中...' : isLoggedIn ? '上傳論文' : '登入後上傳'}
+                {isUploading ? 'Uploading... / 上传中...' : isLoggedIn ? 'Upload Paper / 上传论文' : 'Sign in to Upload / 登录后上传'}
               </button>
               <div className="flex max-w-full rounded-xl border p-1">
                 {readingModes.map((mode) => (
@@ -997,17 +997,17 @@ const HomePage = () => {
                 className="whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={!selectedPaper?.filePath}
                 onClick={() => startPaperReading()}
-                title={selectedPaper ? `解讀 ${selectedPaper.title}` : '請先選定論文'}
+                title={selectedPaper ? `Read / 解读 ${selectedPaper.title}` : 'Please select a paper first / 请先选定论文'}
                 type="button"
               >
-                解讀選定論文
+                Read Selected Paper / 解读选定论文
               </button>
               {uploadMessage ? <p className="text-sm text-muted-foreground">{uploadMessage}</p> : null}
             </div>
             <div>
-              <h2 className="text-xl font-semibold">你的論文</h2>
+              <h2 className="text-xl font-semibold">Your Papers / 你的论文</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                {selectedPaper ? `已選定：${selectedPaper.title} · ${getResearchReadingModeLabel(readingMode)}` : '請先上傳並選定一篇論文。'}
+                {selectedPaper ? `Selected / 已选定：${selectedPaper.title} · ${getResearchReadingModeLabel(readingMode)}` : 'Please upload and select one paper first. / 请先上传并选定一篇论文。'}
               </p>
             </div>
           </div>
@@ -1024,7 +1024,7 @@ const HomePage = () => {
                     canSelectForWriting ? 'cursor-pointer hover:border-primary hover:bg-white' : 'cursor-not-allowed bg-slate-50 text-slate-400'
                   }`}
                   onClick={(event) => event.stopPropagation()}
-                  title={canSelectForWriting ? (isSelectedForWriting ? '取消加入寫作模式' : '加入寫作模式') : '登入並上傳論文後可加入寫作模式'}
+                  title={canSelectForWriting ? (isSelectedForWriting ? 'Remove from Writing Mode / 取消加入写作模式' : 'Add to Writing Mode / 加入写作模式') : 'Sign in and upload a paper before adding it to Writing Mode / 登录并上传论文后可加入写作模式'}
                 >
                   <input
                     checked={isSelectedForWriting}
@@ -1035,7 +1035,7 @@ const HomePage = () => {
                     }}
                     type="checkbox"
                   />
-                  <span className="hidden sm:inline">寫作</span>
+                  <span className="hidden sm:inline">Writing / 写作</span>
                 </label>
               );
               const content = (
@@ -1075,7 +1075,7 @@ const HomePage = () => {
                       }}
                       type="button"
                     >
-                      解讀
+                      Read / 解读
                     </button>
                   ) : null}
                   {paper.filePath ? (

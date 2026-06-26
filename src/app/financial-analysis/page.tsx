@@ -55,8 +55,8 @@ type StockQuote = StockWatchlistItem & {
 type FinancialAnalysisMode = 'quality' | 'normal';
 
 const financialAnalysisModes: Array<{ id: FinancialAnalysisMode; label: string; description: string }> = [
-  { id: 'quality', label: '高質量', description: '使用更強的分析鏈路，適合正式財報和複雜盤面。' },
-  { id: 'normal', label: '一般', description: '直接分析材料，適合快速判斷。' },
+  { id: 'quality', label: 'High Quality / 高质量', description: 'Use a stronger analysis route for formal reports and complex market signals. / 使用更强的分析链路，适合正式财报和复杂盘面。' },
+  { id: 'normal', label: 'Normal / 一般', description: 'Analyze the current materials directly for a quick judgement. / 直接分析材料，适合快速判断。' },
 ];
 
 const formatDate = (value: string) => {
@@ -82,7 +82,7 @@ const mergeFinancialMaterials = (current: FinancialMaterial[], incoming: Financi
 };
 
 const describeMaterialSize = (material: FinancialMaterial) =>
-  material.url ? '網頁連結' : `${formatMaterialSize(material.size)}`;
+  material.url ? 'Web link / 网页链接' : `${formatMaterialSize(material.size)}`;
 
 const formatStockWatchlistText = (watchlist: StockWatchlistItem[]) =>
   watchlist.map((item) => `${item.name},${item.code},${item.market ?? 'A'}`).join('\n');
@@ -220,7 +220,7 @@ const FinancialAnalysisPage = () => {
 
   const activateFinancialAnalysis = async () => {
     if (!isLoggedIn) {
-      setFinancialAccessMessage('請先登入後再開通財務分析。');
+      setFinancialAccessMessage('Please sign in before enabling Financial Analysis. / 请先登录后再开通财务分析。');
       return;
     }
 
@@ -234,7 +234,7 @@ const FinancialAnalysisPage = () => {
       if (!response.ok) throw new Error(result.message ?? result.error ?? 'Financial analysis access failed.');
 
       setIsFinancialEnabled(Boolean(result.enabled));
-      setFinancialAccessMessage('財務分析已開通。');
+      setFinancialAccessMessage('Financial Analysis is enabled. / 财务分析已开通。');
       void loadReports();
     } catch (error) {
       setFinancialAccessMessage(error instanceof Error ? error.message : 'Financial analysis access failed.');
@@ -286,7 +286,7 @@ const FinancialAnalysisPage = () => {
   const saveStockWatchlist = async () => {
     const watchlist = parseStockWatchlistText(stockWatchlistText);
     if (!watchlist.length) {
-      setStockMessage('請至少保留一隻自選股。');
+      setStockMessage('Please keep at least one watchlist stock. / 请至少保留一只自选股。');
       return;
     }
 
@@ -352,12 +352,12 @@ const FinancialAnalysisPage = () => {
 
   const addLinkMaterial = async () => {
     if (!isLoggedIn) {
-      setMessage('請先登入再加入網頁連結。');
+      setMessage('Please sign in before adding a web link. / 请先登录再加入网页链接。');
       return;
     }
 
     if (!isFinancialEnabled) {
-      setFinancialAccessMessage('請先開通財務分析功能。');
+      setFinancialAccessMessage('Please enable Financial Analysis first. / 请先开通财务分析功能。');
       return;
     }
 
@@ -377,9 +377,9 @@ const FinancialAnalysisPage = () => {
       addCurrentMaterials([material]);
       await saveMaterialsToLibrary([material]);
       setMaterialUrl('');
-      setMessage('已加入網頁連結，本次分析會嘗試讀取正文。');
+      setMessage('Web link added. This analysis will try to read the page text. / 已加入网页链接，本次分析会尝试读取正文。');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '請輸入有效的網頁連結。');
+      setMessage(error instanceof Error ? error.message : 'Please enter a valid web link. / 请输入有效的网页链接。');
     }
   };
 
@@ -398,7 +398,7 @@ const FinancialAnalysisPage = () => {
 
     try {
       await persistFinancialMaterials(nextLibrary);
-      setMessage('已從歷史資料移除。');
+      setMessage('Removed from saved materials. / 已从历史资料移除。');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not save financial materials.');
       void loadFinancialMaterials();
@@ -467,13 +467,13 @@ const FinancialAnalysisPage = () => {
 
   const handleUpload = async (files: FileList | File[]) => {
     if (!isLoggedIn) {
-      setMessage('請先登入再上傳財務材料。');
+      setMessage('Please sign in before uploading financial materials. / 请先登录再上传财务材料。');
       return;
     }
 
     const selectedFiles = Array.from(files).slice(0, Math.max(0, 12 - materials.length));
     if (!selectedFiles.length) {
-      setMessage('本次資料已達 12 份上限。');
+      setMessage('Current materials have reached the 12-item limit. / 本次资料已达 12 份上限。');
       return;
     }
 
@@ -514,7 +514,7 @@ const FinancialAnalysisPage = () => {
 
       addCurrentMaterials(uploaded);
       await saveMaterialsToLibrary(uploaded);
-      setMessage(`已上傳 ${uploaded.length} 個材料，並加入本次分析。`);
+      setMessage(`Uploaded ${uploaded.length} material(s) and added them to this analysis. / 已上传 ${uploaded.length} 个材料，并加入本次分析。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Financial material upload failed.');
     } finally {
@@ -524,22 +524,22 @@ const FinancialAnalysisPage = () => {
 
   const startFinancialAnalysis = () => {
     if (!isLoggedIn) {
-      setMessage('請先登入再使用財務分析。');
+      setMessage('Please sign in before using Financial Analysis. / 请先登录再使用财务分析。');
       return;
     }
 
     if (!isFinancialEnabled) {
-      setFinancialAccessMessage('請先開通財務分析功能。');
+      setFinancialAccessMessage('Please enable Financial Analysis first. / 请先开通财务分析功能。');
       return;
     }
 
     if (!selectedStock) {
-      setStockMessage('請先輸入擬分析板塊或股票。');
+      setStockMessage('Please enter the sector or stock to analyze. / 请先输入拟分析板块或股票。');
       return;
     }
 
     if (!materials.length) {
-      setMessage('請先上傳財報、K 線圖、盤口截圖或走勢圖。');
+      setMessage('Please upload a financial report, K-line chart, order-book screenshot, or trend image first. / 请先上传财报、K 线图、盘口截图或走势图。');
       return;
     }
 
@@ -561,32 +561,32 @@ const FinancialAnalysisPage = () => {
             <div>
               <div className="flex items-center gap-2">
                 <BarChart3 className="size-5 text-primary" />
-                <h1 className="text-xl font-semibold">財務分析</h1>
+                <h1 className="text-xl font-semibold">Financial Analysis / 财务分析</h1>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
-                {authUser ? `當前帳戶：${authUser.email}` : isSessionLoading ? '正在檢查登入狀態...' : '請先回到首頁登入後使用。'}
+                {authUser ? `Current account / 当前账号: ${authUser.email}` : isSessionLoading ? 'Checking sign-in status... / 正在检查登录状态...' : 'Please return to the home page and sign in first. / 请先回到主页登录后使用。'}
               </p>
-              <p className="mt-1 text-xs font-medium text-amber-700">該功能需要單獨開通；token 使用費按正常分析的 3 倍計算。</p>
+              <p className="mt-1 text-xs font-medium text-amber-700">This feature must be enabled separately; token usage is billed at 3x the normal analysis rate. / 该功能需要单独开通；token 使用费按正常分析的 3 倍计算。</p>
             </div>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row lg:items-center lg:justify-end">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-2xl border bg-white p-4 text-right shadow-sm">
                 <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-                  <WalletCards className="size-4" /> Token 預估
+                  <WalletCards className="size-4" /> Token Estimate / Token 预估
                 </div>
-                <p className="mt-2 text-2xl font-semibold">{materials.length ? `${materials.length} 份` : '--'}</p>
+                <p className="mt-2 text-2xl font-semibold">{materials.length ? `${materials.length} items / 份` : '--'}</p>
                 <p className="mt-1 max-w-44 text-xs text-muted-foreground">
-                  {materials.length ? `${formatMaterialSize(materialSizeTotal)} 材料；提交後按實際消耗 ×3` : '上傳財報或圖片後開始分析。'}
+                  {materials.length ? `${formatMaterialSize(materialSizeTotal)} materials / 材料；billed by actual usage ×3 / 提交后按实际消耗 ×3` : 'Upload reports or images to start. / 上传财报或图片后开始分析。'}
                 </p>
               </div>
               <div className="rounded-2xl border bg-white p-4 text-right shadow-sm">
                 <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-                  <WalletCards className="size-4" /> Token 餘額
+                  <WalletCards className="size-4" /> Token Balance / Token 余额
                 </div>
                 <p className="mt-2 text-2xl font-semibold">{tokenAccount ? tokenAccount.tokenAvailable.toLocaleString() : '200,000'}</p>
                 <p className="mt-1 max-w-44 text-xs text-muted-foreground">
-                  {tokenAccount ? `${tokenAccount.tokenUsed.toLocaleString()} 已用 / ${tokenAccount.tokenBalance.toLocaleString()} 總額` : '預設帳戶額度'}
+                  {tokenAccount ? `${tokenAccount.tokenUsed.toLocaleString()} used / 已用 · ${tokenAccount.tokenBalance.toLocaleString()} total / 总额` : 'Default account quota / 预设账号额度'}
                 </p>
               </div>
             </div>
@@ -595,13 +595,13 @@ const FinancialAnalysisPage = () => {
 
         <section className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-            本網站不面向中國大陸用戶開放。
+            This website is not available to users in Mainland China. / 本网站不面向中国内地用户开放。
           </div>
           <div className="mt-4 grid gap-3 border-t pt-4 text-sm md:grid-cols-3">
             <div>
-              <p className="font-medium">充值參考</p>
+              <p className="font-medium">Top-up Reference / 充值参考</p>
               <p className="mt-1 text-muted-foreground">
-                僅接受美元充值；US$1 ≈ 2,000,000 token，首登贈送 200,000 token。需要購買更多 token，請發郵件至{' '}
+                USD top-ups only; US$1 ≈ 2,000,000 tokens, and new accounts receive 200,000 tokens. Need more tokens? Email / 仅接受美元充值；US$1 ≈ 2,000,000 token，首登赠送 200,000 token。需要购买更多 token，请发邮件至{' '}
                 <a className="font-medium text-primary underline-offset-4 hover:underline" href="mailto:sanbangzi@mailfence.com">
                   sci reader &lt;sanbangzi@mailfence.com&gt;
                 </a>
@@ -609,12 +609,12 @@ const FinancialAnalysisPage = () => {
               </p>
             </div>
             <div>
-              <p className="font-medium">財務扣費</p>
-              <p className="mt-1 text-muted-foreground">財務分析按模型實際輸入/輸出折算後，再按正常分析的 3 倍扣費。</p>
+              <p className="font-medium">Financial Billing / 财务扣费</p>
+              <p className="mt-1 text-muted-foreground">Financial Analysis is calculated from actual model input/output usage, then billed at 3x the normal analysis rate. / 财务分析按模型实际输入/输出折算后，再按正常分析的 3 倍扣费。</p>
             </div>
             <div>
-              <p className="font-medium">材料說明</p>
-              <p className="mt-1 text-muted-foreground">可上傳多份財報 PDF、K 線圖、盤口截圖、走勢圖，也可貼網頁連結；歷史資料和本次資料分開管理。</p>
+              <p className="font-medium">Materials / 材料说明</p>
+              <p className="mt-1 text-muted-foreground">Upload financial report PDFs, K-line charts, order-book screenshots, trend images, or web links; saved materials and current materials are managed separately. / 可上传多份财报 PDF、K 线图、盘口截图、走势图，也可贴网页链接；历史资料和本次资料分开管理。</p>
             </div>
           </div>
         </section>
@@ -623,14 +623,14 @@ const FinancialAnalysisPage = () => {
           <section className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4 shadow-sm">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="font-semibold text-blue-950">請先登入</h2>
-                <p className="mt-1 text-sm text-blue-900">財務分析需要登入帳戶後使用；登入窗口已移到主頁，登入後再進入本頁即可看到自選股、歷史資料和報告。</p>
+                <h2 className="font-semibold text-blue-950">Please Sign In / 请先登录</h2>
+                <p className="mt-1 text-sm text-blue-900">Financial Analysis requires a signed-in account. The sign-in panel is now on the home page; after signing in, return here to view your watchlist, saved materials, and reports. / 财务分析需要登录账号后使用；登录窗口已移到主页，登录后再进入本页即可看到自选股、历史资料和报告。</p>
               </div>
               <Link
                 className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
                 href="/"
               >
-                回首頁登入
+                Back to Sign In / 回主页登录
               </Link>
             </div>
           </section>
@@ -640,9 +640,9 @@ const FinancialAnalysisPage = () => {
           <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <h2 className="font-semibold text-amber-950">開通財務分析</h2>
+                <h2 className="font-semibold text-amber-950">Enable Financial Analysis / 开通财务分析</h2>
                 <p className="mt-1 text-sm leading-6 text-amber-900">
-                  財務分析會讀取財報、K 線圖、盤口截圖和走勢圖，並按分析對象保存本用戶的歷史報告。使用前需單獨開通，token 使用量按正常分析的 3 倍計算。
+                  Financial Analysis reads reports, K-line charts, order-book screenshots, and trend images, then saves reports by analysis target for this user. It must be enabled separately, and token usage is billed at 3x the normal analysis rate. / 财务分析会读取财报、K 线图、盘口截图和走势图，并按分析对象保存本用户的历史报告。使用前需单独开通，token 使用量按正常分析的 3 倍计算。
                 </p>
               </div>
               <button
@@ -651,7 +651,7 @@ const FinancialAnalysisPage = () => {
                 onClick={() => void activateFinancialAnalysis()}
                 type="button"
               >
-                {isActivatingFinancial ? '開通中...' : '確認開通'}
+                {isActivatingFinancial ? 'Enabling... / 开通中...' : 'Confirm Enable / 确认开通'}
               </button>
             </div>
             {financialAccessMessage ? <p className="mt-2 text-sm text-amber-900">{financialAccessMessage}</p> : null}
@@ -661,16 +661,16 @@ const FinancialAnalysisPage = () => {
         <section className="mt-4 rounded-2xl border bg-white p-3 shadow-sm">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-sm font-medium">自選股即時價格</p>
+              <p className="text-sm font-medium">Watchlist Live Prices / 自选股实时价格</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {quotesUpdatedAt ? `最近更新 ${formatDate(quotesUpdatedAt)}` : '進入頁面後自動重新整理；每 60 秒更新一次。'}
+                {quotesUpdatedAt ? `Last updated / 最近更新 ${formatDate(quotesUpdatedAt)}` : 'Refreshes automatically after entering this page; updates every 60 seconds. / 进入页面后自动刷新；每 60 秒更新一次。'}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <input
                 className="min-w-64 rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-primary"
                 onChange={(event) => setAnalysisTargetText(event.target.value)}
-                placeholder="擬分析板塊或股票，例如：光伏設備、阿里巴巴 09988"
+                placeholder="Sector or stock to analyze, e.g. optical equipment, Alibaba 09988 / 拟分析板块或股票，例如：光伏设备、阿里巴巴 09988"
                 value={analysisTargetText}
               />
               <div className="flex rounded-xl border p-1">
@@ -692,7 +692,7 @@ const FinancialAnalysisPage = () => {
                 onClick={startFinancialAnalysis}
                 type="button"
               >
-                開始分析
+                Start Analysis / 开始分析
               </button>
               <button
                 className="rounded-xl border px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-70"
@@ -700,14 +700,14 @@ const FinancialAnalysisPage = () => {
                 onClick={() => void refreshStockQuotes()}
                 type="button"
               >
-                {isQuotesLoading ? '重新整理中...' : '重新整理'}
+                {isQuotesLoading ? 'Refreshing... / 刷新中...' : 'Refresh / 刷新'}
               </button>
               <button
                 className="rounded-xl border px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
                 onClick={() => setIsWatchlistEditing((current) => !current)}
                 type="button"
               >
-                {isWatchlistEditing ? '收起編輯' : '編輯自選股'}
+                {isWatchlistEditing ? 'Collapse Edit / 收起编辑' : 'Edit Watchlist / 编辑自选股'}
               </button>
             </div>
           </div>
@@ -717,7 +717,7 @@ const FinancialAnalysisPage = () => {
               <textarea
                 className="min-h-28 w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none transition focus:border-primary"
                 onChange={(event) => setStockWatchlistText(event.target.value)}
-                placeholder={'每行一隻：名稱,代碼,市場\n例如：北方華創,002371,A\n英偉達,NVDA,US'}
+                placeholder={'One stock per line: name,code,market / 每行一只：名称,代码,市场\nExample / 例如：北方华创,002371,A\nNVIDIA / 英伟达,NVDA,US'}
                 value={stockWatchlistText}
               />
               <div className="flex flex-wrap gap-2">
@@ -726,9 +726,9 @@ const FinancialAnalysisPage = () => {
                   onClick={() => void saveStockWatchlist()}
                   type="button"
                 >
-                  儲存自選股
+                  Save Watchlist / 保存自选股
                 </button>
-                <span className="self-center text-xs text-muted-foreground">市場支援 A / US / HK / FX。</span>
+                <span className="self-center text-xs text-muted-foreground">Supported markets: A / US / HK / FX. / 支持市场：A / US / HK / FX。</span>
               </div>
             </div>
           ) : null}
@@ -767,7 +767,7 @@ const FinancialAnalysisPage = () => {
                 </button>
               );
             }) : (
-              <p className="text-sm text-muted-foreground">{isLoggedIn ? '暫無行情。請重新整理或編輯自選股列表。' : '登入後顯示你的自選股即時價格。'}</p>
+              <p className="text-sm text-muted-foreground">{isLoggedIn ? 'No quotes yet. Please refresh or edit your watchlist. / 暂无行情。请刷新或编辑自选股列表。' : 'Sign in to show your watchlist live prices. / 登录后显示你的自选股实时价格。'}</p>
             )}
           </div>
         </section>
@@ -776,8 +776,8 @@ const FinancialAnalysisPage = () => {
           <aside className="rounded-2xl border bg-white p-4 shadow-sm">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <h2 className="font-semibold">本次資料</h2>
-                <p className="mt-1 text-sm text-muted-foreground">只會分析這裡的資料；可從歷史資料拖入或點擊加入。</p>
+                <h2 className="font-semibold">Current Materials / 本次资料</h2>
+                <p className="mt-1 text-sm text-muted-foreground">Only these materials will be analyzed; drag from saved materials or tap to add. / 只会分析这里的资料；可从历史资料拖入或点击加入。</p>
               </div>
               <div className="flex flex-wrap gap-2 sm:justify-end">
                 <button
@@ -787,7 +787,7 @@ const FinancialAnalysisPage = () => {
                   type="button"
                 >
                   {isUploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
-                  {isUploading ? '上傳中...' : '上傳材料'}
+                  {isUploading ? 'Uploading... / 上传中...' : 'Upload Materials / 上传材料'}
                 </button>
                 {materials.length ? (
                 <button
@@ -795,7 +795,7 @@ const FinancialAnalysisPage = () => {
                   onClick={() => setMaterials([])}
                   type="button"
                 >
-                  清空本次
+                  Clear Current / 清空本次
                 </button>
                 ) : null}
               </div>
@@ -831,7 +831,7 @@ const FinancialAnalysisPage = () => {
                   <button
                     className="rounded-lg border bg-white p-2 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
                     onClick={() => setMaterials((current) => current.filter((item) => item.storagePath !== file.storagePath))}
-                    title="移出本次資料"
+                    title="Remove from current materials / 移出本次资料"
                     type="button"
                   >
                     <Trash2 className="size-4" />
@@ -839,13 +839,13 @@ const FinancialAnalysisPage = () => {
                 </div>
               )) : (
                 <div className="rounded-xl border border-dashed bg-slate-50 p-4 text-sm text-muted-foreground">
-                  拖入歷史資料，或上傳 PDF、K 線圖、盤口截圖、走勢圖圖片。
+                  Drag in saved materials, or upload PDFs, K-line charts, order-book screenshots, and trend images. / 拖入历史资料，或上传 PDF、K 线图、盘口截图、走势图图片。
                 </div>
               )}
             </div>
 
             <div className="mt-4 border-t pt-4">
-              <h3 className="text-sm font-semibold">加入網頁連結</h3>
+              <h3 className="text-sm font-semibold">Add Web Link / 加入网页链接</h3>
               <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                 <input
                   className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-primary"
@@ -853,7 +853,7 @@ const FinancialAnalysisPage = () => {
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') void addLinkMaterial();
                   }}
-                  placeholder="貼上年報、公告或網頁連結"
+                  placeholder="Paste an annual report, announcement, or web link / 粘贴年报、公告或网页链接"
                   value={materialUrl}
                 />
                 <button
@@ -862,7 +862,7 @@ const FinancialAnalysisPage = () => {
                   onClick={() => void addLinkMaterial()}
                   type="button"
                 >
-                  加入連結
+                  Add Link / 加入链接
                 </button>
               </div>
             </div>
@@ -870,8 +870,8 @@ const FinancialAnalysisPage = () => {
             <div className="mt-4 border-t pt-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-sm font-semibold">歷史資料</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">登入後保存資料索引；拖動或點擊可加入本次。</p>
+                  <h3 className="text-sm font-semibold">Saved Materials / 历史资料</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">The material index is saved after sign-in; drag or tap to add to current materials. / 登录后保存资料索引；拖动或点击可加入本次。</p>
                 </div>
               </div>
               <div className="mt-3 grid max-h-[28rem] gap-2 overflow-y-auto pr-1">
@@ -896,7 +896,7 @@ const FinancialAnalysisPage = () => {
                         <button
                           className="rounded-lg border bg-white p-2 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
                           onClick={() => void removeMaterialFromLibrary(file.storagePath)}
-                          title="從歷史資料移除"
+                          title="Remove from saved materials / 从历史资料移除"
                           type="button"
                         >
                           <Trash2 className="size-4" />
@@ -908,13 +908,13 @@ const FinancialAnalysisPage = () => {
                         onClick={() => addMaterialFromLibrary(file.storagePath)}
                         type="button"
                       >
-                        {isCurrent ? '已在本次資料' : '加入本次資料'}
+                        {isCurrent ? 'Already Current / 已在本次资料' : 'Add to Current / 加入本次资料'}
                       </button>
                     </div>
                   );
                 }) : (
                   <div className="rounded-xl border border-dashed bg-slate-50 p-4 text-sm text-muted-foreground">
-                    暫無歷史資料。上傳文件或加入網頁連結後會保存在這裡。
+                    No saved materials yet. Upload files or add web links to save them here. / 暂无历史资料。上传文件或加入网页链接后会保存在这里。
                   </div>
                 )}
               </div>
@@ -924,8 +924,8 @@ const FinancialAnalysisPage = () => {
           <section className="rounded-2xl border bg-white p-4 shadow-sm">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="font-semibold">歷史報告</h2>
-                <p className="mt-1 text-sm text-muted-foreground">只保存本用戶的分析對象、問題、回答和 token 記錄；不保存歷史上傳資料。</p>
+                <h2 className="font-semibold">Saved Reports / 历史报告</h2>
+                <p className="mt-1 text-sm text-muted-foreground">Only this user's analysis targets, questions, answers, and token records are saved; historical uploaded files are not stored in reports. / 只保存本用户的分析对象、问题、回答和 token 记录；不在报告中保存历史上传资料。</p>
               </div>
               <button
                 className="rounded-xl border px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-70"
@@ -933,7 +933,7 @@ const FinancialAnalysisPage = () => {
                 onClick={() => void loadReports()}
                 type="button"
               >
-                重新整理
+                Refresh / 刷新
               </button>
             </div>
             {reportsMessage ? <p className="mt-2 text-sm text-red-600">{reportsMessage}</p> : null}
@@ -962,7 +962,7 @@ const FinancialAnalysisPage = () => {
                 );
               }) : (
                 <div className="rounded-xl border border-dashed bg-slate-50 p-4 text-sm text-muted-foreground">
-                  尚無歷史報告。開通後在浮動聊天窗完成分析，報告會自動出現在這裡。
+                  No saved reports yet. After enabling the feature and completing analysis in the floating chat window, reports will appear here automatically. / 尚无历史报告。开通后在浮动聊天窗完成分析，报告会自动出现在这里。
                 </div>
               )}
             </div>
