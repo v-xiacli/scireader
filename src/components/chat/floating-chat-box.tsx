@@ -209,10 +209,10 @@ const normalizePaperReadingMode = (mode: PaperReadingMode): PaperReadingMode => 
 const getPaperReadingModeLabel = (mode: PaperReadingMode) => {
   const normalizedMode = normalizePaperReadingMode(mode);
 
-  if (normalizedMode === 'quality') return '高质量';
-  if (normalizedMode === 'simple') return '简单';
+  if (normalizedMode === 'quality') return 'High Quality / 高质量';
+  if (normalizedMode === 'simple') return 'Simple / 简单';
 
-  return '详细';
+  return 'Detailed / 详细';
 };
 
 const chatFontSizeOrder: ChatFontSize[] = ['xs', 'small', 'medium', 'large', 'xl'];
@@ -459,7 +459,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
   const readingModePrompt = paperReadingPrompts[readingMode];
   const detailedReport = paper?.detailedReport ?? false;
   const summaryRunKey = getSummaryRunKey(paperId, paperPdfUrl, readingMode, detailedReport);
-  const readingModeLabel = `${getPaperReadingModeLabel(readingMode)} · ${paper?.shouldAutoSummarize ? '解读中' : '待解读'}`;
+  const readingModeLabel = `${getPaperReadingModeLabel(readingMode)} · ${paper?.shouldAutoSummarize ? 'Reading / 解读中' : 'Pending / 待解读'}`;
   const fontSizeIndex = chatFontSizeOrder.indexOf(chatFontSize);
   const fontSizeStyle = chatFontSizeStyles[chatFontSize];
   const canDecreaseFontSize = fontSizeIndex > 0;
@@ -1567,18 +1567,18 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
           <div className="min-w-0">
             <div className="flex items-baseline gap-2">
               <p className="text-[11px] font-medium uppercase tracking-wide text-primary">{readingModeLabel}</p>
-              <h2 className="text-sm font-semibold">{isFinancialChat ? '财务分析 chat' : hasPaper ? 'Paper chat' : 'SCIReader chat'}</h2>
+              <h2 className="text-sm font-semibold">{isFinancialChat ? 'Financial Analysis chat / 财务分析 chat' : hasPaper ? 'Paper chat / 论文 chat' : 'SCIReader chat'}</h2>
             </div>
             <p className="truncate text-[11px] text-muted-foreground">
               {isFinancialChat
-                ? `${financialContext?.selectedStock ? `${financialContext.selectedStock.name} ${financialContext.selectedStock.code}` : '请输入拟分析对象'} · ${financialContext?.materials.length ?? 0} 个材料 · 3x token`
+                ? `${financialContext?.selectedStock ? `${financialContext.selectedStock.name} ${financialContext.selectedStock.code}` : 'Enter analysis target / 请输入拟分析对象'} · ${financialContext?.materials.length ?? 0} materials / 个材料 · 3x token`
                 : paper?.title ?? 'Ask without opening a paper'}
             </p>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-1">
             {exportableMessages.length ? (
               <button
-                aria-label={isExportMode ? '退出匯出選擇' : '選擇回答匯出 PDF'}
+                aria-label={isExportMode ? 'Exit export selection / 退出导出选择' : 'Select answers to export PDF / 选择回答导出 PDF'}
                 className={`${isExportMode ? 'border-primary bg-primary/10 text-primary' : 'border text-slate-700 hover:bg-slate-50'} inline-flex h-9 items-center justify-center rounded-lg text-xs font-medium ${isMobileViewport ? 'w-9' : 'gap-1 px-2'}`}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -1588,15 +1588,15 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
                   });
                 }}
                 onPointerDown={(event) => event.stopPropagation()}
-                title={isExportMode ? '退出匯出選擇' : '選擇回答匯出 PDF'}
+                title={isExportMode ? 'Exit export selection / 退出导出选择' : 'Select answers to export PDF / 选择回答导出 PDF'}
                 type="button"
               >
                 {isExportMode ? <X className="size-4" /> : <Download className="size-4" />}
-                <span className={isMobileViewport ? 'sr-only' : ''}>{isExportMode ? '取消' : '匯出'}</span>
+                <span className={isMobileViewport ? 'sr-only' : ''}>{isExportMode ? 'Cancel / 取消' : 'Export / 导出'}</span>
               </button>
             ) : null}
             <button
-              aria-label={isChatCollapsed ? '展開聊天框' : '最小化聊天框'}
+              aria-label={isChatCollapsed ? 'Expand chat box / 展开聊天框' : 'Minimize chat box / 最小化聊天框'}
               className={`inline-flex h-9 items-center justify-center rounded-lg border text-xs font-medium text-slate-700 hover:bg-slate-50 ${isMobileViewport ? 'w-9' : 'gap-1 px-2'}`}
               onClick={(event) => {
                 event.stopPropagation();
@@ -1604,14 +1604,14 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
                 else setIsDesktopChatCollapsed((current) => !current);
               }}
               onPointerDown={(event) => event.stopPropagation()}
-              title={isChatCollapsed ? '展開聊天框' : '最小化聊天框'}
+              title={isChatCollapsed ? 'Expand chat box / 展开聊天框' : 'Minimize chat box / 最小化聊天框'}
               type="button"
             >
               {isChatCollapsed ? <Maximize2 className="size-4" /> : <Minimize2 className="size-4" />}
-              <span className={isMobileViewport ? 'sr-only' : ''}>{isChatCollapsed ? '展開' : '收起'}</span>
+              <span className={isMobileViewport ? 'sr-only' : ''}>{isChatCollapsed ? 'Expand / 展开' : 'Collapse / 收起'}</span>
             </button>
             <button
-              aria-label="縮小聊天字體"
+              aria-label="Decrease chat font size / 缩小聊天字体"
               className={`inline-flex h-9 items-center justify-center rounded-lg border text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35 ${isMobileViewport ? 'w-9' : 'gap-1 px-2'}`}
               disabled={!canDecreaseFontSize}
               onClick={(event) => {
@@ -1619,17 +1619,17 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
                 setChatFontSize((current) => chatFontSizeOrder[Math.max(0, chatFontSizeOrder.indexOf(current) - 1)]);
               }}
               onPointerDown={(event) => event.stopPropagation()}
-              title="縮小聊天字體"
+              title="Decrease chat font size / 缩小聊天字体"
               type="button"
             >
               <Type className="size-4" />
               <span className={isMobileViewport ? 'sr-only' : ''}>-</span>
             </button>
-            <span className={isMobileViewport ? 'sr-only' : 'min-w-5 text-center text-[11px] font-medium text-slate-500'} title="目前字體檔位">
+            <span className={isMobileViewport ? 'sr-only' : 'min-w-5 text-center text-[11px] font-medium text-slate-500'} title="Current font level / 当前字体档位">
               {fontSizeStyle.label}
             </span>
             <button
-              aria-label="放大聊天字體"
+              aria-label="Increase chat font size / 放大聊天字体"
               className={`inline-flex h-9 items-center justify-center rounded-lg border text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35 ${isMobileViewport ? 'w-9' : 'gap-1 px-2'}`}
               disabled={!canIncreaseFontSize}
               onClick={(event) => {
@@ -1637,7 +1637,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
                 setChatFontSize((current) => chatFontSizeOrder[Math.min(chatFontSizeOrder.length - 1, chatFontSizeOrder.indexOf(current) + 1)]);
               }}
               onPointerDown={(event) => event.stopPropagation()}
-              title="放大聊天字體"
+              title="Increase chat font size / 放大聊天字体"
               type="button"
             >
               <Type className="size-4" />
@@ -1649,34 +1649,34 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
 
       {isMobilePortrait && !isPortraitHintDismissed && !isChatCollapsed ? (
         <div className="absolute inset-x-3 top-16 z-30 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 shadow-lg">
-          <p className="font-semibold">建議橫屏閱讀</p>
-          <p className="mt-1 text-xs leading-5 text-amber-800">手機豎屏空間太窄，橫屏更適合一邊看 PDF、一邊展開聊天。</p>
+          <p className="font-semibold">Landscape Recommended / 建议横屏阅读</p>
+          <p className="mt-1 text-xs leading-5 text-amber-800">Portrait mode is too narrow on mobile; landscape works better for reading PDFs and opening chat side by side. / 手机竖屏空间太窄，横屏更适合一边看 PDF、一边展开聊天。</p>
           <button
             className="mt-2 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white"
             onClick={() => setIsPortraitHintDismissed(true)}
             type="button"
           >
-            繼續豎屏
+            Continue Portrait / 继续竖屏
           </button>
         </div>
       ) : null}
 
       {isExportMode && !isChatCollapsed ? (
         <div className="flex items-center gap-2 border-b bg-slate-50 px-3 py-2 text-xs">
-          <span className="text-slate-600">已選 {selectedExportCount} 條回答</span>
+          <span className="text-slate-600">Selected {selectedExportCount} answers / 已选 {selectedExportCount} 条回答</span>
           <button
             className="ml-auto rounded-lg border px-2.5 py-1.5 font-medium text-slate-700 hover:bg-white"
             onClick={() => setSelectedExportIds(new Set(exportableMessages.map((message) => message.id)))}
             type="button"
           >
-            全選
+            Select All / 全选
           </button>
           <button
             className="rounded-lg border px-2.5 py-1.5 font-medium text-slate-700 hover:bg-white"
             onClick={() => setSelectedExportIds(new Set())}
             type="button"
           >
-            清空
+            Clear / 清空
           </button>
           <button
             className="rounded-lg bg-primary px-2.5 py-1.5 font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
@@ -1684,7 +1684,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
             onClick={exportSelectedAnswersToPdf}
             type="button"
           >
-            匯出選中
+            Export Selected / 导出选中
           </button>
         </div>
       ) : null}
@@ -1693,7 +1693,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
         <div className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
           <div className="flex flex-wrap items-center gap-2">
             <div className="min-w-0 flex-1">
-              <p className="font-semibold">超長文獻需要確認</p>
+              <p className="font-semibold">Long Document Confirmation / 超长文献需要确认</p>
               <p className="mt-1 leading-5 text-amber-800">
                 {largeSummaryWarning.reason}
                 {largeSummaryWarning.pages ? ` 頁數：約 ${largeSummaryWarning.pages.toLocaleString()} 頁。` : ' '}
