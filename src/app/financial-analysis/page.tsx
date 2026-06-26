@@ -553,10 +553,11 @@ const FinancialAnalysisPage = () => {
   return (
     <main className="min-h-screen bg-slate-50">
       <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-4 sm:px-6">
-        <header className="flex flex-col gap-4 border-b bg-slate-50 pb-4 lg:flex-row lg:items-center lg:justify-between">
+        <header className="relative z-10 flex flex-col gap-4 border-b bg-slate-50 pb-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
-            <Link className="inline-flex size-10 items-center justify-center rounded-xl border bg-white text-slate-600 hover:text-primary" href="/">
+            <Link className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-primary/40 hover:text-primary" href="/">
               <ArrowLeft className="size-5" />
+              <span>Back to Home / 回到主页</span>
             </Link>
             <div>
               <div className="flex items-center gap-2">
