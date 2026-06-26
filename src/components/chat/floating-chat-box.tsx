@@ -946,6 +946,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
       setIsSummarizing(false);
       setIsCheckingSummaryCost(false);
       setLargeSummaryWarning(null);
+      setPendingReviewerTargetKey('');
       loadPaperHistory()
         .then((history) => {
           setMessages([
@@ -975,6 +976,24 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
             },
           ]);
         });
+      return;
+    }
+
+    if (readingMode === 'reviewer' && reviewerTargetJournal === undefined) {
+      setPaperContextSummary('');
+      setSummaryProgress(null);
+      setIsSummarizing(false);
+      setIsCheckingSummaryCost(false);
+      setLargeSummaryWarning(null);
+      setPendingReviewerTargetKey(summaryRunKey);
+      setMessages([
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Target journal or conference? If unknown, type skip.\n\n目标期刊或会议是什么？不知道可输入 skip。',
+          contextLabel: 'Reviewer target',
+        },
+      ]);
       return;
     }
 
@@ -1117,7 +1136,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
       setIsSummarizing(false);
       setIsCheckingSummaryCost(false);
     };
-  }, [confirmedLargeSummaryKey, estimateSummaryCost, loadPaperHistory, paper, paperId, paperPdfUrl, readingMode, summarizePaper, summaryRunKey]);
+  }, [confirmedLargeSummaryKey, estimateSummaryCost, loadPaperHistory, paper, paperId, paperPdfUrl, readingMode, reviewerTargetJournal, summarizePaper, summaryRunKey]);
 
   const startDragging = (event: PointerEvent<HTMLElement>) => {
     if (isMobileViewport) return;
@@ -1417,6 +1436,32 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
   const sendMessage = async (overrideInput?: string) => {
     const trimmed = (overrideInput ?? input).trim();
     if (!trimmed || isThinking) return;
+
+    if (!isFinancialChat && readingMode === 'reviewer' && pendingReviewerTargetKey === summaryRunKey) {
+      const normalizedTarget = /^(skip|none|n\/a|na|不知道|不清楚|无|沒有|没有)$/i.test(trimmed) ? '' : trimmed;
+      const displayTarget = normalizedTarget || 'Not specified / 未指定';
+      const userMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: trimmed,
+        contextLabel: 'Reviewer target',
+      };
+
+      setReviewerTarget({ key: summaryRunKey, target: normalizedTarget });
+      setPendingReviewerTargetKey('');
+      setInput('');
+      setMessages((current) => [
+        ...current,
+        userMessage,
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: `Reviewer target set: ${displayTarget}. Starting paper review summary now...`,
+          contextLabel: 'Reviewer target',
+        },
+      ]);
+      return;
+    }
 
     if (isFinancialChat) {
       const loadingId = crypto.randomUUID();
