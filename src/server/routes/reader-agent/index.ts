@@ -873,12 +873,27 @@ const getMetadataInfoValue = (info: Record<string, unknown>, key: string) => {
   return typeof value === 'string' ? normalizeMetadataText(value) : undefined;
 };
 
+const isLowQualityMetadataTitle = (title?: string, fallbackTitle?: string) => {
+  const normalizedTitle = normalizeMetadataText(title)?.toLowerCase() ?? '';
+  const normalizedFallbackTitle = normalizeMetadataText(fallbackTitle)?.toLowerCase() ?? '';
+
+  if (!normalizedTitle) return true;
+  if (/^microsoft word\s*-/i.test(normalizedTitle)) return true;
+  if (normalizedFallbackTitle && normalizedTitle === normalizedFallbackTitle) return true;
+  if (/^[a-z]*v\d+[a-z0-9_-]*$/i.test(normalizedTitle)) return true;
+
+  return false;
+};
+
 const parseAuthors = (value?: string) =>
   value
-    ?.split(/\s*(?:,|;|\band\b|&)\s*/i)
+    ?.replace(/\b(?:senior|student|graduate|life|fellow)\s+member\s*,?\s*ieee\b/gi, '')
+    .replace(/\bmember\s*,?\s*ieee\b/gi, '')
+    .replace(/\bieee\b/gi, '')
+    .split(/\s*(?:,|;|\band\b|&)\s*/i)
     .map((author) => author.replace(/\d+|\*|†|‡|§/g, '').trim())
-    .filter(Boolean)
-    .slice(0, 2) ?? [];
+    .filter((author) => Boolean(author) && !isInvalidCitationAuthor(author))
+    .slice(0, 12) ?? [];
 
 const cleanCitationAuthor = (author: string) => author.replace(/\d+|\*|†|‡|§/g, '').replace(/\s+/g, ' ').trim();
 
@@ -952,6 +967,7 @@ const cleanCitationVenue = (value?: string) => {
   const venue = trimCitationField(value);
   if (!venue) return undefined;
   if (/^(ieee|acm|journal homepage:?|homepage:?)$/i.test(venue)) return undefined;
+  if (/\b(?:senior|student|graduate|life|fellow)?\s*member\s*,?\s*ieee\b/i.test(venue)) return undefined;
   if (/\b(journal homepage|available online|www\.|https?:\/\/|doi:|copyright|all rights reserved)\b/i.test(venue)) return undefined;
   if (/^(this work was supported|manuscript received|received|accepted|revised|corresponding author)\b/i.test(venue)) return undefined;
   if (venue.length > 180) return undefined;
@@ -974,19 +990,20 @@ const buildIeeeCitation = (request: Pick<z.infer<typeof readerRequestSchema>, 'p
   return `${authorPrefix}"${title},"${publication ? ` ${publication}` : ''}.`;
 };
 
-const hasIeeeCitationPreface = (summary: string) => /^##\s*(?:IEEE规范引用格式|IEEE Citation)\b/i.test(summary.trim());
+const stripLeadingIeeeCitationPrefaces = (summary: string) => summary
+  .trim()
+  .replace(/^(?:##\s*(?:IEEE规范引用格式|IEEE Citation)\b[\s\S]*?(?=\n(?:---\n|#{1,3}\s+|\d+\.\s+|$))\s*)+/i, '')
+  .replace(/^---\s*/i, '')
+  .trim();
 
 const withIeeeCitationPreface = (
   summary: string,
   request: Pick<z.infer<typeof readerRequestSchema>, 'paperId' | 'title' | 'authors' | 'journal' | 'year'>,
 ) => {
-  const trimmedSummary = summary.trim();
+  const trimmedSummary = stripLeadingIeeeCitationPrefaces(summary);
   if (!trimmedSummary) return trimmedSummary;
 
   const citationPreface = `## IEEE规范引用格式\n\n${buildIeeeCitation(request)}`;
-  if (hasIeeeCitationPreface(trimmedSummary)) {
-    return trimmedSummary.replace(/^##\s*(?:IEEE规范引用格式|IEEE Citation)\b[\s\S]*?(?=\n---\n)/i, citationPreface);
-  }
 
   return `${citationPreface}\n\n---\n\n${trimmedSummary}`;
 };
@@ -1221,15 +1238,51 @@ const formatWritingExternalEvaluations = (records: ReferenceEvaluationRecord[]) 
 
 const extractYear = (text: string) => text.match(/(?:19|20)\d{2}/)?.[0];
 
+const isLikelyPaperTemplateLine = (line: string) =>
+  /^>?\s*replace this line/i.test(line) ||
+  /^manuscript id/i.test(line) ||
+  /^\d+$/.test(line);
+
+const isLikelyTitleLine = (line: string) =>
+  line.length >= 8 &&
+  line.length <= 180 &&
+  !isLikelyPaperTemplateLine(line) &&
+  !/^abstract\b/i.test(line) &&
+  !/^keywords?\b/i.test(line) &&
+  !/\b(email|@|doi|http|www|corresponding|received|accepted|revised|senior member|member,\s*ieee)\b/i.test(line);
+
+const isLikelyAuthorLine = (line: string) => {
+  const cleanLine = line.replace(/\b(?:senior|student|graduate|life|fellow)?\s*member\s*,?\s*ieee\b/gi, '').trim();
+  const authors = parseAuthors(cleanLine);
+
+  return authors.length >= 1 && /,|;|\band\b|&/i.test(cleanLine) && !/\b(abstract|keywords?|university|department|laboratory|email|doi|http|www)\b/i.test(cleanLine);
+};
+
 const inferMetadataFromText = (text: string, fallbackTitle?: string): PaperMetadata => {
   const lines = text
     .split(/\n+/)
     .map((line) => normalizeMetadataText(line))
     .filter((line): line is string => Boolean(line));
-  const title = lines.find((line) => line.length >= 12 && !/^abstract\b/i.test(line)) ?? normalizeMetadataText(fallbackTitle);
+
+  const authorIndex = lines.findIndex(isLikelyAuthorLine);
+  const titleLines = authorIndex > 0
+    ? lines
+      .slice(0, authorIndex)
+      .filter(isLikelyTitleLine)
+      .slice(-4)
+    : [];
+  const title = titleLines.length
+    ? titleLines.join(' ')
+    : lines.find(isLikelyTitleLine) ?? normalizeMetadataText(fallbackTitle);
   const titleIndex = title ? lines.indexOf(title) : -1;
-  const authorLine = titleIndex >= 0 ? lines.slice(titleIndex + 1, titleIndex + 5).find((line) => /,|;|\band\b|&/i.test(line)) : undefined;
-  const journalLine = lines.find((line) => /\b(journal|transactions|proceedings|conference|letters|review|nature|science|ieee|acm)\b/i.test(line));
+  const authorLine = authorIndex >= 0
+    ? lines[authorIndex]
+    : titleIndex >= 0 ? lines.slice(titleIndex + 1, titleIndex + 7).find(isLikelyAuthorLine) : undefined;
+  const journalLine = lines.find((line) =>
+    /\b(journal|transactions|proceedings|conference|letters|review|nature|science|acm)\b/i.test(line) &&
+    !/\bmember\s*,?\s*ieee\b/i.test(line) &&
+    !isLikelyAuthorLine(line),
+  );
   const year = extractYear(lines.slice(0, 20).join(' '));
 
   return {
@@ -1259,7 +1312,9 @@ const extractPaperMetadata = async (localPdfPath: string, fallbackTitle?: string
   page.cleanup();
 
   return {
-    title: metadataTitle ?? inferred.title ?? normalizeMetadataText(fallbackTitle),
+    title: isLowQualityMetadataTitle(metadataTitle, fallbackTitle)
+      ? inferred.title ?? metadataTitle ?? normalizeMetadataText(fallbackTitle)
+      : metadataTitle ?? inferred.title ?? normalizeMetadataText(fallbackTitle),
     authors: metadataAuthors.length ? metadataAuthors : inferred.authors,
     journal: inferred.journal,
     year: inferred.year,

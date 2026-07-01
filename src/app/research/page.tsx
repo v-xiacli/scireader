@@ -97,13 +97,26 @@ const getUploadedFileTitleFromPath = (filePath?: string) => {
 
 const shouldPreferUploadedFileTitle = (metadataTitle: string | undefined, fileTitle: string) => {
   const normalizedMetadataTitle = metadataTitle?.trim().toLowerCase() ?? '';
-  const normalizedFileTitle = fileTitle.trim().toLowerCase();
 
   if (!normalizedMetadataTitle) return true;
   if (/^microsoft word\s*-/i.test(normalizedMetadataTitle)) return true;
-  if (/\bv\d+\b/i.test(normalizedFileTitle) && !normalizedMetadataTitle.includes(normalizedFileTitle)) return true;
+  if (/^[a-z]*v\d+[a-z0-9_-]*$/i.test(normalizedMetadataTitle)) return true;
 
   return false;
+};
+
+const shouldRepairUploadedPaperMetadata = (paper: PaperSummary) => {
+  const title = paper.title.trim();
+  const fileTitle = getUploadedFileTitleFromPath(paper.filePath);
+
+  return (
+    Boolean(paper.filePath && paper.pdfUrl) &&
+    (/^microsoft word\s*-/i.test(title) ||
+      title === fileTitle ||
+      /^[a-z]*v\d+[a-z0-9_-]*$/i.test(title) ||
+      !paper.authors ||
+      paper.authors === 'Uploaded paper')
+  );
 };
 
 const getUploadedPaperId = (baseId: string, filePath: string) => {
@@ -146,6 +159,7 @@ const HomePage = () => {
   const isSignupVerificationEnabled = true;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const estimatedPaperIdRef = useRef<string | null>(null);
+  const metadataRepairAttemptedRef = useRef(new Set<string>());
   const [authMode, setAuthMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -287,6 +301,15 @@ const HomePage = () => {
     void estimateTokenConsumption(newestUploadedPaper);
   }, [uploadedPapers]);
 
+  useEffect(() => {
+    if (!isLoggedIn) return;
+
+    const papersToRepair = uploadedPapers.filter(shouldRepairUploadedPaperMetadata).slice(0, 3);
+    if (!papersToRepair.length) return;
+
+    void Promise.all(papersToRepair.map((paper) => repairUploadedPaperMetadata(paper)));
+  }, [isLoggedIn, uploadedPapers]);
+
   const handleAuth = async () => {
     setIsAuthLoading(true);
     setAuthMessage(null);
@@ -396,6 +419,45 @@ const HomePage = () => {
     if (!response.ok) throw new Error(result.message ?? result.error ?? 'PDF metadata extraction failed.');
 
     return result;
+  };
+
+  const repairUploadedPaperMetadata = async (paper: PaperSummary) => {
+    if (!paper.filePath || !paper.pdfUrl || metadataRepairAttemptedRef.current.has(paper.filePath)) return;
+
+    metadataRepairAttemptedRef.current.add(paper.filePath);
+
+    try {
+      const fallbackTitle = getUploadedFileTitleFromPath(paper.filePath);
+      const metadata = await extractPaperMetadata(paper.pdfUrl, fallbackTitle);
+      const metadataTitle = metadata.title?.trim();
+      const title = shouldPreferUploadedFileTitle(metadataTitle, fallbackTitle) ? fallbackTitle : metadataTitle ?? fallbackTitle;
+      const authors = metadata.authors?.filter(Boolean).join(', ') || paper.authors;
+      const repairedPaper: PaperSummary = normalizeUploadedPaperForDisplay({
+        ...paper,
+        id: getUploadedPaperId(metadata.paperKey || paper.id || fallbackPaperKey(fallbackTitle), paper.filePath),
+        title,
+        authors,
+        journal: metadata.journal?.trim() || paper.journal,
+        year: metadata.year?.trim() || paper.year,
+      });
+
+      if (
+        repairedPaper.title === paper.title &&
+        repairedPaper.authors === paper.authors &&
+        repairedPaper.journal === paper.journal &&
+        repairedPaper.year === paper.year
+      ) return;
+
+      setUploadedPapers((current) => current.map((item) => item.filePath === paper.filePath ? repairedPaper : item));
+
+      await fetch('/api/auth/uploaded-papers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(repairedPaper),
+      });
+    } catch {
+      // Metadata repair is best-effort; uploading and reading should still work if it fails.
+    }
   };
 
   const handleUpload = async (file: File) => {
