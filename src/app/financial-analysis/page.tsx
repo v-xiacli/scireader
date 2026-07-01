@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 
 import { useFloatingChat } from '@/components/chat/floating-chat-context';
+import { LanguageToggle, localizeBilingualText, useLanguage, type AppLanguage } from '@/components/language/language-context';
 
 type AuthUser = { id: string; email: string };
 type TokenAccount = { tokenBalance: number; tokenUsed: number; tokenAvailable: number };
@@ -81,8 +82,8 @@ const mergeFinancialMaterials = (current: FinancialMaterial[], incoming: Financi
   return Array.from(byPath.values()).slice(-limit);
 };
 
-const describeMaterialSize = (material: FinancialMaterial) =>
-  material.url ? 'Web link / 网页链接' : `${formatMaterialSize(material.size)}`;
+const describeMaterialSize = (material: FinancialMaterial, language: AppLanguage) =>
+  material.url ? localizeBilingualText('Web link / 网页链接', language) : `${formatMaterialSize(material.size)}`;
 
 const formatStockWatchlistText = (watchlist: StockWatchlistItem[]) =>
   watchlist.map((item) => `${item.name},${item.code},${item.market ?? 'A'}`).join('\n');
@@ -148,6 +149,9 @@ const parseAnalysisTarget = (text: string): StockWatchlistItem | null => {
 
 const FinancialAnalysisPage = () => {
   const { setFinancialContext } = useFloatingChat();
+  const { language } = useLanguage();
+  const b = (value: string) => localizeBilingualText(value, language);
+  const l = (en: string, zh: string) => language === 'zh' ? zh : en;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [tokenAccount, setTokenAccount] = useState<TokenAccount | null>(null);
@@ -557,40 +561,38 @@ const FinancialAnalysisPage = () => {
           <div className="flex items-center gap-3">
             <Link className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-primary/40 hover:text-primary" href="/">
               <ArrowLeft className="size-5" />
-              <span>Back to Home / 回到主页</span>
+              <span>{b('Back to Home / 回到主页')}</span>
             </Link>
+            <LanguageToggle className="hidden sm:flex" />
             <div>
               <div className="flex items-center gap-2">
                 <BarChart3 className="size-5 text-primary" />
-                <h1 className="text-xl font-semibold">Financial Analysis / 财务分析</h1>
+                <h1 className="text-xl font-semibold">{b('Financial Analysis / 财务分析')}</h1>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
-                {authUser ? `Current account / 当前账号: ${authUser.email}` : isSessionLoading ? 'Checking sign-in status... / 正在检查登录状态...' : 'Please return to the home page and sign in first. / 请先回到主页登录后使用。'}
+                {authUser ? `${b('Current account / 当前账号')}: ${authUser.email}` : isSessionLoading ? b('Checking sign-in status... / 正在检查登录状态...') : b('Please return to the home page and sign in first. / 请先回到主页登录后使用。')}
               </p>
-              <p className="mt-1 text-xs font-medium text-amber-700">This feature must be enabled separately; token usage is billed at 3x the normal analysis rate. / 该功能需要单独开通；token 使用费按正常分析的 3 倍计算。</p>
-              <div className="mt-3 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
-                Language: English first, Singapore Chinese in Simplified script. / 语言：英文在前，新加坡中文（简体）在后。
-              </div>
+              <p className="mt-1 text-xs font-medium text-amber-700">{b('This feature must be enabled separately; token usage is billed at 3x the normal analysis rate. / 该功能需要单独开通；token 使用费按正常分析的 3 倍计算。')}</p>
             </div>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row lg:items-center lg:justify-end">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-2xl border bg-white p-4 text-right shadow-sm">
                 <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-                  <WalletCards className="size-4" /> Token Estimate / Token 预估
+                  <WalletCards className="size-4" /> {b('Token Estimate / Token 预估')}
                 </div>
-                <p className="mt-2 text-2xl font-semibold">{materials.length ? `${materials.length} items / 份` : '--'}</p>
+                <p className="mt-2 text-2xl font-semibold">{materials.length ? `${materials.length} ${l('items', '份')}` : '--'}</p>
                 <p className="mt-1 max-w-44 text-xs text-muted-foreground">
-                  {materials.length ? `${formatMaterialSize(materialSizeTotal)} materials / 材料；billed by actual usage ×3 / 提交后按实际消耗 ×3` : 'Upload reports or images to start. / 上传财报或图片后开始分析。'}
+                  {materials.length ? `${formatMaterialSize(materialSizeTotal)} ${b('materials; billed by actual usage ×3 / 材料；提交后按实际消耗 ×3')}` : b('Upload reports or images to start. / 上传财报或图片后开始分析。')}
                 </p>
               </div>
               <div className="rounded-2xl border bg-white p-4 text-right shadow-sm">
                 <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-                  <WalletCards className="size-4" /> Token Balance / Token 余额
+                  <WalletCards className="size-4" /> {b('Token Balance / Token 余额')}
                 </div>
                 <p className="mt-2 text-2xl font-semibold">{tokenAccount ? tokenAccount.tokenAvailable.toLocaleString() : '200,000'}</p>
                 <p className="mt-1 max-w-44 text-xs text-muted-foreground">
-                  {tokenAccount ? `${tokenAccount.tokenUsed.toLocaleString()} used / 已用 · ${tokenAccount.tokenBalance.toLocaleString()} total / 总额` : 'Default account quota / 预设账号额度'}
+                  {tokenAccount ? `${tokenAccount.tokenUsed.toLocaleString()} ${l('used', '已用')} · ${tokenAccount.tokenBalance.toLocaleString()} ${l('total', '总额')}` : b('Default account quota / 预设账号额度')}
                 </p>
               </div>
             </div>
@@ -599,26 +601,26 @@ const FinancialAnalysisPage = () => {
 
         <section className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-            This website is not available to users in Mainland China and is intended only for overseas Chinese users. / 本网站不面向中国内地用户开放，仅针对海外华人。
+            {b('This website is not available to users in Mainland China and is intended only for overseas Chinese users. / 本网站不面向中国内地用户开放，仅针对海外华人。')}
           </div>
           <div className="mt-4 grid gap-3 border-t pt-4 text-sm md:grid-cols-3">
             <div>
-              <p className="font-medium">Top-up Reference / 充值参考</p>
+              <p className="font-medium">{b('Top-up Reference / 充值参考')}</p>
               <p className="mt-1 text-muted-foreground">
-                USD top-ups only; US$1 ≈ 2,000,000 tokens, and new accounts receive 200,000 tokens. Need more tokens? Email / 仅接受美元充值；US$1 ≈ 2,000,000 token，首登赠送 200,000 token。需要购买更多 token，请发邮件至{' '}
+                {language === 'zh' ? '仅接受美元充值；US$1 ≈ 2,000,000 token，首登赠送 200,000 token。需要购买更多 token，请发邮件至' : 'USD top-ups only; US$1 ≈ 2,000,000 tokens, and new accounts receive 200,000 tokens. Need more tokens? Email'}{' '}
                 <a className="font-medium text-primary underline-offset-4 hover:underline" href="mailto:sanbangzi@mailfence.com">
                   sci reader &lt;sanbangzi@mailfence.com&gt;
                 </a>
-                。
+                {language === 'zh' ? '。' : '.'}
               </p>
             </div>
             <div>
-              <p className="font-medium">Financial Billing / 财务扣费</p>
-              <p className="mt-1 text-muted-foreground">Financial Analysis is calculated from actual model input/output usage, then billed at 3x the normal analysis rate. / 财务分析按模型实际输入/输出折算后，再按正常分析的 3 倍扣费。</p>
+              <p className="font-medium">{b('Financial Billing / 财务扣费')}</p>
+              <p className="mt-1 text-muted-foreground">{b('Financial Analysis is calculated from actual model input/output usage, then billed at 3x the normal analysis rate. / 财务分析按模型实际输入/输出折算后，再按正常分析的 3 倍扣费。')}</p>
             </div>
             <div>
-              <p className="font-medium">Materials / 材料说明</p>
-              <p className="mt-1 text-muted-foreground">Upload financial report PDFs, K-line charts, order-book screenshots, trend images, or web links; saved materials and current materials are managed separately. / 可上传多份财报 PDF、K 线图、盘口截图、走势图，也可贴网页链接；历史资料和本次资料分开管理。</p>
+              <p className="font-medium">{b('Materials / 材料说明')}</p>
+              <p className="mt-1 text-muted-foreground">{b('Upload financial report PDFs, K-line charts, order-book screenshots, trend images, or web links; saved materials and current materials are managed separately. / 可上传多份财报 PDF、K 线图、盘口截图、走势图，也可贴网页链接；历史资料和本次资料分开管理。')}</p>
             </div>
           </div>
         </section>
@@ -627,14 +629,14 @@ const FinancialAnalysisPage = () => {
           <section className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4 shadow-sm">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="font-semibold text-blue-950">Please Sign In / 请先登录</h2>
-                <p className="mt-1 text-sm text-blue-900">Financial Analysis requires a signed-in account. The sign-in panel is now on the home page; after signing in, return here to view your watchlist, saved materials, and reports. / 财务分析需要登录账号后使用；登录窗口已移到主页，登录后再进入本页即可看到自选股、历史资料和报告。</p>
+                <h2 className="font-semibold text-blue-950">{b('Please Sign In / 请先登录')}</h2>
+                <p className="mt-1 text-sm text-blue-900">{b('Financial Analysis requires a signed-in account. The sign-in panel is now on the home page; after signing in, return here to view your watchlist, saved materials, and reports. / 财务分析需要登录账号后使用；登录窗口已移到主页，登录后再进入本页即可看到自选股、历史资料和报告。')}</p>
               </div>
               <Link
                 className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
                 href="/"
               >
-                Back to Sign In / 回主页登录
+                {b('Back to Sign In / 回主页登录')}
               </Link>
             </div>
           </section>
@@ -644,9 +646,9 @@ const FinancialAnalysisPage = () => {
           <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <h2 className="font-semibold text-amber-950">Enable Financial Analysis / 开通财务分析</h2>
+                <h2 className="font-semibold text-amber-950">{b('Enable Financial Analysis / 开通财务分析')}</h2>
                 <p className="mt-1 text-sm leading-6 text-amber-900">
-                  Financial Analysis reads reports, K-line charts, order-book screenshots, and trend images, then saves reports by analysis target for this user. It must be enabled separately, and token usage is billed at 3x the normal analysis rate. / 财务分析会读取财报、K 线图、盘口截图和走势图，并按分析对象保存本用户的历史报告。使用前需单独开通，token 使用量按正常分析的 3 倍计算。
+                  {b('Financial Analysis reads reports, K-line charts, order-book screenshots, and trend images, then saves reports by analysis target for this user. It must be enabled separately, and token usage is billed at 3x the normal analysis rate. / 财务分析会读取财报、K 线图、盘口截图和走势图，并按分析对象保存本用户的历史报告。使用前需单独开通，token 使用量按正常分析的 3 倍计算。')}
                 </p>
               </div>
               <button
@@ -655,26 +657,26 @@ const FinancialAnalysisPage = () => {
                 onClick={() => void activateFinancialAnalysis()}
                 type="button"
               >
-                {isActivatingFinancial ? 'Enabling... / 开通中...' : 'Confirm Enable / 确认开通'}
+                {isActivatingFinancial ? b('Enabling... / 开通中...') : b('Confirm Enable / 确认开通')}
               </button>
             </div>
-            {financialAccessMessage ? <p className="mt-2 text-sm text-amber-900">{financialAccessMessage}</p> : null}
+            {financialAccessMessage ? <p className="mt-2 text-sm text-amber-900">{b(financialAccessMessage)}</p> : null}
           </section>
         ) : null}
 
         <section className="mt-4 rounded-2xl border bg-white p-3 shadow-sm">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-sm font-medium">Watchlist Live Prices / 自选股实时价格</p>
+              <p className="text-sm font-medium">{b('Watchlist Live Prices / 自选股实时价格')}</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {quotesUpdatedAt ? `Last updated / 最近更新 ${formatDate(quotesUpdatedAt)}` : 'Refreshes automatically after entering this page; updates every 60 seconds. / 进入页面后自动刷新；每 60 秒更新一次。'}
+                {quotesUpdatedAt ? `${b('Last updated / 最近更新')} ${formatDate(quotesUpdatedAt)}` : b('Refreshes automatically after entering this page; updates every 60 seconds. / 进入页面后自动刷新；每 60 秒更新一次。')}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <input
                 className="min-w-64 rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-primary"
                 onChange={(event) => setAnalysisTargetText(event.target.value)}
-                placeholder="Sector or stock to analyze, e.g. optical equipment, Alibaba 09988 / 拟分析板块或股票，例如：光伏设备、阿里巴巴 09988"
+                placeholder={b('Sector or stock to analyze, e.g. optical equipment, Alibaba 09988 / 拟分析板块或股票，例如：光伏设备、阿里巴巴 09988')}
                 value={analysisTargetText}
               />
               <div className="flex rounded-xl border p-1">
@@ -683,10 +685,10 @@ const FinancialAnalysisPage = () => {
                     className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-sm transition ${financialAnalysisMode === mode.id ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
                     key={mode.id}
                     onClick={() => setFinancialAnalysisMode(mode.id)}
-                    title={mode.description}
+                    title={b(mode.description)}
                     type="button"
                   >
-                    {mode.label}
+                    {b(mode.label)}
                   </button>
                 ))}
               </div>
@@ -696,7 +698,7 @@ const FinancialAnalysisPage = () => {
                 onClick={startFinancialAnalysis}
                 type="button"
               >
-                Start Analysis / 开始分析
+                {b('Start Analysis / 开始分析')}
               </button>
               <button
                 className="rounded-xl border px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-70"
@@ -704,14 +706,14 @@ const FinancialAnalysisPage = () => {
                 onClick={() => void refreshStockQuotes()}
                 type="button"
               >
-                {isQuotesLoading ? 'Refreshing... / 刷新中...' : 'Refresh / 刷新'}
+                {isQuotesLoading ? b('Refreshing... / 刷新中...') : b('Refresh / 刷新')}
               </button>
               <button
                 className="rounded-xl border px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
                 onClick={() => setIsWatchlistEditing((current) => !current)}
                 type="button"
               >
-                {isWatchlistEditing ? 'Collapse Edit / 收起编辑' : 'Edit Watchlist / 编辑自选股'}
+                {isWatchlistEditing ? b('Collapse Edit / 收起编辑') : b('Edit Watchlist / 编辑自选股')}
               </button>
             </div>
           </div>
@@ -721,7 +723,7 @@ const FinancialAnalysisPage = () => {
               <textarea
                 className="min-h-28 w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none transition focus:border-primary"
                 onChange={(event) => setStockWatchlistText(event.target.value)}
-                placeholder={'One stock per line: name,code,market / 每行一只：名称,代码,市场\nExample / 例如：北方华创,002371,A\nNVIDIA / 英伟达,NVDA,US'}
+                placeholder={language === 'zh' ? '每行一只：名称,代码,市场\n例如：北方华创,002371,A\n英伟达,NVDA,US' : 'One stock per line: name,code,market\nExample: North Huachuang,002371,A\nNVIDIA,NVDA,US'}
                 value={stockWatchlistText}
               />
               <div className="flex flex-wrap gap-2">
@@ -730,14 +732,14 @@ const FinancialAnalysisPage = () => {
                   onClick={() => void saveStockWatchlist()}
                   type="button"
                 >
-                  Save Watchlist / 保存自选股
+                  {b('Save Watchlist / 保存自选股')}
                 </button>
-                <span className="self-center text-xs text-muted-foreground">Supported markets: A / US / HK / FX. / 支持市场：A / US / HK / FX。</span>
+                <span className="self-center text-xs text-muted-foreground">{b('Supported markets: A / US / HK / FX. / 支持市场：A / US / HK / FX。')}</span>
               </div>
             </div>
           ) : null}
 
-          {stockMessage ? <p className="mt-2 text-sm text-red-600">{stockMessage}</p> : null}
+          {stockMessage ? <p className="mt-2 text-sm text-red-600">{b(stockMessage)}</p> : null}
 
           <div className="mt-3 flex flex-wrap gap-2">
             {stockQuotes.length ? stockQuotes.map((quote) => {
@@ -771,7 +773,7 @@ const FinancialAnalysisPage = () => {
                 </button>
               );
             }) : (
-              <p className="text-sm text-muted-foreground">{isLoggedIn ? 'No quotes yet. Please refresh or edit your watchlist. / 暂无行情。请刷新或编辑自选股列表。' : 'Sign in to show your watchlist live prices. / 登录后显示你的自选股实时价格。'}</p>
+              <p className="text-sm text-muted-foreground">{isLoggedIn ? b('No quotes yet. Please refresh or edit your watchlist. / 暂无行情。请刷新或编辑自选股列表。') : b('Sign in to show your watchlist live prices. / 登录后显示你的自选股实时价格。')}</p>
             )}
           </div>
         </section>
@@ -780,8 +782,8 @@ const FinancialAnalysisPage = () => {
           <aside className="rounded-2xl border bg-white p-4 shadow-sm">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <h2 className="font-semibold">Current Materials / 本次资料</h2>
-                <p className="mt-1 text-sm text-muted-foreground">Only these materials will be analyzed; drag from saved materials or tap to add. / 只会分析这里的资料；可从历史资料拖入或点击加入。</p>
+                <h2 className="font-semibold">{b('Current Materials / 本次资料')}</h2>
+                <p className="mt-1 text-sm text-muted-foreground">{b('Only these materials will be analyzed; drag from saved materials or tap to add. / 只会分析这里的资料；可从历史资料拖入或点击加入。')}</p>
               </div>
               <div className="flex flex-wrap gap-2 sm:justify-end">
                 <button
@@ -791,7 +793,7 @@ const FinancialAnalysisPage = () => {
                   type="button"
                 >
                   {isUploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
-                  {isUploading ? 'Uploading... / 上传中...' : 'Upload Materials / 上传材料'}
+                  {isUploading ? b('Uploading... / 上传中...') : b('Upload Materials / 上传材料')}
                 </button>
                 {materials.length ? (
                 <button
@@ -799,12 +801,12 @@ const FinancialAnalysisPage = () => {
                   onClick={() => setMaterials([])}
                   type="button"
                 >
-                  Clear Current / 清空本次
+                  {b('Clear Current / 清空本次')}
                 </button>
                 ) : null}
               </div>
             </div>
-            {message ? <p className="mt-2 text-sm text-muted-foreground">{message}</p> : null}
+            {message ? <p className="mt-2 text-sm text-muted-foreground">{b(message)}</p> : null}
             <input
               accept="application/pdf,image/*"
               className="hidden"
@@ -830,12 +832,12 @@ const FinancialAnalysisPage = () => {
                 <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 text-sm" key={file.storagePath}>
                   <div className="min-w-0">
                     <p className="truncate font-medium">{file.name}</p>
-                    <p className="text-xs text-muted-foreground">{file.contentType} · {describeMaterialSize(file)}</p>
+                    <p className="text-xs text-muted-foreground">{file.contentType} · {describeMaterialSize(file, language)}</p>
                   </div>
                   <button
                     className="rounded-lg border bg-white p-2 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
                     onClick={() => setMaterials((current) => current.filter((item) => item.storagePath !== file.storagePath))}
-                    title="Remove from current materials / 移出本次资料"
+                    title={b('Remove from current materials / 移出本次资料')}
                     type="button"
                   >
                     <Trash2 className="size-4" />
@@ -843,13 +845,13 @@ const FinancialAnalysisPage = () => {
                 </div>
               )) : (
                 <div className="rounded-xl border border-dashed bg-slate-50 p-4 text-sm text-muted-foreground">
-                  Drag in saved materials, or upload PDFs, K-line charts, order-book screenshots, and trend images. / 拖入历史资料，或上传 PDF、K 线图、盘口截图、走势图图片。
+                  {b('Drag in saved materials, or upload PDFs, K-line charts, order-book screenshots, and trend images. / 拖入历史资料，或上传 PDF、K 线图、盘口截图、走势图图片。')}
                 </div>
               )}
             </div>
 
             <div className="mt-4 border-t pt-4">
-              <h3 className="text-sm font-semibold">Add Web Link / 加入网页链接</h3>
+              <h3 className="text-sm font-semibold">{b('Add Web Link / 加入网页链接')}</h3>
               <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                 <input
                   className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-primary"
@@ -857,7 +859,7 @@ const FinancialAnalysisPage = () => {
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') void addLinkMaterial();
                   }}
-                  placeholder="Paste an annual report, announcement, or web link / 粘贴年报、公告或网页链接"
+                  placeholder={b('Paste an annual report, announcement, or web link / 粘贴年报、公告或网页链接')}
                   value={materialUrl}
                 />
                 <button
@@ -866,7 +868,7 @@ const FinancialAnalysisPage = () => {
                   onClick={() => void addLinkMaterial()}
                   type="button"
                 >
-                  Add Link / 加入链接
+                  {b('Add Link / 加入链接')}
                 </button>
               </div>
             </div>
@@ -874,8 +876,8 @@ const FinancialAnalysisPage = () => {
             <div className="mt-4 border-t pt-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-sm font-semibold">Saved Materials / 历史资料</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">The material index is saved after sign-in; drag or tap to add to current materials. / 登录后保存资料索引；拖动或点击可加入本次。</p>
+                  <h3 className="text-sm font-semibold">{b('Saved Materials / 历史资料')}</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">{b('The material index is saved after sign-in; drag or tap to add to current materials. / 登录后保存资料索引；拖动或点击可加入本次。')}</p>
                 </div>
               </div>
               <div className="mt-3 grid max-h-[28rem] gap-2 overflow-y-auto pr-1">
@@ -895,12 +897,12 @@ const FinancialAnalysisPage = () => {
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <p className="truncate font-medium">{file.name}</p>
-                          <p className="text-xs text-muted-foreground">{file.contentType} · {describeMaterialSize(file)}</p>
+                          <p className="text-xs text-muted-foreground">{file.contentType} · {describeMaterialSize(file, language)}</p>
                         </div>
                         <button
                           className="rounded-lg border bg-white p-2 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
                           onClick={() => void removeMaterialFromLibrary(file.storagePath)}
-                          title="Remove from saved materials / 从历史资料移除"
+                          title={b('Remove from saved materials / 从历史资料移除')}
                           type="button"
                         >
                           <Trash2 className="size-4" />
@@ -912,13 +914,13 @@ const FinancialAnalysisPage = () => {
                         onClick={() => addMaterialFromLibrary(file.storagePath)}
                         type="button"
                       >
-                        {isCurrent ? 'Already Current / 已在本次资料' : 'Add to Current / 加入本次资料'}
+                        {isCurrent ? b('Already Current / 已在本次资料') : b('Add to Current / 加入本次资料')}
                       </button>
                     </div>
                   );
                 }) : (
                   <div className="rounded-xl border border-dashed bg-slate-50 p-4 text-sm text-muted-foreground">
-                    No saved materials yet. Upload files or add web links to save them here. / 暂无历史资料。上传文件或加入网页链接后会保存在这里。
+                    {b('No saved materials yet. Upload files or add web links to save them here. / 暂无历史资料。上传文件或加入网页链接后会保存在这里。')}
                   </div>
                 )}
               </div>
@@ -928,8 +930,8 @@ const FinancialAnalysisPage = () => {
           <section className="rounded-2xl border bg-white p-4 shadow-sm">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="font-semibold">Saved Reports / 历史报告</h2>
-                <p className="mt-1 text-sm text-muted-foreground">Only this user's analysis targets, questions, answers, and token records are saved; historical uploaded files are not stored in reports. / 只保存本用户的分析对象、问题、回答和 token 记录；不在报告中保存历史上传资料。</p>
+                <h2 className="font-semibold">{b('Saved Reports / 历史报告')}</h2>
+                <p className="mt-1 text-sm text-muted-foreground">{b("Only this user's analysis targets, questions, answers, and token records are saved; historical uploaded files are not stored in reports. / 只保存本用户的分析对象、问题、回答和 token 记录；不在报告中保存历史上传资料。")}</p>
               </div>
               <button
                 className="rounded-xl border px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-70"
@@ -937,10 +939,10 @@ const FinancialAnalysisPage = () => {
                 onClick={() => void loadReports()}
                 type="button"
               >
-                Refresh / 刷新
+                {b('Refresh / 刷新')}
               </button>
             </div>
-            {reportsMessage ? <p className="mt-2 text-sm text-red-600">{reportsMessage}</p> : null}
+            {reportsMessage ? <p className="mt-2 text-sm text-red-600">{b(reportsMessage)}</p> : null}
             <div className="mt-4 grid gap-3">
               {reports.length ? reports.map((report) => {
                 return (
@@ -966,7 +968,7 @@ const FinancialAnalysisPage = () => {
                 );
               }) : (
                 <div className="rounded-xl border border-dashed bg-slate-50 p-4 text-sm text-muted-foreground">
-                  No saved reports yet. After enabling the feature and completing analysis in the floating chat window, reports will appear here automatically. / 尚无历史报告。开通后在浮动聊天窗完成分析，报告会自动出现在这里。
+                  {b('No saved reports yet. After enabling the feature and completing analysis in the floating chat window, reports will appear here automatically. / 尚无历史报告。开通后在浮动聊天窗完成分析，报告会自动出现在这里。')}
                 </div>
               )}
             </div>

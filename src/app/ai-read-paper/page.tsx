@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
+
+import { SeoLanguagePage } from '@/components/language/seo-language-page';
 
 export const metadata: Metadata = {
   title: 'AI Read Paper | AI Paper Reader for Academic PDFs',
@@ -41,41 +42,36 @@ const relatedQueries = [
 ];
 
 const AiReadPaperPage = () => (
-  <main className="min-h-screen bg-slate-50 px-4 py-10 sm:px-6">
-    <section className="mx-auto max-w-4xl rounded-3xl bg-white p-6 shadow-sm sm:p-8">
-      <p className="text-sm font-medium text-primary">SCIReader</p>
-      <h1 className="mt-3 text-3xl font-semibold text-slate-950">AI Read Paper: read academic PDFs with AI</h1>
-      <p className="mt-4 max-w-3xl text-base leading-7 text-slate-600">
-        SCIReader is an AI paper reader for academic PDFs. Upload a research paper, choose a reading mode, and ask questions about
-        methods, experiments, figures, equations, limitations, and conclusions. It supports English paper reading with Chinese output,
-        concise summaries, detailed reviews, and reusable research notes.
-      </p>
-      <div className="mt-6 grid gap-4 md:grid-cols-3">
-        <div className="rounded-2xl border bg-slate-50 p-4">
-          <h2 className="font-semibold text-slate-950">Read papers with AI</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">Summarize academic papers and extract key findings, methods, data, and conclusions.</p>
-        </div>
-        <div className="rounded-2xl border bg-slate-50 p-4">
-          <h2 className="font-semibold text-slate-950">Ask about PDFs</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">Chat with a paper, selected text, figures, tables, and saved reading history.</p>
-        </div>
-        <div className="rounded-2xl border bg-slate-50 p-4">
-          <h2 className="font-semibold text-slate-950">中文解讀英文論文</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">高質量模式使用英文閱讀鏈路，最後輸出簡體中文閱讀報告。</p>
-        </div>
-      </div>
-      <div className="mt-6 flex flex-wrap gap-2">
-        {relatedQueries.map((query) => (
-          <span className="rounded-full border bg-white px-3 py-1 text-sm text-slate-600" key={query}>
-            {query}
-          </span>
-        ))}
-      </div>
-      <Link className="mt-7 inline-flex rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground" href="/research">
-        Open AI paper reader
-      </Link>
-    </section>
-  </main>
+  <SeoLanguagePage
+    copy={{
+      en: {
+        eyebrow: 'SCIReader',
+        title: 'AI Read Paper: read academic PDFs with AI',
+        description: 'SCIReader is an AI paper reader for academic PDFs. Upload a research paper, choose a reading mode, and ask questions about methods, experiments, figures, equations, limitations, and conclusions.',
+        cards: [
+          { title: 'Read papers with AI', description: 'Summarize academic papers and extract key findings, methods, data, and conclusions.' },
+          { title: 'Ask about PDFs', description: 'Chat with a paper, selected text, figures, tables, and saved reading history.' },
+          { title: 'Chinese output', description: 'High-quality mode can read English materials first and produce a Simplified Chinese research report.' },
+        ],
+        keywords: relatedQueries,
+        cta: 'Open AI paper reader',
+        href: '/research',
+      },
+      zh: {
+        eyebrow: 'SCIReader',
+        title: 'AI 读论文：深度理解科研 PDF',
+        description: 'SCIReader 可以上传论文 PDF，选择阅读模式，并围绕方法、实验、图表、公式、局限和结论继续追问。它更强调对物理原理、证据链和研究逻辑的深刻理解。',
+        cards: [
+          { title: 'AI 精读论文', description: '提取核心发现、方法、数据和结论，不只停留在摘要层面。' },
+          { title: '围绕 PDF 追问', description: '可以结合整篇论文、选中文本、图表页面和历史读书笔记继续对话。' },
+          { title: '英文论文中文解读', description: '高质量模式可先按英文链路阅读，再输出简体中文研究报告。' },
+        ],
+        keywords: relatedQueries,
+        cta: '打开 AI 论文阅读器',
+        href: '/research',
+      },
+    }}
+  />
 );
 
 export default AiReadPaperPage;

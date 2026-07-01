@@ -9,6 +9,7 @@ import remarkMath from 'remark-math';
 import { mockMessages } from '@/features/papers/mock-data';
 import type { ChatMessage, PaperReadingMode, PaperSelection, PaperSummary } from '@/types/paper';
 import type { FloatingFinancialContext } from '@/components/chat/floating-chat-context';
+import { localizeBilingualText, useLanguage } from '@/components/language/language-context';
 
 interface FloatingChatBoxProps {
   paper?: PaperSummary | null;
@@ -437,6 +438,9 @@ const clampLayout = (position: { x: number; y: number }, size: { width: number; 
 };
 
 export const FloatingChatBox = ({ paper = null, selectedText = null, financialContext = null, initialPosition, initialSize, initialFontSize = 'small', onLayoutChange }: FloatingChatBoxProps) => {
+  const { language } = useLanguage();
+  const b = (value: string) => localizeBilingualText(value, language);
+  const l = (en: string, zh: string) => language === 'zh' ? zh : en;
   const dragOffsetRef = useRef(defaultPosition);
   const resizeStartRef = useRef({ x: 0, y: 0, width: defaultSize.width, height: defaultSize.height, left: defaultPosition.x, top: defaultPosition.y });
   const resizeHandleRef = useRef<ResizeHandle>('bottom-right');
@@ -488,7 +492,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
       ? `\n\nTarget journal/conference for reviewer calibration: ${reviewerTargetJournal.trim() || 'Not specified. Infer the appropriate venue tier from the paper evidence, and state the assumption explicitly.'}`
       : '';
   const summaryPrompt = `${readingModePrompt}${reviewerTargetInstruction}`;
-  const readingModeLabel = `${getPaperReadingModeLabel(readingMode)} · ${paper?.shouldAutoSummarize ? 'Reading / 解读中' : 'Pending / 待解读'}`;
+  const readingModeLabel = `${b(getPaperReadingModeLabel(readingMode))} · ${paper?.shouldAutoSummarize ? b('Reading / 解读中') : b('Pending / 待解读')}`;
   const fontSizeIndex = chatFontSizeOrder.indexOf(chatFontSize);
   const fontSizeStyle = chatFontSizeStyles[chatFontSize];
   const canDecreaseFontSize = fontSizeIndex > 0;
@@ -1739,18 +1743,18 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
           <div className={isMobileViewport ? 'min-w-0 flex-1' : 'min-w-0 flex-1 basis-48'}>
             <div className={`items-baseline gap-x-2 gap-y-0.5 ${isMobileViewport ? 'flex min-w-0 flex-nowrap' : 'flex flex-wrap'}`}>
               <p className="max-w-full break-words text-[10px] font-medium uppercase leading-4 tracking-wide text-primary">{readingModeLabel}</p>
-              <h2 className={`min-w-0 text-sm font-semibold leading-5 ${isMobileViewport ? 'truncate' : ''}`}>{isFinancialChat ? 'Financial Analysis chat / 财务分析 chat' : hasPaper ? 'Paper chat / 论文 chat' : 'SCIReader chat'}</h2>
+              <h2 className={`min-w-0 text-sm font-semibold leading-5 ${isMobileViewport ? 'truncate' : ''}`}>{isFinancialChat ? b('Financial Analysis chat / 财务分析 chat') : hasPaper ? b('Paper chat / 论文 chat') : 'SCIReader chat'}</h2>
             </div>
             <p className="truncate text-[11px] text-muted-foreground">
               {isFinancialChat
-                ? `${financialContext?.selectedStock ? `${financialContext.selectedStock.name} ${financialContext.selectedStock.code}` : 'Enter analysis target / 请输入拟分析对象'} · ${financialContext?.materials.length ?? 0} materials / 个材料 · 3x token`
-                : paper?.title ?? 'Ask without opening a paper'}
+                ? `${financialContext?.selectedStock ? `${financialContext.selectedStock.name} ${financialContext.selectedStock.code}` : b('Enter analysis target / 请输入拟分析对象')} · ${financialContext?.materials.length ?? 0} ${l('materials', '个材料')} · 3x token`
+                : paper?.title ?? l('Ask without opening a paper', '未打开论文也可提问')}
             </p>
           </div>
           <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1">
             {exportableMessages.length && !isMobileViewport ? (
               <button
-                aria-label={isExportMode ? 'Exit export selection / 退出导出选择' : 'Select answers to export PDF / 选择回答导出 PDF'}
+                aria-label={isExportMode ? b('Exit export selection / 退出导出选择') : b('Select answers to export PDF / 选择回答导出 PDF')}
                 className={`${isExportMode ? 'border-primary bg-primary/10 text-primary' : 'border text-slate-700 hover:bg-slate-50'} inline-flex h-9 items-center justify-center rounded-lg text-xs font-medium ${isMobileViewport ? 'w-9' : 'gap-1 px-2 max-[520px]:w-9 max-[520px]:px-0'}`}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -1760,15 +1764,15 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
                   });
                 }}
                 onPointerDown={(event) => event.stopPropagation()}
-                title={isExportMode ? 'Exit export selection / 退出导出选择' : 'Select answers to export PDF / 选择回答导出 PDF'}
+                title={isExportMode ? b('Exit export selection / 退出导出选择') : b('Select answers to export PDF / 选择回答导出 PDF')}
                 type="button"
               >
                 {isExportMode ? <X className="size-4" /> : <Download className="size-4" />}
-                <span className={isMobileViewport ? 'sr-only' : 'max-[520px]:sr-only'}>{isExportMode ? 'Cancel / 取消' : 'Export / 导出'}</span>
+                <span className={isMobileViewport ? 'sr-only' : 'max-[520px]:sr-only'}>{isExportMode ? b('Cancel / 取消') : b('Export / 导出')}</span>
               </button>
             ) : null}
             <button
-              aria-label={isChatCollapsed ? 'Expand chat box / 展开聊天框' : 'Minimize chat box / 最小化聊天框'}
+              aria-label={isChatCollapsed ? b('Expand chat box / 展开聊天框') : b('Minimize chat box / 最小化聊天框')}
               className={`inline-flex h-9 items-center justify-center rounded-lg border text-xs font-medium text-slate-700 hover:bg-slate-50 ${isMobileViewport ? 'w-9' : 'gap-1 px-2 max-[520px]:w-9 max-[520px]:px-0'}`}
               onClick={(event) => {
                 event.stopPropagation();
@@ -1776,14 +1780,14 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
                 else setIsDesktopChatCollapsed((current) => !current);
               }}
               onPointerDown={(event) => event.stopPropagation()}
-              title={isChatCollapsed ? 'Expand chat box / 展开聊天框' : 'Minimize chat box / 最小化聊天框'}
+              title={isChatCollapsed ? b('Expand chat box / 展开聊天框') : b('Minimize chat box / 最小化聊天框')}
               type="button"
             >
               {isChatCollapsed ? <Maximize2 className="size-4" /> : <Minimize2 className="size-4" />}
-              <span className={isMobileViewport ? 'sr-only' : 'max-[520px]:sr-only'}>{isChatCollapsed ? 'Expand / 展开' : 'Collapse / 收起'}</span>
+              <span className={isMobileViewport ? 'sr-only' : 'max-[520px]:sr-only'}>{isChatCollapsed ? b('Expand / 展开') : b('Collapse / 收起')}</span>
             </button>
             {!isMobileViewport ? <button
-              aria-label="Decrease chat font size / 缩小聊天字体"
+              aria-label={b('Decrease chat font size / 缩小聊天字体')}
               className={`inline-flex h-9 items-center justify-center rounded-lg border text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35 ${isMobileViewport ? 'w-9' : 'gap-1 px-2 max-[520px]:w-9 max-[520px]:px-0'}`}
               disabled={!canDecreaseFontSize}
               onClick={(event) => {
@@ -1791,17 +1795,17 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
                 setChatFontSize((current) => chatFontSizeOrder[Math.max(0, chatFontSizeOrder.indexOf(current) - 1)]);
               }}
               onPointerDown={(event) => event.stopPropagation()}
-              title="Decrease chat font size / 缩小聊天字体"
+              title={b('Decrease chat font size / 缩小聊天字体')}
               type="button"
             >
               <Type className="size-4" />
               <span className={isMobileViewport ? 'sr-only' : ''}>-</span>
             </button> : null}
-            {!isMobileViewport ? <span className="min-w-5 text-center text-[11px] font-medium text-slate-500" title="Current font level / 当前字体档位">
+            {!isMobileViewport ? <span className="min-w-5 text-center text-[11px] font-medium text-slate-500" title={b('Current font level / 当前字体档位')}>
               {fontSizeStyle.label}
             </span> : null}
             {!isMobileViewport ? <button
-              aria-label="Increase chat font size / 放大聊天字体"
+              aria-label={b('Increase chat font size / 放大聊天字体')}
               className={`inline-flex h-9 items-center justify-center rounded-lg border text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35 ${isMobileViewport ? 'w-9' : 'gap-1 px-2 max-[520px]:w-9 max-[520px]:px-0'}`}
               disabled={!canIncreaseFontSize}
               onClick={(event) => {
@@ -1809,7 +1813,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
                 setChatFontSize((current) => chatFontSizeOrder[Math.min(chatFontSizeOrder.length - 1, chatFontSizeOrder.indexOf(current) + 1)]);
               }}
               onPointerDown={(event) => event.stopPropagation()}
-              title="Increase chat font size / 放大聊天字体"
+              title={b('Increase chat font size / 放大聊天字体')}
               type="button"
             >
               <Type className="size-4" />
@@ -1821,34 +1825,34 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
 
       {isMobilePortrait && !isPortraitHintDismissed && !isChatCollapsed ? (
         <div className="absolute inset-x-3 top-16 z-30 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 shadow-lg">
-          <p className="font-semibold">Landscape Recommended / 建议横屏阅读</p>
-          <p className="mt-1 text-xs leading-5 text-amber-800">Portrait mode is too narrow on mobile; landscape works better for reading PDFs and opening chat side by side. / 手机竖屏空间太窄，横屏更适合一边看 PDF、一边展开聊天。</p>
+          <p className="font-semibold">{b('Landscape Recommended / 建议横屏阅读')}</p>
+          <p className="mt-1 text-xs leading-5 text-amber-800">{b('Portrait mode is too narrow on mobile; landscape works better for reading PDFs and opening chat side by side. / 手机竖屏空间太窄，横屏更适合一边看 PDF、一边展开聊天。')}</p>
           <button
             className="mt-2 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white"
             onClick={() => setIsPortraitHintDismissed(true)}
             type="button"
           >
-            Continue Portrait / 继续竖屏
+            {b('Continue Portrait / 继续竖屏')}
           </button>
         </div>
       ) : null}
 
       {isExportMode && !isChatCollapsed ? (
         <div className="flex items-center gap-2 border-b bg-slate-50 px-3 py-2 text-xs">
-          <span className="text-slate-600">Selected {selectedExportCount} answers / 已选 {selectedExportCount} 条回答</span>
+          <span className="text-slate-600">{language === 'zh' ? `已选 ${selectedExportCount} 条回答` : `Selected ${selectedExportCount} answers`}</span>
           <button
             className="ml-auto rounded-lg border px-2.5 py-1.5 font-medium text-slate-700 hover:bg-white"
             onClick={() => setSelectedExportIds(new Set(exportableMessages.map((message) => message.id)))}
             type="button"
           >
-            Select All / 全选
+            {b('Select All / 全选')}
           </button>
           <button
             className="rounded-lg border px-2.5 py-1.5 font-medium text-slate-700 hover:bg-white"
             onClick={() => setSelectedExportIds(new Set())}
             type="button"
           >
-            Clear / 清空
+            {b('Clear / 清空')}
           </button>
           <button
             className="rounded-lg bg-primary px-2.5 py-1.5 font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
@@ -1856,7 +1860,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
             onClick={exportSelectedAnswersToPdf}
             type="button"
           >
-            Export Selected / 导出选中
+            {b('Export Selected / 导出选中')}
           </button>
         </div>
       ) : null}
@@ -1865,7 +1869,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
         <div className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
           <div className="flex flex-wrap items-center gap-2">
             <div className="min-w-0 flex-1">
-              <p className="font-semibold">Long Document Confirmation / 超长文献需要确认</p>
+              <p className="font-semibold">{b('Long Document Confirmation / 超长文献需要确认')}</p>
               <p className="mt-1 leading-5 text-amber-800">
                 {largeSummaryWarning.reason}
                 {largeSummaryWarning.pages ? ` 頁數：約 ${largeSummaryWarning.pages.toLocaleString()} 頁。` : ' '}
@@ -1938,7 +1942,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
 
       {isChatCollapsed ? null : selectedText ? (
         <div className="border-b bg-blue-50 p-3 text-xs">
-          <p className="font-medium text-blue-900">Selected text context</p>
+          <p className="font-medium text-blue-900">{l('Selected text context', '选中文本上下文')}</p>
           <p className="mt-1 line-clamp-3 text-blue-800">{selectedText.text}</p>
         </div>
       ) : null}
@@ -2005,16 +2009,16 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
         {readingMode === 'reviewer' && !isFinancialChat ? (
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-900">
             <span className="min-w-0 flex-1">
-              Reviewer mode: generate English reviewer comments from the first summary and chat history.
+              {l('Reviewer mode: generate English reviewer comments from the first summary and chat history.', '审稿模式：基于第一份摘要和聊天历史生成英文审稿意见。')}
             </span>
             <button
               className="rounded-lg bg-white px-3 py-1.5 font-medium text-blue-700 shadow-sm ring-1 ring-blue-200 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
               disabled={isThinking || !paperContextSummary.trim()}
               onClick={() => void generateReviewerComments()}
-              title={paperContextSummary.trim() ? 'Generate reviewer comments' : 'Please generate the first paper summary first.'}
+              title={paperContextSummary.trim() ? l('Generate reviewer comments', '生成审稿意见') : l('Please generate the first paper summary first.', '请先生成第一份论文摘要。')}
               type="button"
             >
-              Generate review
+              {l('Generate review', '生成审稿')}
             </button>
           </div>
         ) : null}
@@ -2025,7 +2029,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
           onKeyDown={(event) => {
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) void sendMessage();
           }}
-          placeholder={isFinancialChat ? '输入财务分析问题，例如：结合盘口和财报，短线资金是否有异动？' : 'Ask about the paper, selected text, methods, or citations...'}
+          placeholder={isFinancialChat ? l('Ask a financial-analysis question, e.g. are there unusual short-term flows in the order book and report?', '输入财务分析问题，例如：结合盘口和财报，短线资金是否有异动？') : l('Ask about the paper, selected text, methods, or citations...', '询问论文、选中文本、方法或引用依据...')}
           value={input}
         />
         <button
@@ -2035,7 +2039,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
           type="button"
         >
           {isThinking ? <Loader2 className="size-4 animate-spin" /> : <CornerDownLeft className="size-4" />}
-          {isThinking ? (isFinancialChat ? 'Financial analyst is working...' : 'Reader agent is working...') : isFinancialChat ? 'Send to financial analyst' : 'Send to reader agent'}
+          {isThinking ? (isFinancialChat ? l('Financial analyst is working...', '财务分析助手正在处理...') : l('Reader agent is working...', '论文阅读助手正在处理...')) : isFinancialChat ? l('Send to financial analyst', '发送给财务分析助手') : l('Send to reader agent', '发送给论文阅读助手')}
         </button>
       </footer>
       {!isMobileViewport && !isDesktopChatCollapsed && (

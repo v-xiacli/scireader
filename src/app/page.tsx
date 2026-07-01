@@ -1,11 +1,12 @@
 'use client';
 
-import { ArrowRight, BarChart3, Check, FileText, Gift, Loader2, ShieldCheck, Sparkles } from 'lucide-react';
+import { ArrowRight, BarChart3, Check, FileText, Gift, Loader2, ShieldCheck, Sparkles, type LucideIcon } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
+import { LanguageToggle, useLanguage, type AppLanguage } from '@/components/language/language-context';
+
 type AuthMode = 'login' | 'signup';
-type Language = 'en' | 'zh';
 type AuthUser = { id: string; email: string };
 type TokenAccount = { tokenBalance: number; tokenUsed: number; tokenAvailable: number };
 
@@ -45,7 +46,44 @@ const copy = {
     ctaTitle: '深入理解，不再每天撞上限额', ctaText: '用 100 万初始 tokens 深入追问论文和财报。相比许多免费 AI 网站紧张的每日配额，SCIReader 让持续探索的成本降到极低。', ctaButton: '加入早期体验',
     codeSent: '验证码已发送，请查看邮箱。', codeFailed: '验证码发送失败。', actionFailed: '操作失败，请稍后再试。', signupSuccess: '账号创建成功。', loginSuccess: '登录成功。',
   },
-} as const;
+} satisfies Record<AppLanguage, {
+  login: string;
+  signup: string;
+  badge: string;
+  headline: string;
+  intro: string;
+  benefits: readonly string[];
+  chips: readonly string[];
+  tokenOffer: string;
+  createTitle: string;
+  loginTitle: string;
+  accountHint: string;
+  password: string;
+  code: string;
+  sendCode: string;
+  sending: string;
+  create: string;
+  noPhone: string;
+  noPhoneDetail: string;
+  already: string;
+  newHere: string;
+  welcome: string;
+  account: string;
+  available: string;
+  logout: string;
+  workspaceTitle: string;
+  workspaceHint: string;
+  included: string;
+  workspaces: readonly { href: string; title: string; description: string; icon: LucideIcon }[];
+  ctaTitle: string;
+  ctaText: string;
+  ctaButton: string;
+  codeSent: string;
+  codeFailed: string;
+  actionFailed: string;
+  signupSuccess: string;
+  loginSuccess: string;
+}>;
 
 const ScienceWaterRipples = () => (
   <div aria-hidden="true" className="science-water-ripples">
@@ -89,7 +127,7 @@ const ScienceWaterRipples = () => (
 );
 
 const HomePage = () => {
-  const [language, setLanguage] = useState<Language>('zh');
+  const { language } = useLanguage();
   const [authMode, setAuthMode] = useState<AuthMode>('signup');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -152,9 +190,7 @@ const HomePage = () => {
         <header className="flex items-center justify-between">
           <Link className="flex items-center gap-2 font-bold tracking-tight sm:gap-3" href="/"><span className="flex size-9 items-center justify-center rounded-[10px] bg-[#0d8278] text-white"><FileText className="size-[19px]" /></span><span className="text-[17px] sm:text-[19px]">SCIReader</span></Link>
           <nav className="flex items-center gap-2 text-xs font-medium">
-            <div className="hidden rounded-xl bg-[#edf0f6] p-1 sm:flex">
-              {(['en', 'zh'] as const).map((lang) => <button aria-pressed={language === lang} className={language === lang ? 'rounded-lg bg-white px-3 py-1.5 font-semibold text-[#0a6f68] shadow-sm' : 'px-3 py-1.5 text-slate-500'} key={lang} onClick={() => setLanguage(lang)} type="button">{lang === 'en' ? 'EN' : '中文'}</button>)}
-            </div>
+            <LanguageToggle className="hidden sm:flex" />
             {authUser ? <>
               <button className="rounded-lg border border-[#dce2ec] bg-white px-3 py-2 sm:px-4" onClick={scrollToAccount} type="button">{t.account}</button>
               <button className="rounded-lg bg-[#0d8278] px-3 py-2 text-white sm:px-4" onClick={handleLogout} type="button">{t.logout}</button>

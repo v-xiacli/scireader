@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
+
+import { SeoLanguagePage } from '@/components/language/seo-language-page';
 
 export const metadata: Metadata = {
   title: 'AI讀論文 | AI讀文獻與 PDF 論文閱讀工具',
@@ -42,40 +43,34 @@ const keywords = [
 ];
 
 const AiPaperReadingPage = () => (
-  <main className="min-h-screen bg-slate-50 px-4 py-10 sm:px-6">
-    <section className="mx-auto max-w-4xl rounded-3xl bg-white p-6 shadow-sm sm:p-8">
-      <p className="text-sm font-medium text-primary">SCIReader</p>
-      <h1 className="mt-3 text-3xl font-semibold text-slate-950">AI讀論文與 AI讀文獻工具</h1>
-      <p className="mt-4 max-w-3xl text-base leading-7 text-slate-600">
-        SCIReader 可以上傳 PDF 論文後進行 AI 閱讀，生成簡單速覽、詳細報告或高質量英文鏈路解讀。你可以直接詢問研究方法、
-        實驗數據、圖表、公式、創新性、局限和結論，也可以保存讀書筆記並用於後續學術寫作。
-      </p>
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
-        <div className="rounded-2xl border bg-slate-50 p-4">
-          <h2 className="font-semibold text-slate-950">適合科研文獻閱讀</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">
-            支援英文論文中文解讀、科研文獻摘要、論文重點提煉、方法學和實驗結果分析。
-          </p>
-        </div>
-        <div className="rounded-2xl border bg-slate-50 p-4">
-          <h2 className="font-semibold text-slate-950">適合 PDF 論文問答</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">
-            可針對整篇論文、選中文字、圖表頁面和歷史讀書筆記進行對話式問答。
-          </p>
-        </div>
-      </div>
-      <div className="mt-6 flex flex-wrap gap-2">
-        {keywords.map((keyword) => (
-          <span className="rounded-full border bg-white px-3 py-1 text-sm text-slate-600" key={keyword}>
-            {keyword}
-          </span>
-        ))}
-      </div>
-      <Link className="mt-7 inline-flex rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground" href="/research">
-        開始 AI 讀論文
-      </Link>
-    </section>
-  </main>
+  <SeoLanguagePage
+    copy={{
+      en: {
+        eyebrow: 'SCIReader',
+        title: 'AI paper reading and literature Q&A',
+        description: 'Upload a PDF paper, generate a concise overview or detailed report, ask about methods and figures, and save reading notes for later academic writing.',
+        cards: [
+          { title: 'For research papers', description: 'Read English papers with Chinese output, summarize literature, and analyze methods and experimental results.' },
+          { title: 'For PDF Q&A', description: 'Ask questions about the whole paper, selected text, figure pages, and saved reading notes.' },
+        ],
+        keywords,
+        cta: 'Start AI paper reading',
+        href: '/research',
+      },
+      zh: {
+        eyebrow: 'SCIReader',
+        title: 'AI 读论文与 AI 读文献工具',
+        description: '上传 PDF 论文后进行 AI 阅读，生成简单速览、详细报告或高质量英文链路解读。你可以直接询问研究方法、实验数据、图表、公式、创新性、局限和结论。',
+        cards: [
+          { title: '适合科研文献阅读', description: '支持英文论文中文解读、科研文献摘要、论文重点提炼、方法学和实验结果分析。' },
+          { title: '适合 PDF 论文问答', description: '可针对整篇论文、选中文字、图表页面和历史读书笔记进行对话式问答。' },
+        ],
+        keywords,
+        cta: '开始 AI 读论文',
+        href: '/research',
+      },
+    }}
+  />
 );
 
 export default AiPaperReadingPage;

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
+import { LanguageToggle, localizeBilingualText, useLanguage } from '@/components/language/language-context';
 import type { PaperReadingMode, PaperSummary } from '@/types/paper';
 
 type AuthMode = 'login' | 'signup';
@@ -104,6 +105,9 @@ const formatArticleDate = (value: string) => {
 
 const HomePage = () => {
   const router = useRouter();
+  const { language } = useLanguage();
+  const b = (value: string) => localizeBilingualText(value, language);
+  const l = (en: string, zh: string) => language === 'zh' ? zh : en;
   const isSignupVerificationEnabled = true;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const estimatedPaperIdRef = useRef<string | null>(null);
@@ -121,7 +125,7 @@ const HomePage = () => {
   const [uploadedPapers, setUploadedPapers] = useState<PaperSummary[]>([]);
   const [deletingFilePath, setDeletingFilePath] = useState<string | null>(null);
   const [tokenEstimate, setTokenEstimate] = useState<TokenEstimate | null>(null);
-  const [tokenEstimateMessage, setTokenEstimateMessage] = useState('Upload a PDF to estimate tokens.');
+  const [tokenEstimateMessage, setTokenEstimateMessage] = useState('Upload a PDF to estimate tokens. / 上传 PDF 后估算 token。');
   const [tokenAccount, setTokenAccount] = useState<TokenAccount | null>(null);
   const [readingMode, setReadingMode] = useState<PaperReadingMode>('detailed');
   const [paperTaskMode, setPaperTaskMode] = useState<'read' | 'review'>('read');
@@ -179,10 +183,10 @@ const HomePage = () => {
       const papers = response.ok ? result.papers : [];
       setUploadedPapers(papers);
       setSelectedPaperKey((current) => current || papers.find((paper: PaperSummary) => paper.filePath)?.filePath || '');
-      if (!papers.some((paper: PaperSummary) => paper.filePath)) setTokenEstimateMessage('Upload a PDF to estimate tokens.');
+      if (!papers.some((paper: PaperSummary) => paper.filePath)) setTokenEstimateMessage('Upload a PDF to estimate tokens. / 上传 PDF 后估算 token。');
     } catch {
       setUploadedPapers([]);
-      setTokenEstimateMessage('Upload a PDF to estimate tokens.');
+      setTokenEstimateMessage('Upload a PDF to estimate tokens. / 上传 PDF 后估算 token。');
     }
   };
 
@@ -237,14 +241,14 @@ const HomePage = () => {
 
     if (!newestUploadedPaper) {
       setTokenEstimate(null);
-      setTokenEstimateMessage('Upload a PDF to estimate tokens.');
+      setTokenEstimateMessage('Upload a PDF to estimate tokens. / 上传 PDF 后估算 token。');
       return;
     }
 
     if (estimatedPaperIdRef.current === newestUploadedPaper.id) return;
 
     estimatedPaperIdRef.current = newestUploadedPaper.id;
-    setTokenEstimateMessage('Estimating latest uploaded PDF...');
+    setTokenEstimateMessage('Estimating latest uploaded PDF... / 正在估算最新上传的 PDF...');
     void estimateTokenConsumption(newestUploadedPaper);
   }, [uploadedPapers]);
 
@@ -320,7 +324,7 @@ const HomePage = () => {
     if (!paper.filePath) return;
 
     setTokenEstimate(null);
-    setTokenEstimateMessage('Calculating PDF input tokens...');
+    setTokenEstimateMessage('Calculating PDF input tokens... / 正在计算 PDF 输入 token...');
 
     try {
       const response = await fetch('/api/reader-agent/count-tokens', {
@@ -340,7 +344,7 @@ const HomePage = () => {
       if (!response.ok) throw new Error(result.message ?? result.error ?? 'Token estimate failed.');
 
       setTokenEstimate({ inputTokens: result.inputTokens, billableTokens: result.billableTokens, tokenWeight: result.tokenWeight, model: result.model });
-      setTokenEstimateMessage('Estimated before AI analysis.');
+      setTokenEstimateMessage('Estimated before AI analysis. / AI 分析前预估。');
     } catch (error) {
       setTokenEstimateMessage(error instanceof Error ? error.message : 'Token estimate failed.');
     }
@@ -361,12 +365,12 @@ const HomePage = () => {
 
   const handleUpload = async (file: File) => {
     if (!isLoggedIn) {
-      setUploadMessage('Please log in before uploading a paper.');
+      setUploadMessage('Please log in before uploading a paper. / 请先登录再上传论文。');
       return;
     }
 
     if (file.type !== 'application/pdf') {
-      setUploadMessage('Please choose a PDF file.');
+      setUploadMessage('Please choose a PDF file. / 请选择 PDF 文件。');
       return;
     }
 
@@ -462,7 +466,7 @@ const HomePage = () => {
 
       setUploadedPapers(result.papers);
       setWritingSelectedPaperKeys((current) => current.filter((key) => key !== getWritingPaperKey(paper)));
-      setUploadMessage('Removed.');
+      setUploadMessage('Removed. / 已移除。');
     } catch (error) {
       setUploadMessage(error instanceof Error ? error.message : 'Could not remove paper.');
     } finally {
@@ -486,7 +490,7 @@ const HomePage = () => {
 
   const handleGenerateWriting = async () => {
     if (!isLoggedIn) {
-      setWritingMessage('Please log in before using writing mode.');
+      setWritingMessage('Please log in before using writing mode. / 请先登录再使用写作模式。');
       return;
     }
 
@@ -682,22 +686,20 @@ const HomePage = () => {
                   href="/"
                 >
                   <ArrowLeft className="size-4" />
-                  Back to Home / 回到主页
+                  {b('Back to Home / 回到主页')}
                 </Link>
+                <LanguageToggle className="flex" />
                 <p className="text-sm font-medium uppercase tracking-wide text-primary">SCIReader</p>
               </div>
-              <h1 className="mt-2 text-3xl font-semibold">Read Papers with AI / AI 阅读论文</h1>
+              <h1 className="mt-2 text-3xl font-semibold">{b('Read Papers with AI / AI 阅读论文')}</h1>
               <p className="mt-2 max-w-2xl text-muted-foreground">
-                Upload a PDF, read it on the left, and ask questions in the chat on the right. / 上传 PDF，在左侧阅读，并在右侧聊天窗口提问。
+                {b('Upload a PDF, read it on the left, and ask questions in the chat on the right. / 上传 PDF，在左侧阅读，并在右侧聊天窗口提问。')}
               </p>
-              <div className="mt-3 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
-                Language: English first, Singapore Chinese in Simplified script. / 语言：英文在前，新加坡中文（简体）在后。
-              </div>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row lg:justify-end">
               <div className="rounded-2xl border bg-slate-50 p-4 text-right">
                 <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-                  <WalletCards className="size-4" /> Token Estimate / Token 预估
+                  <WalletCards className="size-4" /> {b('Token Estimate / Token 预估')}
                 </div>
                 <p className="mt-2 text-2xl font-semibold">
                   {tokenEstimate ? (tokenEstimate.billableTokens ?? tokenEstimate.inputTokens).toLocaleString() : '--'}
@@ -705,41 +707,41 @@ const HomePage = () => {
                 <p className="mt-1 max-w-44 text-xs text-muted-foreground">
                   {tokenEstimate
                     ? `${tokenEstimate.inputTokens.toLocaleString()} raw · ${getBillingModeLabel(tokenEstimate.model)}`
-                    : tokenEstimateMessage}
+                    : b(tokenEstimateMessage)}
                 </p>
               </div>
               <div className="rounded-2xl border bg-slate-50 p-4 text-right">
                 <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-                  <WalletCards className="size-4" /> Token Balance / Token 余额
+                  <WalletCards className="size-4" /> {b('Token Balance / Token 余额')}
                 </div>
                 <p className="mt-2 text-2xl font-semibold">{tokenAccount ? tokenAccount.tokenAvailable.toLocaleString() : '200,000'}</p>
                 <p className="mt-1 max-w-44 text-xs text-muted-foreground">
-                  {tokenAccount ? `${tokenAccount.tokenUsed.toLocaleString()} used / 已用 · ${tokenAccount.tokenBalance.toLocaleString()} total / 总额` : 'Default account quota / 预设账号额度'}
+                  {tokenAccount ? `${tokenAccount.tokenUsed.toLocaleString()} ${l('used', '已用')} · ${tokenAccount.tokenBalance.toLocaleString()} ${l('total', '总额')}` : b('Default account quota / 预设账号额度')}
                 </p>
               </div>
             </div>
           </div>
           <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-            This website is not available to users in Mainland China and is intended only for overseas Chinese users. / 本网站不面向中国内地用户开放，仅针对海外华人。
+            {b('This website is not available to users in Mainland China and is intended only for overseas Chinese users. / 本网站不面向中国内地用户开放，仅针对海外华人。')}
           </div>
           <div className="mt-5 grid gap-3 border-t pt-4 text-sm md:grid-cols-3">
             <div>
-              <p className="font-medium">Top-up Reference / 充值参考</p>
+              <p className="font-medium">{b('Top-up Reference / 充值参考')}</p>
               <p className="mt-1 text-muted-foreground">
-                USD top-ups only; US$1 ≈ 2,000,000 tokens, and new accounts receive 200,000 tokens. Need more tokens? Email / 仅接受美元充值；US$1 ≈ 2,000,000 token，首登赠送 200,000 token。需要购买更多 token，请发邮件至{' '}
+                {language === 'zh' ? '仅接受美元充值；US$1 ≈ 2,000,000 token，首登赠送 200,000 token。需要购买更多 token，请发邮件至' : 'USD top-ups only; US$1 ≈ 2,000,000 tokens, and new accounts receive 200,000 tokens. Need more tokens? Email'}{' '}
                 <a className="font-medium text-primary underline-offset-4 hover:underline" href="mailto:sanbangzi@mailfence.com">
                   sci reader &lt;sanbangzi@mailfence.com&gt;
                 </a>
-                。
+                {language === 'zh' ? '。' : '.'}
               </p>
             </div>
             <div>
-              <p className="font-medium">Billing Rules / 扣费规则</p>
-              <p className="mt-1 text-muted-foreground">Calculated from actual model input/output prices; input price is about 1/6 of output price. / 按模型实际输入/输出单价折算；输入价格约为输出价格的 1/6。</p>
+              <p className="font-medium">{b('Billing Rules / 扣费规则')}</p>
+              <p className="mt-1 text-muted-foreground">{b('Calculated from actual model input/output prices; input price is about 1/6 of output price. / 按模型实际输入/输出单价折算；输入价格约为输出价格的 1/6。')}</p>
             </div>
             <div>
-              <p className="font-medium">Reading Estimate / 阅读估算</p>
-              <p className="mt-1 text-muted-foreground">US$1 can deeply read about 80-160 English papers of 5,000 words; very long papers are billed by actual token usage. / US$1 约可精读 80-160 篇 5000 words 英文文献，超长论文按实际 token 扣费。</p>
+              <p className="font-medium">{b('Reading Estimate / 阅读估算')}</p>
+              <p className="mt-1 text-muted-foreground">{b('US$1 can deeply read about 80-160 English papers of 5,000 words; very long papers are billed by actual token usage. / US$1 约可精读 80-160 篇 5000 words 英文文献，超长论文按实际 token 扣费。')}</p>
             </div>
           </div>
         </header>
@@ -747,18 +749,18 @@ const HomePage = () => {
         <div className="grid gap-5 md:grid-cols-3">
           <div className="rounded-2xl bg-white p-5 shadow-sm">
             <FileText className="size-6 text-primary" />
-            <h2 className="mt-4 font-semibold">Read PDFs</h2>
-            <p className="mt-2 text-sm text-muted-foreground">Open papers in a clean PDF reader.</p>
+            <h2 className="mt-4 font-semibold">{l('Read PDFs', '阅读 PDF')}</h2>
+            <p className="mt-2 text-sm text-muted-foreground">{l('Open papers in a clean PDF reader.', '在清爽的 PDF 阅读器里打开论文。')}</p>
           </div>
           <div className="rounded-2xl bg-white p-5 shadow-sm">
             <MessageSquareText className="size-6 text-primary" />
-            <h2 className="mt-4 font-semibold">Ask AI</h2>
-            <p className="mt-2 text-sm text-muted-foreground">Ask questions about the paper or selected text.</p>
+            <h2 className="mt-4 font-semibold">{l('Ask AI', '追问 AI')}</h2>
+            <p className="mt-2 text-sm text-muted-foreground">{l('Ask questions about the paper or selected text.', '围绕整篇论文或选中文字继续提问。')}</p>
           </div>
           <div className="rounded-2xl bg-white p-5 shadow-sm">
             <WalletCards className="size-6 text-primary" />
-            <h2 className="mt-4 font-semibold">Your account</h2>
-            <p className="mt-2 text-sm text-muted-foreground">Check your credits before using AI features.</p>
+            <h2 className="mt-4 font-semibold">{l('Your account', '你的账户')}</h2>
+            <p className="mt-2 text-sm text-muted-foreground">{l('Check your credits before using AI features.', '使用 AI 功能前可先查看 token 余额。')}</p>
           </div>
         </div>
 
@@ -766,27 +768,27 @@ const HomePage = () => {
           <div className="flex flex-col gap-2">
             <div className="flex items-center gap-2">
               <PenLine className="size-5 text-primary" />
-              <h2 className="text-xl font-semibold">Writing Mode / 写作模式</h2>
+              <h2 className="text-xl font-semibold">{b('Writing Mode / 写作模式')}</h2>
             </div>
             <p className="text-sm text-muted-foreground">
-              Organize an Introduction from saved reading notes and generate citation numbers by first appearance; Writing Mode is billed at 1.5x tokens. / 基于已保存的读书笔记组织 Introduction，并按首次出现顺序生成引用编号；写作模式按 1.5 倍 token 计费。
+              {b('Organize an Introduction from saved reading notes and generate citation numbers by first appearance; Writing Mode is billed at 1.5x tokens. / 基于已保存的读书笔记组织 Introduction，并按首次出现顺序生成引用编号；写作模式按 1.5 倍 token 计费。')}
             </p>
           </div>
 
           <div className="mt-5 grid gap-4">
             <div className="space-y-4">
               <label className="block">
-                <span className="text-sm font-medium">Writing Topic or Direction / 写作题目或方向</span>
+                <span className="text-sm font-medium">{b('Writing Topic or Direction / 写作题目或方向')}</span>
                 <textarea
                   className="mt-2 min-h-24 w-full rounded-xl border px-4 py-3 text-sm outline-none transition focus:border-primary"
                   onChange={(event) => setWritingTopic(event.target.value)}
-                  placeholder="Example: multimodal fusion for complex-environment perception / 例如：面向复杂环境感知的多模态融合方法研究"
+                  placeholder={b('Example: multimodal fusion for complex-environment perception / 例如：面向复杂环境感知的多模态融合方法研究')}
                   value={writingTopic}
                 />
               </label>
 
               <div>
-                <p className="text-sm font-medium">Output Language / 输出语言</p>
+                <p className="text-sm font-medium">{b('Output Language / 输出语言')}</p>
                 <div className="mt-2 inline-flex rounded-xl border p-1">
                   {([
                     ['chinese', 'Chinese / 中文'],
@@ -798,14 +800,14 @@ const HomePage = () => {
                       onClick={() => setWritingLanguage(id)}
                       type="button"
                     >
-                      {label}
+                      {b(label)}
                     </button>
                   ))}
                 </div>
               </div>
 
               <div>
-                <p className="text-sm font-medium">Selected Materials / 已选素材</p>
+                <p className="text-sm font-medium">{b('Selected Materials / 已选素材')}</p>
                 <div className="mt-2 min-h-20 rounded-xl border p-3">
                   {selectedWritingMaterialCount ? (
                     <div className="flex flex-wrap gap-2">
@@ -814,7 +816,7 @@ const HomePage = () => {
                           className="max-w-full rounded-lg border bg-slate-50 px-3 py-2 text-left text-sm transition hover:border-primary hover:bg-white"
                           key={getWritingPaperKey(paper)}
                           onClick={() => toggleWritingPaper(paper)}
-                          title="Remove selection / 取消选择"
+                          title={b('Remove selection / 取消选择')}
                           type="button"
                         >
                           <span className="block truncate font-medium">{paper.title}</span>
@@ -828,7 +830,7 @@ const HomePage = () => {
                           className="max-w-full rounded-lg border bg-indigo-50 px-3 py-2 text-left text-sm transition hover:border-primary hover:bg-white"
                           key={article.storagePath}
                           onClick={() => toggleWritingArticle(article)}
-                          title="Remove selection / 取消选择"
+                          title={b('Remove selection / 取消选择')}
                           type="button"
                         >
                           <span className="block truncate font-medium">{article.topic}</span>
@@ -839,7 +841,7 @@ const HomePage = () => {
                       ))}
                     </div>
                   ) : (
-                    <p className="text-sm text-muted-foreground">Select writing materials from the Your Papers or Your Articles lists below. / 请在下面的 Your Papers 或 Your Articles 列表里勾选要用于写作的素材。</p>
+                    <p className="text-sm text-muted-foreground">{b('Select writing materials from the Your Papers or Your Articles lists below. / 请在下面的 Your Papers 或 Your Articles 列表里勾选要用于写作的素材。')}</p>
                   )}
                 </div>
               </div>
@@ -851,16 +853,16 @@ const HomePage = () => {
                 type="button"
               >
                 {isWriting ? <Loader2 className="size-4 animate-spin" /> : <PenLine className="size-4" />}
-                {isWriting ? 'Generating... / 正在生成...' : 'Generate Introduction / 生成 Introduction'}
+                {isWriting ? b('Generating... / 正在生成...') : b('Generate Introduction / 生成 Introduction')}
               </button>
-              {writingMessage ? <p className="text-sm text-muted-foreground">{writingMessage}</p> : null}
+              {writingMessage ? <p className="text-sm text-muted-foreground">{b(writingMessage)}</p> : null}
             </div>
           </div>
 
           {writingResult ? (
             <div className="mt-5 rounded-2xl border bg-slate-50 p-4">
               <div className="flex flex-col gap-1 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-                <span>{writingResult.storagePath ? `Saved: ${writingResult.storagePath}` : writingResult.processing ? 'Status: generating missing reading notes' : 'Status: not saved'}</span>
+                <span>{writingResult.storagePath ? `${l('Saved', '已保存')}: ${writingResult.storagePath}` : writingResult.processing ? l('Status: generating missing reading notes', '状态：正在生成缺失的读书笔记') : l('Status: not saved', '状态：未保存')}</span>
                 {writingResult.usage ? (
                   <span>
                     {writingResult.usage.billableTokens.toLocaleString()} billable · x{writingResult.usage.billingMultiplier}
@@ -874,7 +876,7 @@ const HomePage = () => {
                 <input
                   className="min-w-0 flex-1 rounded-xl border px-4 py-2 text-sm outline-none transition focus:border-primary"
                   onChange={(event) => setWritingFollowUp(event.target.value)}
-                  placeholder="Ask a follow-up or request edits; if more reading is needed, I will check first and will not reread automatically. / 继续追问或提出修改要求；需要补读时会先判断，不会自动重读"
+                  placeholder={b('Ask a follow-up or request edits; if more reading is needed, I will check first and will not reread automatically. / 继续追问或提出修改要求；需要补读时会先判断，不会自动重读')}
                   value={writingFollowUp}
                 />
                 <button
@@ -884,7 +886,7 @@ const HomePage = () => {
                   type="button"
                 >
                   {isWritingFollowUp ? <Loader2 className="size-4 animate-spin" /> : null}
-                  {isWritingFollowUp ? 'Processing... / 处理中...' : 'Follow up / Edit / 追问/修改'}
+                  {isWritingFollowUp ? b('Processing... / 处理中...') : b('Follow up / Edit / 追问/修改')}
                 </button>
               </div> : null}
             </div>
@@ -894,8 +896,8 @@ const HomePage = () => {
         <section className="order-3 rounded-3xl bg-white p-4 shadow-sm sm:p-6">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-xl font-semibold">Your articles</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Introductions and revisions generated in Writing Mode are saved here. / 写作模式生成的 Introduction 和修改稿会保存在这里。</p>
+              <h2 className="text-xl font-semibold">{l('Your articles', '你的文章')}</h2>
+              <p className="mt-1 text-sm text-muted-foreground">{b('Introductions and revisions generated in Writing Mode are saved here. / 写作模式生成的 Introduction 和修改稿会保存在这里。')}</p>
             </div>
           </div>
 
@@ -910,7 +912,7 @@ const HomePage = () => {
                 >
                   <label
                     className="flex shrink-0 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm transition hover:border-primary hover:bg-white"
-                    title={isSelectedForWriting ? 'Remove from Writing Mode / 取消加入写作模式' : 'Add to Writing Mode / 加入写作模式'}
+                    title={isSelectedForWriting ? b('Remove from Writing Mode / 取消加入写作模式') : b('Add to Writing Mode / 加入写作模式')}
                   >
                     <input
                       checked={isSelectedForWriting}
@@ -918,20 +920,20 @@ const HomePage = () => {
                       onChange={() => toggleWritingArticle(article)}
                       type="checkbox"
                     />
-                    <span className="hidden sm:inline">Writing / 写作</span>
+                    <span className="hidden sm:inline">{b('Writing / 写作')}</span>
                   </label>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="font-semibold">{article.topic}</h3>
                       <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
-                        {article.kind === 'follow-up' ? 'Follow-up' : 'Introduction'}
+                        {article.kind === 'follow-up' ? l('Follow-up', '追问修改') : 'Introduction'}
                       </span>
                       <span className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
                         {article.outputLanguage === 'english' ? 'English' : '中文'}
                       </span>
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      {formatArticleDate(article.savedAt)} · {article.selectedPaperCount} papers
+                      {formatArticleDate(article.savedAt)} · {article.selectedPaperCount} {l('papers', '篇论文')}
                       {article.billableTokens ? ` · ${article.billableTokens.toLocaleString()} billable` : ''}
                     </p>
                     <p className="mt-2 truncate text-xs text-muted-foreground">{article.storagePath}</p>
@@ -941,7 +943,7 @@ const HomePage = () => {
                       className="inline-flex items-center justify-center gap-2 rounded-xl border p-2 text-slate-500 transition hover:border-primary hover:bg-white hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
                       disabled={loadingWritingPath === article.storagePath}
                       onClick={() => void handleOpenWritingArticle(article)}
-                      title="Open in writing output"
+                      title={l('Open in writing output', '在写作输出中打开')}
                       type="button"
                     >
                       {loadingWritingPath === article.storagePath ? <Loader2 className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
@@ -950,7 +952,7 @@ const HomePage = () => {
                       className="inline-flex items-center justify-center gap-2 rounded-xl border p-2 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
                       disabled={deletingWritingPath === article.storagePath}
                       onClick={() => void handleRemoveWritingArticle(article)}
-                      title="Remove from list"
+                      title={l('Remove from list', '从列表移除')}
                       type="button"
                     >
                       {deletingWritingPath === article.storagePath ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
@@ -960,7 +962,7 @@ const HomePage = () => {
               );
             }) : (
               <div className="rounded-2xl border bg-slate-50 p-4 text-sm text-muted-foreground">
-                No writing results yet. Generated Introductions will appear here automatically. / 还没有写作结果。生成 Introduction 后会自动出现在这里。
+                {b('No writing results yet. Generated Introductions will appear here automatically. / 还没有写作结果。生成 Introduction 后会自动出现在这里。')}
               </div>
             )}
           </div>
@@ -986,7 +988,7 @@ const HomePage = () => {
                 disabled={isUploading || !isLoggedIn || isSessionLoading}
                 onClick={() => {
                   if (!isLoggedIn) {
-                    setUploadMessage('Please log in before uploading a paper.');
+                    setUploadMessage('Please log in before uploading a paper. / 请先登录再上传论文。');
                     return;
                   }
 
@@ -995,10 +997,10 @@ const HomePage = () => {
                 type="button"
               >
                 {isUploading ? <Loader2 className="size-4 animate-spin" /> : null}
-                {isUploading ? 'Uploading... / 上传中...' : isLoggedIn ? 'Upload Paper / 上传论文' : 'Sign in to Upload / 登录后上传'}
+                {isUploading ? b('Uploading... / 上传中...') : isLoggedIn ? b('Upload Paper / 上传论文') : b('Sign in to Upload / 登录后上传')}
               </button>
               <div className="flex flex-wrap items-center gap-2">
-                <div className="flex max-w-full flex-wrap rounded-xl border p-1" title="Depth / 深度">
+                <div className="flex max-w-full flex-wrap rounded-xl border p-1" title={b('Depth / 深度')}>
                   {readingModes.map((mode) => (
                     <button
                       className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-sm transition ${normalizeResearchReadingMode(readingMode) === mode.id ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
@@ -1008,23 +1010,23 @@ const HomePage = () => {
                         setDetailedReport(mode.id !== 'simple');
                         saveReadingPreferences({ readingMode: mode.id, detailedReport: mode.id !== 'simple' });
                       }}
-                      title={mode.description}
+                      title={b(mode.description)}
                       type="button"
                     >
-                      {mode.label}
+                      {b(mode.label)}
                     </button>
                   ))}
                 </div>
-                <div className="flex max-w-full flex-wrap rounded-xl border p-1" title="Mode / 模式">
+                <div className="flex max-w-full flex-wrap rounded-xl border p-1" title={b('Mode / 模式')}>
                   {taskModes.map((mode) => (
                     <button
                       className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-sm transition ${paperTaskMode === mode.id ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-slate-50'}`}
                       key={mode.id}
                       onClick={() => setPaperTaskMode(mode.id)}
-                      title={mode.description}
+                      title={b(mode.description)}
                       type="button"
                     >
-                      {mode.label}
+                      {b(mode.label)}
                     </button>
                   ))}
                 </div>
@@ -1033,17 +1035,17 @@ const HomePage = () => {
                 className="whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-medium text-primary transition hover:bg-primary hover:text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={!selectedPaper?.filePath}
                 onClick={() => startPaperReading()}
-                title={selectedPaper ? `${paperTaskMode === 'review' ? 'Review / 审稿' : 'Read / 解读'} ${selectedPaper.title}` : 'Please select a paper first / 请先选定论文'}
+                title={selectedPaper ? `${paperTaskMode === 'review' ? b('Review / 审稿') : b('Read / 解读')} ${selectedPaper.title}` : b('Please select a paper first / 请先选定论文')}
                 type="button"
               >
-                {paperTaskMode === 'review' ? 'Review Selected Paper / 审稿选定论文' : 'Read Selected Paper / 解读选定论文'}
+                {paperTaskMode === 'review' ? b('Review Selected Paper / 审稿选定论文') : b('Read Selected Paper / 解读选定论文')}
               </button>
-              {uploadMessage ? <p className="text-sm text-muted-foreground">{uploadMessage}</p> : null}
+              {uploadMessage ? <p className="text-sm text-muted-foreground">{b(uploadMessage)}</p> : null}
             </div>
             <div>
-              <h2 className="text-xl font-semibold">Your Papers / 你的论文</h2>
+              <h2 className="text-xl font-semibold">{b('Your Papers / 你的论文')}</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                {selectedPaper ? `Selected / 已选定：${selectedPaper.title} · ${getResearchReadingModeLabel(readingMode)} · ${paperTaskMode === 'review' ? 'Review / 审稿' : 'Read / 阅读'}` : 'Please upload and select one paper first. / 请先上传并选定一篇论文。'}
+                {selectedPaper ? `${b('Selected / 已选定')}：${selectedPaper.title} · ${b(getResearchReadingModeLabel(readingMode))} · ${paperTaskMode === 'review' ? b('Review / 审稿') : b('Read / 阅读')}` : b('Please upload and select one paper first. / 请先上传并选定一篇论文。')}
               </p>
             </div>
           </div>
@@ -1060,7 +1062,7 @@ const HomePage = () => {
                     canSelectForWriting ? 'cursor-pointer hover:border-primary hover:bg-white' : 'cursor-not-allowed bg-slate-50 text-slate-400'
                   }`}
                   onClick={(event) => event.stopPropagation()}
-                  title={canSelectForWriting ? (isSelectedForWriting ? 'Remove from Writing Mode / 取消加入写作模式' : 'Add to Writing Mode / 加入写作模式') : 'Sign in and upload a paper before adding it to Writing Mode / 登录并上传论文后可加入写作模式'}
+                  title={canSelectForWriting ? (isSelectedForWriting ? b('Remove from Writing Mode / 取消加入写作模式') : b('Add to Writing Mode / 加入写作模式')) : b('Sign in and upload a paper before adding it to Writing Mode / 登录并上传论文后可加入写作模式')}
                 >
                   <input
                     checked={isSelectedForWriting}
@@ -1071,7 +1073,7 @@ const HomePage = () => {
                     }}
                     type="checkbox"
                   />
-                  <span className="hidden sm:inline">Writing / 写作</span>
+                  <span className="hidden sm:inline">{b('Writing / 写作')}</span>
                 </label>
               );
               const content = (
@@ -1084,7 +1086,7 @@ const HomePage = () => {
                     </p>
                   </div>
                   <span className={`rounded-full px-3 py-1 text-xs font-medium ${isSelectedForReading ? 'bg-primary text-primary-foreground' : 'bg-slate-100 text-slate-600'}`}>
-                    {isSelectedForReading ? 'Selected / 已选定' : 'Pending / 待选定'}
+                    {isSelectedForReading ? b('Selected / 已选定') : b('Pending / 待选定')}
                   </span>
                 </>
               );
@@ -1112,7 +1114,7 @@ const HomePage = () => {
                         }}
                         type="button"
                       >
-                        Read / 解读
+                        {b('Read / 解读')}
                       </button>
                       <button
                         className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100"
@@ -1123,7 +1125,7 @@ const HomePage = () => {
                         }}
                         type="button"
                       >
-                        Review / 审稿
+                        {b('Review / 审稿')}
                       </button>
                     </div>
                   ) : null}
@@ -1135,7 +1137,7 @@ const HomePage = () => {
                         event.stopPropagation();
                         void handleRemovePaper(paper);
                       }}
-                      title="Remove from my account only"
+                      title={l('Remove from my account only', '仅从我的账户移除')}
                       type="button"
                     >
                       {deletingFilePath === paper.filePath ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
@@ -1146,7 +1148,7 @@ const HomePage = () => {
                 <div
                   className="flex cursor-not-allowed items-center justify-between rounded-2xl border bg-slate-50 p-4 opacity-60"
                   key={paper.id}
-                  title="Log in to open papers"
+                  title={l('Log in to open papers', '登录后打开论文')}
                 >
                   {writingSelectControl}
                   {content}

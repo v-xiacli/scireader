@@ -5,6 +5,7 @@ import type { PropsWithChildren } from 'react';
 
 import { FloatingChatProvider } from '@/components/chat/floating-chat-context';
 import { GlobalFloatingChat } from '@/components/chat/global-floating-chat';
+import { LanguageProvider } from '@/components/language/language-context';
 
 const makeQueryClient = () =>
   new QueryClient({
@@ -26,10 +27,12 @@ const getQueryClient = () => {
 export const Providers = ({ children }: PropsWithChildren) => {
   return (
     <QueryClientProvider client={getQueryClient()}>
-      <FloatingChatProvider>
-        {children}
-        <GlobalFloatingChat />
-      </FloatingChatProvider>
+      <LanguageProvider>
+        <FloatingChatProvider>
+          {children}
+          <GlobalFloatingChat />
+        </FloatingChatProvider>
+      </LanguageProvider>
     </QueryClientProvider>
   );
 };

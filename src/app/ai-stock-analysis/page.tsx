@@ -1,27 +1,24 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
+
+import { SeoLanguagePage } from '@/components/language/seo-language-page';
 
 export const metadata: Metadata = {
-  title: 'AI炒股 | AI讀年報、AI讀財報與股票分析工具',
+  title: 'AI 财报分析 | AI 股票分析、年报阅读与 K 线材料解读',
   description:
-    'SCIReader 財務分析支援 AI 炒股研究、AI 讀年報、AI 讀財報、A 股和港股股票分析、K 線圖、盤口截圖和財報 PDF 材料分析。',
+    'SCIReader 财务分析支持 AI 读年报、AI 读财报、A 股与港股股票分析、K 线图、盘口截图和财报 PDF 材料分析。',
   keywords: [
     'AI炒股',
     'AI股票分析',
-    'AI讀年報',
     'AI读年报',
-    'AI讀財報',
     'AI读财报',
-    'AI財報分析',
     'AI财报分析',
-    'AI年報分析',
     'AI年报分析',
     'A股AI分析',
     '港股AI分析',
-    'K線AI分析',
     'K线AI分析',
-    'AI盤口分析',
     'AI盘口分析',
+    'AI stock analysis',
+    'AI financial report analysis',
   ],
   alternates: {
     canonical: '/ai-stock-analysis',
@@ -29,58 +26,51 @@ export const metadata: Metadata = {
 };
 
 const keywords = [
-  'AI炒股',
   'AI股票分析',
-  'AI讀年報',
   'AI读年报',
-  'AI讀財報',
   'AI读财报',
-  'AI財報分析',
   'AI财报分析',
+  'AI年报分析',
   'A股AI分析',
   '港股AI分析',
-  'K線AI分析',
-  '盤口截圖分析',
+  'K线AI分析',
+  '盘口截图分析',
+  'financial report AI',
 ];
 
 const AiStockAnalysisPage = () => (
-  <main className="min-h-screen bg-slate-50 px-4 py-10 sm:px-6">
-    <section className="mx-auto max-w-4xl rounded-3xl bg-white p-6 shadow-sm sm:p-8">
-      <p className="text-sm font-medium text-primary">SCIReader Financial Analysis</p>
-      <h1 className="mt-3 text-3xl font-semibold text-slate-950">AI炒股研究：AI讀年報、AI讀財報與股票分析</h1>
-      <p className="mt-4 max-w-3xl text-base leading-7 text-slate-600">
-        SCIReader 財務分析可以上傳年報 PDF、財報 PDF、K 線圖、盤口截圖和走勢圖，使用 AI 從交易員視角整理基本面、
-        技術面、資金行為、風險和後續觀察清單。系統支援 A 股、港股和自選股行情，並可按股票保存歷史分析。
-      </p>
-      <div className="mt-6 grid gap-4 md:grid-cols-3">
-        <div className="rounded-2xl border bg-slate-50 p-4">
-          <h2 className="font-semibold text-slate-950">AI讀年報</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">提煉收入、利潤、現金流、負債、經營質量和管理層表述。</p>
-        </div>
-        <div className="rounded-2xl border bg-slate-50 p-4">
-          <h2 className="font-semibold text-slate-950">AI讀財報</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">分析財報 PDF、公告、截圖和走勢材料，形成股票研究記錄。</p>
-        </div>
-        <div className="rounded-2xl border bg-slate-50 p-4">
-          <h2 className="font-semibold text-slate-950">AI炒股分析</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">結合 K 線、量價、盤口和風險反證，生成研究分析而非投資建議。</p>
-        </div>
-      </div>
-      <div className="mt-6 flex flex-wrap gap-2">
-        {keywords.map((keyword) => (
-          <span className="rounded-full border bg-white px-3 py-1 text-sm text-slate-600" key={keyword}>
-            {keyword}
-          </span>
-        ))}
-      </div>
-      <p className="mt-6 text-sm leading-6 text-amber-700">
-        風險提示：以下功能僅用於研究分析，不構成投資建議，也不承諾任何收益。
-      </p>
-      <Link className="mt-7 inline-flex rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground" href="/financial-analysis">
-        開始 AI 財務分析
-      </Link>
-    </section>
-  </main>
+  <SeoLanguagePage
+    copy={{
+      en: {
+        eyebrow: 'SCIReader Financial Analysis',
+        title: 'AI stock and financial-report analysis',
+        description: 'Upload annual reports, financial-report PDFs, K-line charts, order-book screenshots, and trend images. SCIReader analyzes business drivers, financial signals, risk factors, and market context from a research perspective.',
+        cards: [
+          { title: 'Read annual reports', description: 'Extract revenue, profit, cash flow, debt, operating quality, and management discussion.' },
+          { title: 'Analyze financial materials', description: 'Combine PDFs, announcements, screenshots, and trend materials into one stock-research view.' },
+          { title: 'Market-context reasoning', description: 'Use K-line charts, volume-price signals, and order-book screenshots for analysis, not investment advice.' },
+        ],
+        keywords,
+        note: 'Risk notice: this feature is for research analysis only and does not constitute investment advice or a promise of returns.',
+        cta: 'Open AI financial analysis',
+        href: '/financial-analysis',
+      },
+      zh: {
+        eyebrow: 'SCIReader 财务分析',
+        title: 'AI 股票分析、年报阅读与财报材料解读',
+        description: '上传年报 PDF、财报 PDF、K 线图、盘口截图和走势图，SCIReader 会从研究视角梳理业务驱动、财务信号、风险因素和市场上下文。',
+        cards: [
+          { title: 'AI 读年报', description: '提取收入、利润、现金流、负债、经营质量和管理层表述。' },
+          { title: 'AI 读财报', description: '结合财报 PDF、公告、截图和趋势材料，形成股票研究视角。' },
+          { title: '盘面与趋势分析', description: '结合 K 线、量价、盘口和风险因素进行研究分析，不构成投资建议。' },
+        ],
+        keywords,
+        note: '风险提示：以下功能仅用于研究分析，不构成投资建议，也不承诺任何收益。',
+        cta: '开始 AI 财务分析',
+        href: '/financial-analysis',
+      },
+    }}
+  />
 );
 
 export default AiStockAnalysisPage;
