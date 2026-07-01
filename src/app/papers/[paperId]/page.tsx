@@ -110,12 +110,12 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
 
   return (
     <main className="relative h-screen overflow-hidden p-1">
-      <nav className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-4 rounded-2xl bg-white/90 px-4 py-2 shadow-sm backdrop-blur">
-        <Link className="text-sm font-medium text-primary" href="/research">
+      <nav className="absolute left-4 top-16 z-20 flex max-w-[calc(100vw-2rem)] flex-wrap items-center gap-2 rounded-2xl bg-white/90 px-3 py-2 shadow-sm backdrop-blur sm:left-6">
+        <Link className="whitespace-nowrap text-sm font-medium text-primary" href="/research">
           ← {b('Paper Library / 论文库')}
         </Link>
         <LanguageToggle className="hidden sm:flex" />
-        <div className="text-sm text-muted-foreground">{b('PDF Reader + Floating Chat / PDF 阅读器 + 浮动聊天窗')}</div>
+        <div className="hidden text-sm text-muted-foreground md:block">{b('PDF Reader + Floating Chat / PDF 阅读器 + 浮动聊天窗')}</div>
         <div className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">{b(getReadingModeLabel(readingMode))}</div>
         <div className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{paper?.shouldAutoSummarize ? b('Start Reading / 开始解读') : b('Open Only / 仅打开')}</div>
       </nav>
