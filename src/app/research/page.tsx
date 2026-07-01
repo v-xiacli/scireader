@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { ArrowLeft, ArrowRight, FileText, Loader2, MessageSquareText, PenLine, Trash2, WalletCards } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Loader2, PenLine, Trash2, WalletCards } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
@@ -745,24 +745,6 @@ const HomePage = () => {
             </div>
           </div>
         </header>
-
-        <div className="grid gap-5 md:grid-cols-3">
-          <div className="rounded-2xl bg-white p-5 shadow-sm">
-            <FileText className="size-6 text-primary" />
-            <h2 className="mt-4 font-semibold">{l('Read PDFs', '阅读 PDF')}</h2>
-            <p className="mt-2 text-sm text-muted-foreground">{l('Open papers in a clean PDF reader.', '在清爽的 PDF 阅读器里打开论文。')}</p>
-          </div>
-          <div className="rounded-2xl bg-white p-5 shadow-sm">
-            <MessageSquareText className="size-6 text-primary" />
-            <h2 className="mt-4 font-semibold">{l('Ask AI', '追问 AI')}</h2>
-            <p className="mt-2 text-sm text-muted-foreground">{l('Ask questions about the paper or selected text.', '围绕整篇论文或选中文字继续提问。')}</p>
-          </div>
-          <div className="rounded-2xl bg-white p-5 shadow-sm">
-            <WalletCards className="size-6 text-primary" />
-            <h2 className="mt-4 font-semibold">{l('Your account', '你的账户')}</h2>
-            <p className="mt-2 text-sm text-muted-foreground">{l('Check your credits before using AI features.', '使用 AI 功能前可先查看 token 余额。')}</p>
-          </div>
-        </div>
 
         <section className="order-2 rounded-3xl bg-white p-4 shadow-sm sm:p-6">
           <div className="flex flex-col gap-2">
