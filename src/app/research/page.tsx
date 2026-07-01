@@ -87,6 +87,41 @@ const normalizeDownloadUrl = (downloadUrl: string) => {
 
 const fallbackPaperKey = (fileName: string) => fileName.replace(/\.pdf$/i, '').toLowerCase().replace(/[^a-z0-9]/g, '') || 'uploadedpaper';
 
+const getUploadedFileTitle = (fileName: string) => fileName.replace(/\.pdf$/i, '').trim() || 'Uploaded paper';
+
+const getUploadedFileTitleFromPath = (filePath?: string) => {
+  const fileName = filePath?.split('/').pop()?.replace(/^\d+-/, '') ?? '';
+
+  return getUploadedFileTitle(fileName);
+};
+
+const shouldPreferUploadedFileTitle = (metadataTitle: string | undefined, fileTitle: string) => {
+  const normalizedMetadataTitle = metadataTitle?.trim().toLowerCase() ?? '';
+  const normalizedFileTitle = fileTitle.trim().toLowerCase();
+
+  if (!normalizedMetadataTitle) return true;
+  if (/^microsoft word\s*-/i.test(normalizedMetadataTitle)) return true;
+  if (/\bv\d+\b/i.test(normalizedFileTitle) && !normalizedMetadataTitle.includes(normalizedFileTitle)) return true;
+
+  return false;
+};
+
+const getUploadedPaperId = (baseId: string, filePath: string) => {
+  const filePart = filePath.split('/').pop()?.replace(/\.pdf$/i, '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 32);
+
+  return [baseId, filePart].filter(Boolean).join('-') || baseId;
+};
+
+const normalizeUploadedPaperForDisplay = (paper: PaperSummary): PaperSummary => {
+  if (!paper.filePath) return paper;
+
+  const fileTitle = getUploadedFileTitleFromPath(paper.filePath);
+  const title = shouldPreferUploadedFileTitle(paper.title, fileTitle) ? fileTitle : paper.title;
+  const id = getUploadedPaperId(paper.id || fallbackPaperKey(fileTitle), paper.filePath);
+
+  return { ...paper, id, title };
+};
+
 const getBillingModeLabel = (model?: string) => {
   const normalizedModel = model?.toLowerCase() ?? '';
 
@@ -180,7 +215,7 @@ const HomePage = () => {
     try {
       const response = await fetch('/api/auth/uploaded-papers');
       const result = await response.json();
-      const papers = response.ok ? result.papers : [];
+      const papers = response.ok ? (result.papers as PaperSummary[]).map(normalizeUploadedPaperForDisplay) : [];
       setUploadedPapers(papers);
       setSelectedPaperKey((current) => current || papers.find((paper: PaperSummary) => paper.filePath)?.filePath || '');
       if (!papers.some((paper: PaperSummary) => paper.filePath)) setTokenEstimateMessage('Upload a PDF to estimate tokens. / 上传 PDF 后估算 token。');
@@ -392,11 +427,12 @@ const HomePage = () => {
 
       if (!response.ok) throw new Error(result.message ?? result.error ?? 'Upload failed.');
 
-      const fallbackTitle = file.name.replace(/\.pdf$/i, '') || 'Uploaded paper';
+      const fallbackTitle = getUploadedFileTitle(file.name);
       const metadata = await extractPaperMetadata(normalizeDownloadUrl(result.downloadUrl), fallbackTitle);
-      const paperTitleValue = metadata.title?.trim() || fallbackTitle;
+      const metadataTitle = metadata.title?.trim();
+      const paperTitleValue = shouldPreferUploadedFileTitle(metadataTitle, fallbackTitle) ? fallbackTitle : metadataTitle ?? fallbackTitle;
       const authorNames = metadata.authors?.filter(Boolean) ?? [];
-      const paperId = metadata.paperKey || fallbackPaperKey(file.name);
+      const paperId = getUploadedPaperId(metadata.paperKey || fallbackPaperKey(file.name), result.filePath);
       const uploadedPaper: PaperSummary = {
         id: paperId,
         title: paperTitleValue,
@@ -420,7 +456,7 @@ const HomePage = () => {
       const saveResult = await saveResponse.json();
 
       if (saveResponse.ok) {
-        setUploadedPapers(saveResult.papers);
+        setUploadedPapers((saveResult.papers as PaperSummary[]).map(normalizeUploadedPaperForDisplay));
         setSelectedPaperKey(uploadedPaper.filePath ?? uploadedPaper.id);
       }
 
@@ -464,7 +500,7 @@ const HomePage = () => {
 
       if (!response.ok) throw new Error(result.message ?? result.error ?? 'Could not remove paper.');
 
-      setUploadedPapers(result.papers);
+      setUploadedPapers((result.papers as PaperSummary[]).map(normalizeUploadedPaperForDisplay));
       setWritingSelectedPaperKeys((current) => current.filter((key) => key !== getWritingPaperKey(paper)));
       setUploadMessage('Removed. / 已移除。');
     } catch (error) {

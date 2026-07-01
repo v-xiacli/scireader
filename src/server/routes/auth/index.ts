@@ -304,30 +304,11 @@ export const loadUploadedPapers = async (userId: string) => {
   }
 };
 
-const cleanPaperIdentityPart = (part?: string) => part?.toLowerCase().replace(/[^a-z0-9]/g, '') ?? '';
-
-const getUploadedPaperIdentity = (paper: z.infer<typeof uploadedPaperSchema>) => {
-  const title = cleanPaperIdentityPart(paper.title || paper.id);
-  const journal = cleanPaperIdentityPart(paper.journal);
-  const year = cleanPaperIdentityPart(paper.year);
-  const authors = paper.authors
-    .split(/\s*(?:,|;|\band\b|&|，|；)\s*/i)
-    .slice(0, 2)
-    .map(cleanPaperIdentityPart)
-    .join('');
-
-  return [title, authors, journal, year].filter(Boolean).join('') || cleanPaperIdentityPart(paper.id) || cleanPaperIdentityPart(paper.filePath);
-};
-
 const saveUploadedPapers = async (userId: string, papers: z.infer<typeof uploadedPapersSchema>) => {
-  const seenIdentities = new Set<string>();
   const seenFilePaths = new Set<string>();
   const dedupedPapers = papers.filter((paper) => {
-    const identity = getUploadedPaperIdentity(paper);
+    if (seenFilePaths.has(paper.filePath)) return false;
 
-    if (seenIdentities.has(identity) || seenFilePaths.has(paper.filePath)) return false;
-
-    seenIdentities.add(identity);
     seenFilePaths.add(paper.filePath);
 
     return true;
@@ -343,10 +324,9 @@ const saveUploadedPapers = async (userId: string, papers: z.infer<typeof uploade
 
 const saveUploadedPaper = async (userId: string, paper: z.infer<typeof uploadedPaperSchema>) => {
   const currentPapers = await loadUploadedPapers(userId);
-  const paperIdentity = getUploadedPaperIdentity(paper);
   const nextPapers = [
     paper,
-    ...currentPapers.filter((currentPaper) => getUploadedPaperIdentity(currentPaper) !== paperIdentity && currentPaper.filePath !== paper.filePath),
+    ...currentPapers.filter((currentPaper) => currentPaper.filePath !== paper.filePath),
   ];
 
   return saveUploadedPapers(userId, nextPapers);
