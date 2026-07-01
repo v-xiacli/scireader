@@ -606,15 +606,17 @@ const app = new Hono()
   })
   .post('/logout', async (c) => {
     const token = getCookie(c, sessionCookieName);
+    deleteCookie(c, sessionCookieName, { path: '/' });
 
     if (token) {
-      try {
-        await ensureAuthTables();
-        await getSql()`DELETE FROM sessions WHERE token_hash = ${hashToken(token)}`;
-      } catch {}
+      void (async () => {
+        try {
+          await ensureAuthTables();
+          await getSql()`DELETE FROM sessions WHERE token_hash = ${hashToken(token)}`;
+        } catch {}
+      })();
     }
 
-    deleteCookie(c, sessionCookieName, { path: '/' });
     return c.json({ success: true });
   });
 

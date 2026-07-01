@@ -455,6 +455,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
   const [isResizing, setIsResizing] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [mobileViewportRect, setMobileViewportRect] = useState({ width: 390, height: 720, offsetLeft: 0, offsetTop: 0 });
   const [isMobileChatExpanded, setIsMobileChatExpanded] = useState(false);
   const [isDesktopChatCollapsed, setIsDesktopChatCollapsed] = useState(false);
   const [isMobilePortrait, setIsMobilePortrait] = useState(false);
@@ -494,15 +495,15 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
   const canIncreaseFontSize = fontSizeIndex < chatFontSizeOrder.length - 1;
   const exportableMessages = messages.filter(isExportableAssistantMessage);
   const selectedExportCount = selectedExportIds.size;
-  const viewportWidth = typeof window === 'undefined' ? 390 : window.innerWidth;
-  const viewportHeight = typeof window === 'undefined' ? 720 : window.innerHeight;
   const isChatCollapsed = isMobileViewport ? !isMobileChatExpanded : isDesktopChatCollapsed;
   const mobileLayout = isMobileViewport
     ? {
-        x: edgePadding,
-        y: isMobileChatExpanded ? edgePadding : Math.max(edgePadding, viewportHeight - mobileCollapsedHeight - edgePadding),
-        width: Math.max(minSize.width, viewportWidth - edgePadding * 2),
-        height: isMobileChatExpanded ? Math.max(minSize.height, viewportHeight - edgePadding * 2) : mobileCollapsedHeight,
+        x: mobileViewportRect.offsetLeft + edgePadding,
+        y: isMobileChatExpanded
+          ? mobileViewportRect.offsetTop + edgePadding
+          : mobileViewportRect.offsetTop + Math.max(edgePadding, mobileViewportRect.height - mobileCollapsedHeight - edgePadding),
+        width: Math.max(0, mobileViewportRect.width - edgePadding * 2),
+        height: isMobileChatExpanded ? Math.max(0, mobileViewportRect.height - edgePadding * 2) : mobileCollapsedHeight,
       }
     : null;
 
@@ -534,18 +535,38 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
 
   useEffect(() => {
     const updateViewportMode = () => {
-      const nextIsMobileViewport = window.innerWidth < mobileBreakpoint;
+      const visualViewport = window.visualViewport;
+      const nextRect = {
+        width: visualViewport?.width ?? window.innerWidth,
+        height: visualViewport?.height ?? window.innerHeight,
+        offsetLeft: visualViewport?.offsetLeft ?? 0,
+        offsetTop: visualViewport?.offsetTop ?? 0,
+      };
+      const nextIsMobileViewport = nextRect.width < mobileBreakpoint;
+
+      setMobileViewportRect((current) =>
+        current.width === nextRect.width &&
+        current.height === nextRect.height &&
+        current.offsetLeft === nextRect.offsetLeft &&
+        current.offsetTop === nextRect.offsetTop
+          ? current
+          : nextRect,
+      );
       setIsMobileViewport(nextIsMobileViewport);
-      setIsMobilePortrait(nextIsMobileViewport && window.innerHeight > window.innerWidth);
+      setIsMobilePortrait(nextIsMobileViewport && nextRect.height > nextRect.width);
     };
 
     updateViewportMode();
     window.addEventListener('resize', updateViewportMode);
     window.addEventListener('orientationchange', updateViewportMode);
+    window.visualViewport?.addEventListener('resize', updateViewportMode);
+    window.visualViewport?.addEventListener('scroll', updateViewportMode);
 
     return () => {
       window.removeEventListener('resize', updateViewportMode);
       window.removeEventListener('orientationchange', updateViewportMode);
+      window.visualViewport?.removeEventListener('resize', updateViewportMode);
+      window.visualViewport?.removeEventListener('scroll', updateViewportMode);
     };
   }, []);
 
@@ -1696,7 +1717,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
 
   return (
     <aside
-      className="fixed z-50 flex max-w-[calc(100vw-1rem)] flex-col rounded-2xl border bg-white/95 shadow-2xl backdrop-blur"
+      className="fixed z-50 flex max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-2xl border bg-white/95 shadow-2xl backdrop-blur"
       style={{
         left: mobileLayout?.x ?? position.x,
         top: mobileLayout?.y ?? position.y,
@@ -1705,16 +1726,20 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
       }}
     >
       <header
-        className={`${isMobileViewport ? 'cursor-default' : isDragging ? 'cursor-grabbing' : 'cursor-grab'} border-b px-3 py-2`}
+        aria-expanded={!isChatCollapsed}
+        className={`${isMobileViewport ? isChatCollapsed ? 'cursor-pointer' : 'cursor-default' : isDragging ? 'cursor-grabbing' : 'cursor-grab'} border-b px-3 py-2`}
+        onClick={() => {
+          if (isMobileViewport && isChatCollapsed) setIsMobileChatExpanded(true);
+        }}
         onPointerDown={startDragging}
         onPointerMove={drag}
         onPointerUp={stopDragging}
       >
-        <div className="flex flex-wrap items-start gap-2">
-          <div className="min-w-0 flex-1 basis-48">
-            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <div className={`flex items-start gap-2 ${isMobileViewport ? 'flex-nowrap' : 'flex-wrap'}`}>
+          <div className={isMobileViewport ? 'min-w-0 flex-1' : 'min-w-0 flex-1 basis-48'}>
+            <div className={`items-baseline gap-x-2 gap-y-0.5 ${isMobileViewport ? 'flex min-w-0 flex-nowrap' : 'flex flex-wrap'}`}>
               <p className="max-w-full break-words text-[10px] font-medium uppercase leading-4 tracking-wide text-primary">{readingModeLabel}</p>
-              <h2 className="min-w-0 text-sm font-semibold leading-5">{isFinancialChat ? 'Financial Analysis chat / 财务分析 chat' : hasPaper ? 'Paper chat / 论文 chat' : 'SCIReader chat'}</h2>
+              <h2 className={`min-w-0 text-sm font-semibold leading-5 ${isMobileViewport ? 'truncate' : ''}`}>{isFinancialChat ? 'Financial Analysis chat / 财务分析 chat' : hasPaper ? 'Paper chat / 论文 chat' : 'SCIReader chat'}</h2>
             </div>
             <p className="truncate text-[11px] text-muted-foreground">
               {isFinancialChat
@@ -1723,7 +1748,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
             </p>
           </div>
           <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1">
-            {exportableMessages.length ? (
+            {exportableMessages.length && !isMobileViewport ? (
               <button
                 aria-label={isExportMode ? 'Exit export selection / 退出导出选择' : 'Select answers to export PDF / 选择回答导出 PDF'}
                 className={`${isExportMode ? 'border-primary bg-primary/10 text-primary' : 'border text-slate-700 hover:bg-slate-50'} inline-flex h-9 items-center justify-center rounded-lg text-xs font-medium ${isMobileViewport ? 'w-9' : 'gap-1 px-2 max-[520px]:w-9 max-[520px]:px-0'}`}
@@ -1757,7 +1782,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
               {isChatCollapsed ? <Maximize2 className="size-4" /> : <Minimize2 className="size-4" />}
               <span className={isMobileViewport ? 'sr-only' : 'max-[520px]:sr-only'}>{isChatCollapsed ? 'Expand / 展开' : 'Collapse / 收起'}</span>
             </button>
-            <button
+            {!isMobileViewport ? <button
               aria-label="Decrease chat font size / 缩小聊天字体"
               className={`inline-flex h-9 items-center justify-center rounded-lg border text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35 ${isMobileViewport ? 'w-9' : 'gap-1 px-2 max-[520px]:w-9 max-[520px]:px-0'}`}
               disabled={!canDecreaseFontSize}
@@ -1771,11 +1796,11 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
             >
               <Type className="size-4" />
               <span className={isMobileViewport ? 'sr-only' : ''}>-</span>
-            </button>
-            <span className={isMobileViewport ? 'sr-only' : 'min-w-5 text-center text-[11px] font-medium text-slate-500'} title="Current font level / 当前字体档位">
+            </button> : null}
+            {!isMobileViewport ? <span className="min-w-5 text-center text-[11px] font-medium text-slate-500" title="Current font level / 当前字体档位">
               {fontSizeStyle.label}
-            </span>
-            <button
+            </span> : null}
+            {!isMobileViewport ? <button
               aria-label="Increase chat font size / 放大聊天字体"
               className={`inline-flex h-9 items-center justify-center rounded-lg border text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35 ${isMobileViewport ? 'w-9' : 'gap-1 px-2 max-[520px]:w-9 max-[520px]:px-0'}`}
               disabled={!canIncreaseFontSize}
@@ -1789,7 +1814,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
             >
               <Type className="size-4" />
               <span className={isMobileViewport ? 'sr-only' : ''}>+</span>
-            </button>
+            </button> : null}
           </div>
         </div>
       </header>

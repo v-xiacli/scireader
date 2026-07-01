@@ -20,7 +20,7 @@ const copy = {
     accountHint: 'Bring a paper and help shape a research tool built for deep understanding.', password: 'Password (at least 8 characters)',
     code: '6-digit email code', sendCode: 'Send code', sending: 'Sending', create: 'Join early access',
     noPhone: 'No phone number required', noPhoneDetail: 'Register with your email only — no phone verification, no SMS code, and no credit card required.',
-    already: 'Already have an account?', newHere: 'New to SCIReader?', welcome: 'Welcome back', available: 'tokens available', logout: 'Log out',
+    already: 'Already have an account?', newHere: 'New to SCIReader?', welcome: 'Welcome back', account: 'My account', available: 'tokens available', logout: 'Log out',
     workspaceTitle: 'Two domains, one standard: deep understanding', workspaceHint: 'Research remains the lead experience, with equally serious reasoning for financial reports.', included: 'Included on the free plan',
     workspaces: [
       { href: '/research', title: 'Research Papers', description: 'Upload PDF papers, generate reading notes, ask literature questions, and draft your Introduction in writing mode.', icon: FileText },
@@ -37,7 +37,7 @@ const copy = {
     tokenOffer: '早期体验 · 100 万 tokens 免费', createTitle: '加入早期体验用户', loginTitle: '登录 SCIReader', accountHint: '带上一篇论文，一起打磨一款真正追求深度理解的科研工具。',
     password: '密码（至少 8 位）', code: '6 位邮箱验证码', sendCode: '发送验证码', sending: '发送中', create: '加入早期体验',
     noPhone: '无需手机号，仅用邮箱注册', noPhoneDetail: '无需手机验证、无需短信验证码、无需信用卡，填写邮箱即可开始使用。', already: '已有账号？', newHere: '还没有账号？',
-    welcome: '欢迎回来', available: '可用 tokens', logout: '退出登录', workspaceTitle: '两个领域，同一种标准：深度理解', workspaceHint: '科研体验依然优先，同时以同样严谨的方式深入解读财务报告。', included: '免费套餐已包含',
+    welcome: '欢迎回来', account: '我的账户', available: '可用 tokens', logout: '退出登录', workspaceTitle: '两个领域，同一种标准：深度理解', workspaceHint: '科研体验依然优先，同时以同样严谨的方式深入解读财务报告。', included: '免费套餐已包含',
     workspaces: [
       { href: '/research', title: '科研论文', description: '上传 PDF 论文、生成读书笔记、进行文献问答，并在写作模式中整理 Introduction。', icon: FileText },
       { href: '/financial-analysis', title: '财务分析', description: '上传财报 PDF、K 线图和盘口截图，在浮动聊天窗中进行股票分析。', icon: BarChart3 },
@@ -134,7 +134,14 @@ const HomePage = () => {
     finally { setIsSendingCode(false); }
   };
 
-  const handleLogout = async () => { await fetch('/api/auth/logout', { method: 'POST' }); setAuthUser(null); setTokenAccount(null); setAuthMessage(null); };
+  const handleLogout = () => {
+    setAuthUser(null);
+    setTokenAccount(null);
+    setAuthMessage(null);
+    setPassword('');
+    setVerificationCode('');
+    void fetch('/api/auth/logout', { method: 'POST' }).catch(() => undefined);
+  };
   const scrollToAccount = () => document.getElementById('account')?.scrollIntoView({ behavior: 'smooth' });
   const selectMode = (mode: AuthMode) => { setAuthMode(mode); scrollToAccount(); };
 
@@ -148,8 +155,13 @@ const HomePage = () => {
             <div className="hidden rounded-xl bg-[#edf0f6] p-1 sm:flex">
               {(['en', 'zh'] as const).map((lang) => <button aria-pressed={language === lang} className={language === lang ? 'rounded-lg bg-white px-3 py-1.5 font-semibold text-[#0a6f68] shadow-sm' : 'px-3 py-1.5 text-slate-500'} key={lang} onClick={() => setLanguage(lang)} type="button">{lang === 'en' ? 'EN' : '中文'}</button>)}
             </div>
-            <button className="rounded-lg border border-[#dce2ec] bg-white px-3 py-2 sm:px-4" onClick={() => selectMode('login')} type="button">{t.login}</button>
-            <button className="rounded-lg bg-[#0d8278] px-3 py-2 text-white sm:px-4" onClick={() => selectMode('signup')} type="button">{t.signup}</button>
+            {authUser ? <>
+              <button className="rounded-lg border border-[#dce2ec] bg-white px-3 py-2 sm:px-4" onClick={scrollToAccount} type="button">{t.account}</button>
+              <button className="rounded-lg bg-[#0d8278] px-3 py-2 text-white sm:px-4" onClick={handleLogout} type="button">{t.logout}</button>
+            </> : <>
+              <button className="rounded-lg border border-[#dce2ec] bg-white px-3 py-2 sm:px-4" onClick={() => selectMode('login')} type="button">{t.login}</button>
+              <button className="rounded-lg bg-[#0d8278] px-3 py-2 text-white sm:px-4" onClick={() => selectMode('signup')} type="button">{t.signup}</button>
+            </>}
           </nav>
         </header>
 
@@ -163,7 +175,7 @@ const HomePage = () => {
           </div>
 
           <div className="rounded-[22px] border border-[#e0e5ed] bg-white p-5 shadow-[0_18px_45px_rgba(29,45,68,0.14)] sm:p-7" id="account">
-            {authUser ? <div className="py-5 text-center"><span className="mx-auto flex size-12 items-center justify-center rounded-full bg-[#dfeeed] text-[#0d8278]"><Check /></span><h2 className="mt-4 text-xl font-bold">{t.welcome}</h2><p className="mt-2 text-sm text-[#71809b]">{authUser.email}</p><p className="mt-5 text-3xl font-black text-[#0d8278]">{tokenAccount?.tokenAvailable.toLocaleString() ?? '200,000'}</p><p className="mt-1 text-xs text-[#71809b]">{t.available}</p><button className="mt-6 text-sm font-semibold text-[#0d8278]" onClick={() => void handleLogout()} type="button">{t.logout}</button></div> : <>
+            {authUser ? <div className="py-5 text-center"><span className="mx-auto flex size-12 items-center justify-center rounded-full bg-[#dfeeed] text-[#0d8278]"><Check /></span><h2 className="mt-4 text-xl font-bold">{t.welcome}</h2><p className="mt-2 text-sm text-[#71809b]">{authUser.email}</p><p className="mt-5 text-3xl font-black text-[#0d8278]">{tokenAccount?.tokenAvailable.toLocaleString() ?? '200,000'}</p><p className="mt-1 text-xs text-[#71809b]">{t.available}</p><button className="mt-6 text-sm font-semibold text-[#0d8278]" onClick={handleLogout} type="button">{t.logout}</button></div> : <>
               <div className="inline-flex items-center gap-2 rounded-full bg-[#dfeeed] px-3 py-1.5 text-xs font-bold text-[#08746c]"><Gift className="size-3.5" />{t.tokenOffer}</div>
               <h2 className="mt-5 text-[22px] font-black">{authMode === 'signup' ? t.createTitle : t.loginTitle}</h2><p className="mt-1 text-xs text-[#8290a8]">{t.accountHint}</p>
               <div className="mt-5 space-y-3"><input className="h-12 w-full rounded-xl border bg-[#fafbfd] px-4 text-sm outline-none focus:border-[#0d8278]" onChange={(e) => setEmail(e.target.value)} placeholder="you@university.edu" type="email" value={email} /><input className="h-12 w-full rounded-xl border bg-[#fafbfd] px-4 text-sm outline-none focus:border-[#0d8278]" onChange={(e) => setPassword(e.target.value)} placeholder={t.password} type="password" value={password} />
