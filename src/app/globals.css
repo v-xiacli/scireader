@@ -22,3 +22,91 @@ body {
   color: hsl(var(--foreground));
   font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
+
+.landing-background {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background-color: #f5f7fb;
+  background-image:
+    linear-gradient(rgba(45, 67, 137, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(45, 67, 137, 0.04) 1px, transparent 1px),
+    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.95), transparent 46%);
+  background-size: 44px 44px, 44px 44px, auto;
+}
+
+.science-water-ripples {
+  position: absolute;
+  z-index: 1;
+  top: 18rem;
+  left: -16rem;
+  width: 70rem;
+  height: 36rem;
+  pointer-events: none;
+  opacity: .86;
+}
+
+.science-water-ripple-art {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.water-ring {
+  transform-box: view-box;
+  transform-origin: 405px 265px;
+  animation: water-ring-propagate 8s linear infinite;
+  will-change: transform, opacity;
+}
+
+.water-ring-highlight {
+  fill: none;
+  stroke: url(#wave-highlight);
+  stroke-width: 6;
+}
+
+.water-ring-2 { animation-delay: -1s; }
+.water-ring-3 { animation-delay: -2s; }
+.water-ring-4 { animation-delay: -3s; }
+.water-ring-5 { animation-delay: -4s; }
+.water-ring-6 { animation-delay: -5s; }
+.water-ring-7 { animation-delay: -6s; }
+.water-ring-8 { animation-delay: -7s; }
+
+.water-center-light { fill: rgba(230, 243, 255, .82); filter: blur(2px); animation: water-center-breathe 3.2s ease-in-out infinite; transform-origin: 405px 263px; }
+
+.minimal-lighthouse {
+  filter: drop-shadow(0 12px 18px rgba(43, 91, 160, .22));
+}
+
+.lighthouse-beam {
+  transform-box: view-box;
+  transform-origin: 405px 135px;
+  animation: lighthouse-beam-breathe 6s ease-in-out infinite;
+}
+
+@keyframes water-ring-propagate {
+  0% { transform: scale(.12); opacity: 0; }
+  8% { opacity: .86; }
+  72% { opacity: .48; }
+  100% { transform: scale(8.4); opacity: 0; }
+}
+
+@keyframes water-center-breathe {
+  0%, 100% { transform: scale(.8); opacity: .55; }
+  50% { transform: scale(1.18); opacity: 1; }
+}
+
+@keyframes lighthouse-beam-breathe {
+  0%, 100% { transform: rotate(-18deg) scaleX(.94); opacity: .48; }
+  50% { transform: rotate(16deg) scaleX(1.04); opacity: .88; }
+}
+
+@media (max-width: 900px) {
+  .science-water-ripples {
+    top: 22rem;
+    left: -12rem;
+    width: 58rem;
+    opacity: .24;
+  }
+}
