@@ -71,8 +71,8 @@ export const PdfReader = ({ paper, onSelectionChange, initialZoom = 100, onZoomC
   }, [paper.pdfUrl]);
 
   return (
-    <section className="relative flex min-h-0 w-full flex-1 flex-col bg-[#dfe6e5]">
-      <div className="min-h-0 flex-1 overflow-hidden bg-[#dfe6e5] p-1 sm:p-2">
+    <section className="paper-reader-surface relative flex min-h-0 w-full flex-1 flex-col">
+      <div className="min-h-0 flex-1 overflow-hidden p-1 sm:p-2">
         {paper.pdfUrl ? (
           <>
             {pdfFrameStatus ? <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{pdfFrameStatus}</div> : null}

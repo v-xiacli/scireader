@@ -555,9 +555,9 @@ const FinancialAnalysisPage = () => {
   };
 
   return (
-    <main className="min-h-screen bg-slate-50">
-      <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-4 sm:px-6">
-        <header className="relative z-10 flex flex-col gap-4 border-b bg-slate-50 pb-4 lg:flex-row lg:items-center lg:justify-between">
+    <main className="financial-glass-page min-h-screen">
+      <div className="relative z-[1] mx-auto flex min-h-screen w-full max-w-6xl flex-col px-3 pb-28 pt-3 sm:px-5 sm:pt-4">
+        <header className="financial-glass-nav sticky top-3 z-30 flex flex-col gap-4 rounded-2xl px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
             <Link className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-primary/40 hover:text-primary" href="/">
               <ArrowLeft className="size-5" />
@@ -577,7 +577,7 @@ const FinancialAnalysisPage = () => {
           </div>
           <div className="flex flex-col gap-3 sm:flex-row lg:items-center lg:justify-end">
             <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border bg-white p-4 text-right shadow-sm">
+              <div className="financial-token-chip rounded-xl px-3 py-2 text-right">
                 <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
                   <WalletCards className="size-4" /> {b('Token Estimate / Token 预估')}
                 </div>
@@ -586,7 +586,7 @@ const FinancialAnalysisPage = () => {
                   {materials.length ? `${formatMaterialSize(materialSizeTotal)} ${b('materials; billed by actual usage ×3 / 材料；提交后按实际消耗 ×3')}` : b('Upload reports or images to start. / 上传财报或图片后开始分析。')}
                 </p>
               </div>
-              <div className="rounded-2xl border bg-white p-4 text-right shadow-sm">
+              <div className="financial-token-chip rounded-xl px-3 py-2 text-right">
                 <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
                   <WalletCards className="size-4" /> {b('Token Balance / Token 余额')}
                 </div>
@@ -599,7 +599,7 @@ const FinancialAnalysisPage = () => {
           </div>
         </header>
 
-        <section className="mt-4 rounded-2xl border bg-white p-4 shadow-sm">
+        <section className="financial-glass-panel mt-4 rounded-2xl p-4">
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
             {b('This website is not available to users in Mainland China and is intended only for overseas Chinese users. / 本网站不面向中国内地用户开放，仅针对海外华人。')}
           </div>
@@ -664,7 +664,7 @@ const FinancialAnalysisPage = () => {
           </section>
         ) : null}
 
-        <section className="mt-4 rounded-2xl border bg-white p-3 shadow-sm">
+        <section className="financial-glass-panel financial-analysis-hero mt-4 rounded-[22px] p-4 sm:p-5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-sm font-medium">{b('Watchlist Live Prices / 自选股实时价格')}</p>
@@ -752,7 +752,7 @@ const FinancialAnalysisPage = () => {
 
               return (
                 <button
-                  className={`min-h-24 w-[calc((100%-1rem)/3)] rounded-xl border px-2 py-2 text-left transition sm:min-h-28 sm:w-28 ${isSelected ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'bg-slate-50 hover:border-primary/40'}`}
+                  className={`financial-quote-card min-h-24 w-[calc((100%-1rem)/3)] rounded-xl border px-2 py-2 text-left transition sm:min-h-28 sm:w-28 ${isSelected ? 'border-primary bg-primary/10 ring-1 ring-primary' : 'hover:border-primary/40'}`}
                   key={`${quote.market}-${quote.code}`}
                   onClick={() => setAnalysisTargetText(targetText)}
                   type="button"
@@ -779,7 +779,7 @@ const FinancialAnalysisPage = () => {
         </section>
 
         <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(280px,420px)_minmax(0,1fr)]">
-          <aside className="rounded-2xl border bg-white p-4 shadow-sm">
+          <aside className="financial-glass-panel rounded-[22px] p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <h2 className="font-semibold">{b('Current Materials / 本次资料')}</h2>
@@ -927,7 +927,7 @@ const FinancialAnalysisPage = () => {
             </div>
           </aside>
 
-          <section className="rounded-2xl border bg-white p-4 shadow-sm">
+          <section className="financial-glass-panel rounded-[22px] p-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="font-semibold">{b('Saved Reports / 历史报告')}</h2>

@@ -101,8 +101,8 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
   }, []);
 
   return (
-    <main className="grid h-screen grid-rows-[64px_minmax(0,1fr)] overflow-hidden bg-[#edf2f1] sm:grid-rows-[72px_minmax(0,1fr)]">
-      <header className="relative z-20 flex min-w-0 items-center gap-3 border-b border-slate-200/90 bg-white/95 px-3 shadow-[0_1px_12px_rgba(15,23,42,0.04)] backdrop-blur sm:px-5">
+    <main className="paper-glass-page grid h-screen grid-rows-[64px_minmax(0,1fr)] overflow-hidden sm:grid-rows-[72px_minmax(0,1fr)]">
+      <header className="paper-glass-nav relative z-20 flex min-w-0 items-center gap-3 px-3 sm:px-5">
         <Link
           aria-label={b('Back to Paper Library / 返回论文库')}
           className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-primary/30 hover:bg-primary/5 hover:text-primary"

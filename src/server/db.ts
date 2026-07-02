@@ -43,6 +43,7 @@ export const ensureAuthTables = async () => {
   await getSql()`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_used BIGINT NOT NULL DEFAULT 0`;
   await getSql()`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false`;
   await getSql()`ALTER TABLE users ADD COLUMN IF NOT EXISTS financial_analysis_enabled BOOLEAN NOT NULL DEFAULT false`;
+  await getSql()`ALTER TABLE users ADD COLUMN IF NOT EXISTS introduction_writing_enabled BOOLEAN NOT NULL DEFAULT false`;
   await getSql()`ALTER TABLE users ALTER COLUMN token_balance SET DEFAULT 200000`;
   await getSql()`
     UPDATE users
@@ -116,6 +117,19 @@ export const getUserFinancialAnalysisAccess = async (userId: string) => {
   `) as Array<{ financial_analysis_enabled: boolean }>;
 
   return Boolean(rows[0]?.financial_analysis_enabled);
+};
+
+export const getUserIntroductionWritingAccess = async (userId: string) => {
+  await ensureAuthTables();
+
+  const rows = (await getSql()`
+    SELECT introduction_writing_enabled
+    FROM users
+    WHERE id = ${userId}
+    LIMIT 1
+  `) as Array<{ introduction_writing_enabled: boolean }>;
+
+  return Boolean(rows[0]?.introduction_writing_enabled);
 };
 
 export const enableUserFinancialAnalysis = async (userId: string) => {

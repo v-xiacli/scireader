@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { downloadFileAsAdmin, downloadTextAsAdmin, uploadFileAsAdmin, uploadTextAsAdmin } from '@/lib/firebase/server/storage-admin';
 import { readNeo4j, verifyNeo4jConnection, writeNeo4j } from '@/lib/neo4j';
 import { getUserStoragePrefix } from '@/lib/storage-paths';
-import { getUserFinancialAnalysisAccess, getUserTokenAccount, listFinancialAnalysisReports, recordFinancialAnalysisReport, recordUserTokenUsage } from '@/server/db';
+import { getUserFinancialAnalysisAccess, getUserIntroductionWritingAccess, getUserTokenAccount, listFinancialAnalysisReports, recordFinancialAnalysisReport, recordUserTokenUsage } from '@/server/db';
 import { getCurrentUser, loadUploadedPapers, sessionCookieName } from '@/server/routes/auth';
 
 type ExtractedPdfPage = {
@@ -4638,6 +4638,9 @@ const app = new Hono()
     try {
       const { user } = await requirePaperAccess(c);
       userId = user.id;
+      if (!(await getUserIntroductionWritingAccess(user.id))) {
+        return c.json({ error: 'Introduction writing is not enabled for this account.' }, 403);
+      }
       await ensurePositiveTokenBalance(user.id);
 
       const result = await generateWritingIntroduction(user.id, request);
@@ -4742,6 +4745,9 @@ const app = new Hono()
 
     try {
       const { user } = await requirePaperAccess(c);
+      if (!(await getUserIntroductionWritingAccess(user.id))) {
+        return c.json({ error: 'Introduction writing is not enabled for this account.' }, 403);
+      }
       await ensurePositiveTokenBalance(user.id);
 
       const result = await generateWritingFollowUp(user.id, request);

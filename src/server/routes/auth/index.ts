@@ -7,7 +7,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { z } from 'zod';
 
-import { enableUserFinancialAnalysis, ensureAuthTables, getSql, getUserFinancialAnalysisAccess, getUserTokenAccount } from '@/server/db';
+import { enableUserFinancialAnalysis, ensureAuthTables, getSql, getUserFinancialAnalysisAccess, getUserIntroductionWritingAccess, getUserTokenAccount } from '@/server/db';
 import { downloadTextAsAdmin, uploadTextAsAdmin } from '@/lib/firebase/server/storage-admin';
 
 const scrypt = promisify(scryptCallback);
@@ -386,6 +386,7 @@ const app = new Hono()
         user,
         tokenAccount: user ? await getUserTokenAccount(user.id) : null,
         financialAnalysisEnabled: user ? await isFinancialAnalysisAccessEnabled(user) : false,
+        introductionWritingEnabled: user ? await getUserIntroductionWritingAccess(user.id) : false,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not load session.';
@@ -539,7 +540,11 @@ const app = new Hono()
       const token = await createSession(rows[0].id);
       setSessionCookie(c, token);
 
-      return c.json({ user: rows[0], tokenAccount: await getUserTokenAccount(rows[0].id) }, 201);
+      return c.json({
+        user: rows[0],
+        tokenAccount: await getUserTokenAccount(rows[0].id),
+        introductionWritingEnabled: await getUserIntroductionWritingAccess(rows[0].id),
+      }, 201);
     } catch (error) {
       if (error instanceof Error && error.message.includes('duplicate key')) {
         return c.json({ error: 'An account with this email already exists.' }, 409);
@@ -578,7 +583,11 @@ const app = new Hono()
       const token = await createSession(user.id);
       setSessionCookie(c, token);
 
-      return c.json({ user: { id: user.id, email: user.email, created_at: user.created_at }, tokenAccount: await getUserTokenAccount(user.id) });
+      return c.json({
+        user: { id: user.id, email: user.email, created_at: user.created_at },
+        tokenAccount: await getUserTokenAccount(user.id),
+        introductionWritingEnabled: await getUserIntroductionWritingAccess(user.id),
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Login failed.';
       return c.json({ error: 'Login failed.', message }, 500);

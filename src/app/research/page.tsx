@@ -166,6 +166,7 @@ const HomePage = () => {
   const [verificationCode, setVerificationCode] = useState('');
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [isIntroductionWritingEnabled, setIsIntroductionWritingEnabled] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [isSendingVerificationCode, setIsSendingVerificationCode] = useState(false);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
@@ -270,6 +271,7 @@ const HomePage = () => {
 
         if (response.ok && result.user) {
           setAuthUser(result.user);
+          setIsIntroductionWritingEnabled(Boolean(result.introductionWritingEnabled));
           if (result.tokenAccount) setTokenAccount(result.tokenAccount);
           await loadViewerPreferences();
           await loadUploadedPapers();
@@ -277,6 +279,7 @@ const HomePage = () => {
         }
       } catch {
         setAuthUser(null);
+        setIsIntroductionWritingEnabled(false);
       } finally {
         setIsSessionLoading(false);
       }
@@ -325,6 +328,7 @@ const HomePage = () => {
       if (!response.ok) throw new Error(result.error ?? result.message ?? 'Authentication failed.');
 
       setAuthUser(result.user);
+      setIsIntroductionWritingEnabled(Boolean(result.introductionWritingEnabled));
       if (result.tokenAccount) setTokenAccount(result.tokenAccount);
       else await loadTokenAccount();
       await loadViewerPreferences();
@@ -370,6 +374,7 @@ const HomePage = () => {
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
     setAuthUser(null);
+    setIsIntroductionWritingEnabled(false);
     setTokenAccount(null);
     setUploadedPapers([]);
     setWritingArticles([]);
@@ -587,6 +592,10 @@ const HomePage = () => {
   };
 
   const handleGenerateWriting = async () => {
+    if (!isIntroductionWritingEnabled) {
+      setWritingMessage('Introduction writing is not enabled for this account. / 当前账号尚未开通 Introduction 写作权限。');
+      return;
+    }
     if (!isLoggedIn) {
       setWritingMessage('Please log in before using writing mode. / 请先登录再使用写作模式。');
       return;
@@ -660,6 +669,10 @@ const HomePage = () => {
   };
 
   const handleWritingFollowUp = async () => {
+    if (!isIntroductionWritingEnabled) {
+      setWritingMessage('Introduction writing is not enabled for this account. / 当前账号尚未开通 Introduction 写作权限。');
+      return;
+    }
     if (!writingResult || !writingFollowUp.trim()) return;
 
     setIsWritingFollowUp(true);
@@ -855,6 +868,14 @@ const HomePage = () => {
             </p>
           </div>
 
+          {!isIntroductionWritingEnabled ? (
+            <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+              <p className="font-semibold text-amber-950">{b('Introduction writing is not enabled / Introduction 写作功能尚未开通')}</p>
+              <p className="mt-1 text-sm leading-6 text-amber-800">
+                {b('This feature is available only to accounts enabled by an administrator. Please contact the administrator if you need access. / 此功能仅对管理员授权的账号开放。如需使用，请联系管理员开通。')}
+              </p>
+            </div>
+          ) : <>
           <div className="mt-5 grid gap-4">
             <div className="space-y-4">
               <label className="block">
@@ -971,6 +992,7 @@ const HomePage = () => {
               </div> : null}
             </div>
           ) : null}
+          </>}
         </section>
 
         <section className="order-3 rounded-3xl bg-white p-4 shadow-sm sm:p-6">
@@ -983,7 +1005,7 @@ const HomePage = () => {
 
           <div className="mt-5 grid gap-3">
             {writingArticles.length ? writingArticles.map((article) => {
-              const isSelectedForWriting = writingSelectedArticlePaths.includes(article.storagePath);
+              const isSelectedForWriting = isIntroductionWritingEnabled && writingSelectedArticlePaths.includes(article.storagePath);
 
               return (
                 <div
@@ -991,12 +1013,13 @@ const HomePage = () => {
                   key={article.storagePath}
                 >
                   <label
-                    className="flex shrink-0 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm transition hover:border-primary hover:bg-white"
-                    title={isSelectedForWriting ? b('Remove from Writing Mode / 取消加入写作模式') : b('Add to Writing Mode / 加入写作模式')}
+                    className={`flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-sm transition ${isIntroductionWritingEnabled ? 'cursor-pointer hover:border-primary hover:bg-white' : 'cursor-not-allowed bg-slate-50 text-slate-400'}`}
+                    title={isIntroductionWritingEnabled ? (isSelectedForWriting ? b('Remove from Writing Mode / 取消加入写作模式') : b('Add to Writing Mode / 加入写作模式')) : b('Introduction writing is not enabled / Introduction 写作功能尚未开通')}
                   >
                     <input
                       checked={isSelectedForWriting}
                       className="size-4"
+                      disabled={!isIntroductionWritingEnabled}
                       onChange={() => toggleWritingArticle(article)}
                       type="checkbox"
                     />
@@ -1134,7 +1157,7 @@ const HomePage = () => {
             {papers.map((paper) => {
               const paperKey = getWritingPaperKey(paper);
               const isSelectedForReading = paperKey === selectedPaperKey || (!selectedPaperKey && paper.filePath && selectedPaper?.filePath === paper.filePath);
-              const canSelectForWriting = Boolean(isLoggedIn && paper.filePath);
+              const canSelectForWriting = Boolean(isLoggedIn && isIntroductionWritingEnabled && paper.filePath);
               const isSelectedForWriting = canSelectForWriting && writingSelectedPaperKeys.includes(getWritingPaperKey(paper));
               const writingSelectControl = (
                 <label
