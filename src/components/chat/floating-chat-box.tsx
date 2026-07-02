@@ -19,6 +19,8 @@ interface FloatingChatBoxProps {
   initialSize?: { width: number; height: number };
   initialFontSize?: ChatFontSize;
   isAuthenticated?: boolean;
+  guestTokenAvailable?: number | null;
+  openRequested?: boolean;
   onLayoutChange?: (layout: { position: { x: number; y: number }; size: { width: number; height: number }; fontSize: ChatFontSize }) => void;
 }
 
@@ -475,7 +477,7 @@ const clampLayout = (position: { x: number; y: number }, size: { width: number; 
   };
 };
 
-export const FloatingChatBox = ({ paper = null, selectedText = null, financialContext = null, initialPosition, initialSize, initialFontSize = 'small', isAuthenticated = false, onLayoutChange }: FloatingChatBoxProps) => {
+export const FloatingChatBox = ({ paper = null, selectedText = null, financialContext = null, initialPosition, initialSize, initialFontSize = 'small', isAuthenticated = false, guestTokenAvailable = null, openRequested = false, onLayoutChange }: FloatingChatBoxProps) => {
   const { language } = useLanguage();
   const b = (value: string) => localizeBilingualText(value, language);
   const l = (en: string, zh: string) => language === 'zh' ? zh : en;
@@ -493,6 +495,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
   const [messages, setMessages] = useState<ChatMessage[]>(mockMessages);
   const [input, setInput] = useState('');
   const [pendingChatImage, setPendingChatImage] = useState<ChatImageAttachment | null>(null);
+  const [guestTokensRemaining, setGuestTokensRemaining] = useState<number | null>(guestTokenAvailable);
   const [position, setPosition] = useState(initialPosition ?? defaultPosition);
   const [size, setSize] = useState(initialSize ?? defaultSize);
   const [isDragging, setIsDragging] = useState(false);
@@ -575,14 +578,18 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
           ? [{
               id: 'guest-welcome',
               role: 'assistant',
-              content: '访客无需登录即可进行普通聊天，本 IP 地址共有 3,000 个免费 token。论文解读、审稿、写作和财务分析需要登录。',
+              content: `访客无需登录即可进行普通聊天，当前 IP 还剩 ${guestTokensRemaining?.toLocaleString() ?? '3,000'} 个免费 token。论文解读、审稿、写作和财务分析需要登录。`,
               contextLabel: 'Guest chat',
             }]
           : mockMessages,
     );
     setInput('');
     setPendingImageReading(null);
-  }, [isAuthenticated, isFinancialChat, paper]);
+  }, [guestTokensRemaining, isAuthenticated, isFinancialChat, paper]);
+
+  useEffect(() => {
+    setGuestTokensRemaining(guestTokenAvailable);
+  }, [guestTokenAvailable]);
 
   useEffect(() => {
     const updateViewportMode = () => {
@@ -631,6 +638,12 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
 
     return () => window.removeEventListener('scireader-open-chat', openChat);
   }, [isMobileViewport]);
+
+  useEffect(() => {
+    if (!openRequested) return;
+    if (isMobileViewport) setIsMobileChatExpanded(true);
+    else setIsDesktopChatCollapsed(false);
+  }, [isMobileViewport, openRequested]);
 
   useEffect(() => {
     if (!isMobilePortrait) setIsPortraitHintDismissed(false);
@@ -1741,6 +1754,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
             ? `Expensive reader${usageLabel}`
             : undefined;
 
+      if (result.guestTokenAccount) setGuestTokensRemaining(result.guestTokenAccount.tokenAvailable);
+
       setMessages((current) => current.map((message) => (message.id === loadingId ? { ...message, content: result.answer, contextLabel } : message)));
     } catch (error) {
       setMessages((current) =>
@@ -1834,7 +1849,9 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
             <p className="truncate text-[11px] text-muted-foreground">
               {isFinancialChat
                 ? `${financialContext?.selectedStock ? `${financialContext.selectedStock.name} ${financialContext.selectedStock.code}` : b('Enter analysis target / 请输入拟分析对象')} · ${financialContext?.materials.length ?? 0} ${l('materials', '个材料')} · 3x token`
-                : paper?.title ?? l('Ask without opening a paper', '未打开论文也可提问')}
+                : paper?.title ?? (!isAuthenticated && guestTokensRemaining !== null
+                  ? l(`Guest chat · ${guestTokensRemaining.toLocaleString()} tokens left`, `免登录对话 · 剩余 ${guestTokensRemaining.toLocaleString()} tokens`)
+                  : l('Ask without opening a paper', '未打开论文也可提问'))}
             </p>
           </div>
           <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1">
@@ -2139,6 +2156,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
           {!isFinancialChat ? <>
             <input
               accept="image/jpeg,image/png,image/gif,image/webp"
+              capture="environment"
               className="hidden"
               onChange={(event) => {
                 void selectChatImage(event.target.files?.[0]);
@@ -2149,17 +2167,17 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
             />
             <button
               aria-label={l('Attach image', '上传图片')}
-              className="flex size-11 shrink-0 items-center justify-center rounded-xl border bg-white text-primary transition hover:bg-primary/5 disabled:opacity-50"
+              className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border-2 border-primary/30 bg-white text-primary shadow-sm transition hover:border-primary/60 hover:bg-primary/5 disabled:opacity-50"
               disabled={isThinking}
               onClick={() => imageInputRef.current?.click()}
               title={l('Attach an image for AI analysis', '上传图片并发送给 AI 分析')}
               type="button"
             >
-              <ImagePlus className="size-5" />
+              <ImagePlus className="size-6" strokeWidth={2.25} />
             </button>
           </> : null}
           <button
-            className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
+            className="flex min-h-14 flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
             disabled={isThinking}
             onClick={() => void sendMessage()}
             type="button"

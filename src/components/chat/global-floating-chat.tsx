@@ -16,6 +16,8 @@ export const GlobalFloatingChat = () => {
   const { financialContext, paper, selectedText } = useFloatingChat();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
+  const [isGuestChatRequested, setIsGuestChatRequested] = useState(false);
+  const [guestTokenAvailable, setGuestTokenAvailable] = useState<number | null>(null);
   const [preferences, setPreferences] = useState<ViewerPreferences | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -40,6 +42,24 @@ export const GlobalFloatingChat = () => {
     };
 
     void loadSession();
+  }, []);
+
+  useEffect(() => {
+    const openGuestChat = async () => {
+      setIsGuestChatRequested(true);
+
+      try {
+        const response = await fetch('/api/reader-agent/guest-token-account');
+        const result = await response.json();
+        setGuestTokenAvailable(response.ok ? Number(result.guestTokenAccount?.tokenAvailable ?? 0) : null);
+      } catch {
+        setGuestTokenAvailable(null);
+      }
+    };
+
+    window.addEventListener('scireader-open-chat', openGuestChat);
+
+    return () => window.removeEventListener('scireader-open-chat', openGuestChat);
   }, []);
 
   const saveLayout = useCallback(
@@ -76,6 +96,7 @@ export const GlobalFloatingChat = () => {
     console.info('Global floating chat hidden: session loading and no paper context yet.');
     return null;
   }
+  if (!isAuthenticated && !paper && !financialContext?.active && !isGuestChatRequested) return null;
   console.info('Global floating chat rendering.', { paperId: paper?.id, isAuthenticated });
 
   return (
@@ -84,6 +105,8 @@ export const GlobalFloatingChat = () => {
       initialPosition={preferences?.chatPosition}
       initialSize={preferences?.chatSize}
       isAuthenticated={isAuthenticated}
+      guestTokenAvailable={guestTokenAvailable}
+      openRequested={isGuestChatRequested}
       financialContext={financialContext}
       onLayoutChange={saveLayout}
       paper={paper ?? undefined}

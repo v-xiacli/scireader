@@ -16,7 +16,7 @@ const copy = {
     headline: 'Deep understanding for physics papers and financial reports',
     intro: 'SCIReader goes beyond summarization. Uncover physics from first principles, interrogate the business logic behind financial reports, and keep exploring without the tiny daily token quotas common on free AI sites.',
     benefits: ['Reconstruct physical principles, assumptions, and causal chains', 'Connect financial figures to business drivers, risks, and management claims', 'Resolve precise questions through a few rounds of grounded dialogue', 'Escape restrictive daily token quotas at an extremely low usage cost'],
-    chips: ['Physics reasoning', 'Financial insight', 'Low-cost access', 'Generous token quota', 'No phone required'],
+    chips: ['Physics reasoning', 'Financial insight', 'Low-cost access', 'Generous token quota', 'No phone required, email registration only'],
     tokenOffer: 'Free account · 200,000 tokens', createTitle: 'Create your free account', loginTitle: 'Log in to SCIReader',
     accountHint: 'Bring a paper and help shape a research tool built for deep understanding.', password: 'Password (at least 8 characters)',
     code: '6-digit email code', sendCode: 'Send code', sending: 'Sending', create: 'Create account',
@@ -34,7 +34,7 @@ const copy = {
     login: '登录', signup: '免注册对话', badge: '科研优先的深度理解助手', headline: '深刻理解物理原理，也读透每一份财报',
     intro: 'SCIReader 不止生成摘要。它能从第一性原理拆解物理机制，追问财报背后的业务逻辑，还让你不再被常见免费 AI 网站短促的每日 token 配额打断。',
     benefits: ['还原物理原理、关键假设与完整因果链条', '把财务数字与业务驱动、风险和管理层判断相互印证', '通过几轮有原文依据的对话，精准解决具体困惑', '以极低使用成本，摆脱常见免费 AI 网站的每日 token 限制'],
-    chips: ['物理推理', '财报洞察', '低成本使用', '充足 token 配额', '无需手机号'],
+    chips: ['物理推理', '财报洞察', '低成本使用', '充足 token 配额', '无需手机号，仅使用邮箱注册'],
     tokenOffer: '免费账号 · 20 万 tokens', createTitle: '创建免费账号', loginTitle: '登录 SCIReader', accountHint: '带上一篇论文，一起打磨一款真正追求深度理解的科研工具。',
     password: '密码（至少 8 位）', code: '6 位邮箱验证码', sendCode: '发送验证码', sending: '发送中', create: '注册账号',
     noPhone: '无需手机号，仅用邮箱注册', noPhoneDetail: '无需手机验证、无需短信验证码、无需信用卡，填写邮箱即可开始使用。', already: '已有账号？', newHere: '还没有账号？',
@@ -196,7 +196,8 @@ const HomePage = () => {
               <button className="rounded-lg border border-[#dce2ec] bg-white px-3 py-2 sm:px-4" onClick={scrollToAccount} type="button">{t.account}</button>
               <button className="rounded-lg bg-[#0d8278] px-3 py-2 text-white sm:px-4" onClick={handleLogout} type="button">{t.logout}</button>
             </> : <>
-              <button className="rounded-lg border border-[#dce2ec] bg-white px-3 py-2 sm:px-4" onClick={() => selectMode('login')} type="button">{t.login}</button>
+              <button className="rounded-lg border border-[#dce2ec] bg-white px-2.5 py-2 sm:px-4" onClick={() => selectMode('signup')} type="button">{language === 'zh' ? '注册' : 'Sign up'}</button>
+              <button className="rounded-lg border border-[#dce2ec] bg-white px-2.5 py-2 sm:px-4" onClick={() => selectMode('login')} type="button">{t.login}</button>
               <button className="rounded-lg bg-[#0d8278] px-3 py-2 text-white sm:px-4" onClick={openGuestChat} type="button">{t.signup}</button>
             </>}
           </nav>

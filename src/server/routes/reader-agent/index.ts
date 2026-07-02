@@ -4520,6 +4520,9 @@ const startMissingWritingSummaryJobs = async (userId: string, request: z.infer<t
 };
 
 const app = new Hono()
+  .get('/guest-token-account', async (c) => {
+    return c.json({ guestTokenAccount: await getGuestTokenAccount(getGuestIpHash(c)) });
+  })
   .get('/history', async (c) => {
     const paperId = c.req.query('paperId');
     const title = c.req.query('title');
