@@ -23,6 +23,16 @@ body {
   font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
+html.guest-chat-scroll-lock,
+html.guest-chat-scroll-lock body {
+  overscroll-behavior: none;
+}
+
+html.guest-chat-scroll-lock .fixed[role="dialog"],
+html.guest-chat-scroll-lock aside.fixed {
+  overscroll-behavior: contain;
+}
+
 .landing-background {
   position: relative;
   isolation: isolate;

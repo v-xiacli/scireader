@@ -62,6 +62,35 @@ export const GlobalFloatingChat = () => {
     return () => window.removeEventListener('scireader-open-chat', openGuestChat);
   }, []);
 
+  useEffect(() => {
+    const shouldLockPage = isGuestChatRequested && !isAuthenticated && !paper && !financialContext?.active;
+    if (!shouldLockPage) return;
+
+    const scrollY = window.scrollY;
+    const previousBodyPosition = document.body.style.position;
+    const previousBodyTop = document.body.style.top;
+    const previousBodyWidth = document.body.style.width;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+
+    document.documentElement.classList.add('guest-chat-scroll-lock');
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = '100%';
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.documentElement.classList.remove('guest-chat-scroll-lock');
+      document.documentElement.style.overflow = previousHtmlOverflow;
+      document.body.style.position = previousBodyPosition;
+      document.body.style.top = previousBodyTop;
+      document.body.style.width = previousBodyWidth;
+      document.body.style.overflow = previousBodyOverflow;
+      window.scrollTo(0, scrollY);
+    };
+  }, [financialContext?.active, isAuthenticated, isGuestChatRequested, paper]);
+
   const saveLayout = useCallback(
     (layout: { position: { x: number; y: number }; size: { width: number; height: number }; fontSize?: 'xs' | 'small' | 'medium' | 'large' | 'xl' }) => {
       if (!isAuthenticated) return;

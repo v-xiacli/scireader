@@ -581,7 +581,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
           ? [{
               id: 'guest-welcome',
               role: 'assistant',
-              content: `访客无需登录即可进行普通聊天，当前 IP 还剩 ${guestTokensRemaining?.toLocaleString() ?? '3,000'} 个免费 token。论文解读、审稿、写作和财务分析需要登录。`,
+              content: '你可以问论文小助手任何问题，包括论文和非论文的，也可以直接上传照片。',
               contextLabel: 'Guest chat',
             }]
           : mockMessages,
@@ -593,6 +593,21 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
   useEffect(() => {
     setGuestTokensRemaining(guestTokenAvailable);
   }, [guestTokenAvailable]);
+
+  useEffect(() => {
+    if (!isGuestChat) return;
+
+    setMessages((current) => {
+      if (current.length !== 1 || !['assistant-welcome', 'guest-welcome'].includes(current[0].id)) return current;
+
+      return [{
+        id: 'guest-welcome',
+        role: 'assistant',
+        content: '你可以问论文小助手任何问题，包括论文和非论文的，也可以直接上传照片。',
+        contextLabel: 'Guest chat',
+      }];
+    });
+  }, [isGuestChat]);
 
   useEffect(() => {
     const updateViewportMode = () => {
