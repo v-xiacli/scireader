@@ -12,14 +12,14 @@ type TokenAccount = { tokenBalance: number; tokenUsed: number; tokenAvailable: n
 
 const copy = {
   en: {
-    login: 'Log in', signup: 'Join early access', badge: 'Research-first AI reading copilot',
+    login: 'Log in', signup: 'Chat without signup', badge: 'Research-first AI reading copilot',
     headline: 'Deep understanding for physics papers and financial reports',
     intro: 'SCIReader goes beyond summarization. Uncover physics from first principles, interrogate the business logic behind financial reports, and keep exploring without the tiny daily token quotas common on free AI sites.',
     benefits: ['Reconstruct physical principles, assumptions, and causal chains', 'Connect financial figures to business drivers, risks, and management claims', 'Resolve precise questions through a few rounds of grounded dialogue', 'Escape restrictive daily token quotas at an extremely low usage cost'],
     chips: ['Physics reasoning', 'Financial insight', 'Low-cost access', 'Generous token quota', 'No phone required'],
-    tokenOffer: 'Early access · 1,000,000 tokens free', createTitle: 'Join the early access group', loginTitle: 'Log in to SCIReader',
+    tokenOffer: 'Free account · 200,000 tokens', createTitle: 'Create your free account', loginTitle: 'Log in to SCIReader',
     accountHint: 'Bring a paper and help shape a research tool built for deep understanding.', password: 'Password (at least 8 characters)',
-    code: '6-digit email code', sendCode: 'Send code', sending: 'Sending', create: 'Join early access',
+    code: '6-digit email code', sendCode: 'Send code', sending: 'Sending', create: 'Create account',
     noPhone: 'No phone number required', noPhoneDetail: 'Register with your email only — no phone verification, no SMS code, and no credit card required.',
     already: 'Already have an account?', newHere: 'New to SCIReader?', welcome: 'Welcome back', account: 'My account', available: 'tokens available', logout: 'Log out',
     workspaceTitle: 'Two domains, one standard: deep understanding', workspaceHint: 'Research remains the lead experience, with equally serious reasoning for financial reports.', included: 'Included on the free plan',
@@ -31,12 +31,12 @@ const copy = {
     codeSent: 'Verification code sent. Please check your email.', codeFailed: 'Could not send the verification code.', actionFailed: 'Something went wrong. Please try again.', signupSuccess: 'Account created successfully.', loginSuccess: 'Logged in successfully.',
   },
   zh: {
-    login: '登录', signup: '加入早期体验', badge: '科研优先的深度理解助手', headline: '深刻理解物理原理，也读透每一份财报',
+    login: '登录', signup: '免注册对话', badge: '科研优先的深度理解助手', headline: '深刻理解物理原理，也读透每一份财报',
     intro: 'SCIReader 不止生成摘要。它能从第一性原理拆解物理机制，追问财报背后的业务逻辑，还让你不再被常见免费 AI 网站短促的每日 token 配额打断。',
     benefits: ['还原物理原理、关键假设与完整因果链条', '把财务数字与业务驱动、风险和管理层判断相互印证', '通过几轮有原文依据的对话，精准解决具体困惑', '以极低使用成本，摆脱常见免费 AI 网站的每日 token 限制'],
     chips: ['物理推理', '财报洞察', '低成本使用', '充足 token 配额', '无需手机号'],
-    tokenOffer: '早期体验 · 100 万 tokens 免费', createTitle: '加入早期体验用户', loginTitle: '登录 SCIReader', accountHint: '带上一篇论文，一起打磨一款真正追求深度理解的科研工具。',
-    password: '密码（至少 8 位）', code: '6 位邮箱验证码', sendCode: '发送验证码', sending: '发送中', create: '加入早期体验',
+    tokenOffer: '免费账号 · 20 万 tokens', createTitle: '创建免费账号', loginTitle: '登录 SCIReader', accountHint: '带上一篇论文，一起打磨一款真正追求深度理解的科研工具。',
+    password: '密码（至少 8 位）', code: '6 位邮箱验证码', sendCode: '发送验证码', sending: '发送中', create: '注册账号',
     noPhone: '无需手机号，仅用邮箱注册', noPhoneDetail: '无需手机验证、无需短信验证码、无需信用卡，填写邮箱即可开始使用。', already: '已有账号？', newHere: '还没有账号？',
     welcome: '欢迎回来', account: '我的账户', available: '可用 tokens', logout: '退出登录', workspaceTitle: '两个领域，同一种标准：深度理解', workspaceHint: '科研体验依然优先，同时以同样严谨的方式深入解读财务报告。', included: '免费套餐已包含',
     workspaces: [
@@ -182,6 +182,7 @@ const HomePage = () => {
   };
   const scrollToAccount = () => document.getElementById('account')?.scrollIntoView({ behavior: 'smooth' });
   const selectMode = (mode: AuthMode) => { setAuthMode(mode); scrollToAccount(); };
+  const openGuestChat = () => window.dispatchEvent(new Event('scireader-open-chat'));
 
   return (
     <main className="landing-background min-h-screen text-[#091329]">
@@ -196,7 +197,7 @@ const HomePage = () => {
               <button className="rounded-lg bg-[#0d8278] px-3 py-2 text-white sm:px-4" onClick={handleLogout} type="button">{t.logout}</button>
             </> : <>
               <button className="rounded-lg border border-[#dce2ec] bg-white px-3 py-2 sm:px-4" onClick={() => selectMode('login')} type="button">{t.login}</button>
-              <button className="rounded-lg bg-[#0d8278] px-3 py-2 text-white sm:px-4" onClick={() => selectMode('signup')} type="button">{t.signup}</button>
+              <button className="rounded-lg bg-[#0d8278] px-3 py-2 text-white sm:px-4" onClick={openGuestChat} type="button">{t.signup}</button>
             </>}
           </nav>
         </header>
@@ -226,7 +227,6 @@ const HomePage = () => {
         </section>
 
         <section className="pb-9 sm:pb-16"><h2 className="text-[21px] font-black leading-tight tracking-tight sm:text-2xl">{t.workspaceTitle}</h2><p className="mt-2 text-[13px] leading-5 text-[#7b88a0] sm:text-sm">{t.workspaceHint}</p><div className="mt-4 grid gap-3 sm:mt-6 sm:gap-5 md:grid-cols-2">{t.workspaces.map((workspace) => { const Icon = workspace.icon; return <Link className="group rounded-[16px] border border-[#dde3ec] bg-white p-4 transition hover:-translate-y-0.5 hover:border-[#9ccbc7] hover:shadow-lg sm:rounded-[18px] sm:p-8" href={workspace.href} key={workspace.href}><span className="flex size-10 items-center justify-center rounded-xl bg-[#e1efee] text-[#0d8278] sm:size-12"><Icon className="size-5 sm:size-6" /></span><h3 className="mt-3 text-lg font-black sm:mt-5 sm:text-xl">{workspace.title}</h3><p className="mt-2 text-[13px] leading-5 text-[#58677f] sm:mt-3 sm:min-h-12 sm:text-sm sm:leading-6">{workspace.description}</p><span className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-[#b9d9d6] bg-[#f4faf9] px-3 py-1.5 text-xs font-bold text-[#08746c] sm:mt-6"><Check className="size-3.5" />{t.included}</span></Link>; })}</div></section>
-        <section className="flex flex-col gap-4 rounded-[18px] bg-[#0c6e66] px-5 py-6 text-white sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:rounded-[22px] sm:px-11 sm:py-9"><div><h2 className="text-[21px] font-black leading-tight sm:text-2xl">{t.ctaTitle}</h2><p className="mt-2 max-w-[520px] text-[13px] leading-5 text-[#d7eeeb] sm:text-sm">{t.ctaText}</p></div><button className="inline-flex w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-bold text-[#086b64] sm:w-auto" onClick={() => selectMode('signup')} type="button">{t.ctaButton}<ArrowRight className="size-4" /></button></section>
       </div>
     </main>
   );

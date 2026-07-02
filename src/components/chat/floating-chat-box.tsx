@@ -583,6 +583,17 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
   }, []);
 
   useEffect(() => {
+    const openChat = () => {
+      if (isMobileViewport) setIsMobileChatExpanded(true);
+      else setIsDesktopChatCollapsed(false);
+    };
+
+    window.addEventListener('scireader-open-chat', openChat);
+
+    return () => window.removeEventListener('scireader-open-chat', openChat);
+  }, [isMobileViewport]);
+
+  useEffect(() => {
     if (!isMobilePortrait) setIsPortraitHintDismissed(false);
   }, [isMobilePortrait]);
 
