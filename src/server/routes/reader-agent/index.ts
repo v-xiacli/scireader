@@ -172,6 +172,11 @@ const readerRequestSchema = z.object({
   modePrompt: z.string().optional(),
   detailedReport: z.boolean().optional(),
   reviewTargetJournal: z.string().trim().max(200).optional(),
+  image: z.object({
+    name: z.string().trim().max(200).optional(),
+    mediaType: z.enum(['image/jpeg', 'image/png', 'image/gif', 'image/webp']),
+    data: z.string().min(1).max(8_000_000),
+  }).optional(),
   conversationHistory: z
     .array(
       z.object({
@@ -2042,6 +2047,18 @@ const askClaude = async (request: z.infer<typeof readerRequestSchema>, forcedMod
       });
     }
 
+    if (request.image) {
+      content.push({ type: 'text', text: `The user attached an image${request.image.name ? ` named ${request.image.name}` : ''}. Inspect it directly and use it to answer the current request.` });
+      content.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: request.image.mediaType,
+          data: request.image.data,
+        },
+      });
+    }
+
     if (finalPromptBlock) content.push(finalPromptBlock);
 
     const shouldAttachPdfDocument = Boolean(tempPdf && !extractedPdf?.text.trim() && pageImages.length === 0);
@@ -2123,7 +2140,22 @@ const askGeneralChat = async (request: z.infer<typeof readerRequestSchema>, maxT
           role: message.role,
           content: message.content.slice(0, 4000),
         })),
-      { role: 'user', content: request.prompt },
+      {
+        role: 'user',
+        content: request.image
+          ? [
+              {
+                type: 'image',
+                source: {
+                  type: 'base64',
+                  media_type: request.image.mediaType,
+                  data: request.image.data,
+                },
+              },
+              { type: 'text', text: request.prompt },
+            ]
+          : request.prompt,
+      },
     ],
   });
 

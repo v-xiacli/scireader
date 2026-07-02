@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { CornerDownLeft, Download, Loader2, Maximize2, Minimize2, Type, X } from 'lucide-react';
+import { CornerDownLeft, Download, ImagePlus, Loader2, Maximize2, Minimize2, Type, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
 import rehypeKatex from 'rehype-katex';
 import ReactMarkdown from 'react-markdown';
@@ -31,7 +31,44 @@ const mobileCollapsedHeight = 58;
 
 type ResizeHandle = 'top' | 'right' | 'bottom' | 'left' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 type ChatFontSize = 'xs' | 'small' | 'medium' | 'large' | 'xl';
+type ChatImageAttachment = { name: string; mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'; data: string; preview: string };
 type ConversationTurn = Pick<ChatMessage, 'role' | 'content'>;
+
+const prepareChatImage = async (file: File): Promise<ChatImageAttachment> => {
+  const supportedTypes = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+  if (!supportedTypes.has(file.type)) throw new Error('Please choose a JPEG, PNG, GIF, or WebP image. / 请选择 JPEG、PNG、GIF 或 WebP 图片。');
+  if (file.size > 15 * 1024 * 1024) throw new Error('The image must be smaller than 15 MB. / 图片不能超过 15 MB。');
+
+  const source = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('Could not read the image. / 无法读取图片。'));
+    reader.readAsDataURL(file);
+  });
+
+  if (file.size <= 4 * 1024 * 1024) {
+    return { name: file.name, mediaType: file.type as ChatImageAttachment['mediaType'], data: source.split(',')[1] ?? '', preview: source };
+  }
+
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const element = new Image();
+    element.onload = () => resolve(element);
+    element.onerror = () => reject(new Error('Could not decode the image. / 无法解析图片。'));
+    element.src = source;
+  });
+  const scale = Math.min(1, 1600 / Math.max(image.naturalWidth, image.naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Could not prepare the image. / 无法处理图片。');
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const preview = canvas.toDataURL('image/jpeg', 0.84);
+
+  return { name: file.name, mediaType: 'image/jpeg', data: preview.split(',')[1] ?? '', preview };
+};
 type StoredHistoryTurn = ConversationTurn & {
   createdAt: string;
   model?: string;
@@ -452,8 +489,10 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
   const appliedFinancialHistoryKeyRef = useRef('');
   const sizeRef = useRef(initialSize ?? defaultSize);
   const messageBodyRefs = useRef(new Map<string, HTMLDivElement>());
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>(mockMessages);
   const [input, setInput] = useState('');
+  const [pendingChatImage, setPendingChatImage] = useState<ChatImageAttachment | null>(null);
   const [position, setPosition] = useState(initialPosition ?? defaultPosition);
   const [size, setSize] = useState(initialSize ?? defaultSize);
   const [isDragging, setIsDragging] = useState(false);
@@ -700,6 +739,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
           pageNumbers,
           paperContextSummary,
           conversationHistory: buildConversationHistory(messages),
+          image: pendingChatImage ? { name: pendingChatImage.name, mediaType: pendingChatImage.mediaType, data: pendingChatImage.data } : undefined,
         }),
       });
       const result = await response.json();
@@ -708,7 +748,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
 
       return result as { answer: string; usage?: { inputTokens?: number; outputTokens?: number }; routedBy?: string; cached?: boolean; cachePath?: string; guestTokenAccount?: { tokenAvailable: number } };
     },
-    [messages, paperId, paperPdfUrl, paperTitle, paperContextSummary, readingMode, readingModePrompt, selectedText, paper?.authors, paper?.journal, paper?.year],
+    [messages, paperId, paperPdfUrl, paperTitle, paperContextSummary, readingMode, readingModePrompt, selectedText, paper?.authors, paper?.journal, paper?.year, pendingChatImage],
   );
 
   const askFinancialAgent = useCallback(
@@ -1477,8 +1517,26 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
     }
   };
 
+  const selectChatImage = async (file?: File) => {
+    if (!file) return;
+
+    try {
+      setPendingChatImage(await prepareChatImage(file));
+    } catch (error) {
+      setMessages((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: error instanceof Error ? error.message : 'Could not attach the image. / 无法添加图片。',
+          contextLabel: 'Image attachment',
+        },
+      ]);
+    }
+  };
+
   const sendMessage = async (overrideInput?: string) => {
-    const trimmed = (overrideInput ?? input).trim();
+    const trimmed = (overrideInput ?? input).trim() || (pendingChatImage ? l('Please analyze this image.', '请分析这张图片。') : '');
     if (!trimmed || isThinking) return;
 
     if (!isFinancialChat && readingMode === 'reviewer' && pendingReviewerTargetKey === summaryRunKey) {
@@ -1560,6 +1618,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
       id: crypto.randomUUID(),
       role: 'user',
       content: trimmed,
+      imageBase64: pendingChatImage?.preview,
+      imageAlt: pendingChatImage?.name,
       contextLabel: pendingImageReading && (isImageReadingConfirmation(trimmed) || isImageReadingCancellation(trimmed))
         ? 'Confirm image reading'
         : imagePageRange
@@ -1667,6 +1727,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
       { id: loadingId, role: 'assistant', content: 'Analyzing...' },
     ]);
     setInput('');
+    setPendingChatImage(null);
     setIsThinking(true);
 
     try {
@@ -1777,7 +1838,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
             </p>
           </div>
           <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1">
-            {exportableMessages.length && !isMobileViewport ? (
+            {exportableMessages.length ? (
               <button
                 aria-label={isExportMode ? b('Exit export selection / 退出导出选择') : b('Select answers to export PDF / 选择回答导出 PDF')}
                 className={`${isExportMode ? 'border-primary bg-primary/10 text-primary' : 'border text-slate-700 hover:bg-slate-50'} inline-flex h-9 items-center justify-center rounded-lg text-xs font-medium ${isMobileViewport ? 'w-9' : 'gap-1 px-2 max-[520px]:w-9 max-[520px]:px-0'}`}
@@ -1863,8 +1924,8 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
       ) : null}
 
       {isExportMode && !isChatCollapsed ? (
-        <div className="flex items-center gap-2 border-b bg-slate-50 px-3 py-2 text-xs">
-          <span className="text-slate-600">{language === 'zh' ? `已选 ${selectedExportCount} 条回答` : `Selected ${selectedExportCount} answers`}</span>
+        <div className="flex flex-wrap items-center gap-2 border-b bg-slate-50 px-3 py-2 text-xs">
+          <span className="text-slate-600 max-sm:w-full">{language === 'zh' ? `已选 ${selectedExportCount} 条回答` : `Selected ${selectedExportCount} answers`}</span>
           <button
             className="ml-auto rounded-lg border px-2.5 py-1.5 font-medium text-slate-700 hover:bg-white"
             onClick={() => setSelectedExportIds(new Set(exportableMessages.map((message) => message.id)))}
@@ -2047,6 +2108,23 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
             </button>
           </div>
         ) : null}
+        {pendingChatImage && !isFinancialChat ? (
+          <div className="mb-2 flex items-center gap-3 rounded-xl border bg-slate-50 p-2">
+            <img alt={pendingChatImage.name} className="size-14 shrink-0 rounded-lg object-cover" src={pendingChatImage.preview} />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-medium text-slate-700">{pendingChatImage.name}</p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">{l('Image will be sent with this message', '图片将随本轮消息发送')}</p>
+            </div>
+            <button
+              aria-label={l('Remove attached image', '移除已选图片')}
+              className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-white text-slate-500 hover:text-red-600"
+              onClick={() => setPendingChatImage(null)}
+              type="button"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+        ) : null}
         <textarea
           className={`max-h-48 min-h-20 w-full resize-y rounded-xl border bg-slate-50 p-2.5 outline-none focus:border-primary ${fontSizeStyle.textarea}`}
           disabled={isThinking}
@@ -2057,15 +2135,39 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
           placeholder={isFinancialChat ? l('Ask a financial-analysis question, e.g. are there unusual short-term flows in the order book and report?', '输入财务分析问题，例如：结合盘口和财报，短线资金是否有异动？') : l('Ask about the paper, selected text, methods, or citations...', '询问论文、选中文本、方法或引用依据...')}
           value={input}
         />
-        <button
-          className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
-          disabled={isThinking}
-          onClick={() => void sendMessage()}
-          type="button"
-        >
-          {isThinking ? <Loader2 className="size-4 animate-spin" /> : <CornerDownLeft className="size-4" />}
-          {isThinking ? (isFinancialChat ? l('Financial analyst is working...', '财务分析助手正在处理...') : l('Reader agent is working...', '论文阅读助手正在处理...')) : isFinancialChat ? l('Send to financial analyst', '发送给财务分析助手') : l('Send to reader agent', '发送给论文阅读助手')}
-        </button>
+        <div className="mt-2 flex items-stretch gap-2">
+          {!isFinancialChat ? <>
+            <input
+              accept="image/jpeg,image/png,image/gif,image/webp"
+              className="hidden"
+              onChange={(event) => {
+                void selectChatImage(event.target.files?.[0]);
+                event.target.value = '';
+              }}
+              ref={imageInputRef}
+              type="file"
+            />
+            <button
+              aria-label={l('Attach image', '上传图片')}
+              className="flex size-11 shrink-0 items-center justify-center rounded-xl border bg-white text-primary transition hover:bg-primary/5 disabled:opacity-50"
+              disabled={isThinking}
+              onClick={() => imageInputRef.current?.click()}
+              title={l('Attach an image for AI analysis', '上传图片并发送给 AI 分析')}
+              type="button"
+            >
+              <ImagePlus className="size-5" />
+            </button>
+          </> : null}
+          <button
+            className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
+            disabled={isThinking}
+            onClick={() => void sendMessage()}
+            type="button"
+          >
+            {isThinking ? <Loader2 className="size-4 animate-spin" /> : <CornerDownLeft className="size-4" />}
+            {isThinking ? (isFinancialChat ? l('Financial analyst is working...', '财务分析助手正在处理...') : l('Reader agent is working...', '论文阅读助手正在处理...')) : isFinancialChat ? l('Send to financial analyst', '发送给财务分析助手') : l('Send to reader agent', '发送给论文阅读助手')}
+          </button>
+        </div>
       </footer>
       {!isMobileViewport && !isDesktopChatCollapsed && (
         [
