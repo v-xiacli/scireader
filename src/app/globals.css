@@ -299,4 +299,243 @@ html.guest-chat-scroll-lock aside.fixed {
   .financial-token-chip {
     width: 100%;
   }
+
+  .ios-home {
+    color: #fff;
+    background: linear-gradient(165deg, #6fbfa9 0%, #4aa38d 35%, #2e8672 70%, #1d6a5b 100%);
+    background-image:
+      radial-gradient(circle at 110% 3%, rgba(255,255,255,.5), transparent 17rem),
+      radial-gradient(circle at -20% 28%, rgba(4,72,58,.42), transparent 19rem),
+      linear-gradient(165deg, #6fbfa9 0%, #4aa38d 35%, #2e8672 70%, #1d6a5b 100%);
+  }
+
+  .ios-home .science-water-ripples {
+    display: none;
+  }
+
+  .ios-home-shell {
+    max-width: 430px;
+    padding: 0 0 5rem;
+  }
+
+  .ios-home-header {
+    position: sticky;
+    z-index: 30;
+    top: 0;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255,255,255,.34);
+    color: #fff;
+    background: rgba(255,255,255,.16);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.4);
+    -webkit-backdrop-filter: blur(22px) saturate(170%);
+    backdrop-filter: blur(22px) saturate(170%);
+  }
+
+  .ios-home-header > a > span:first-child {
+    border: 1px solid rgba(255,255,255,.5);
+    color: #fff;
+    background: linear-gradient(145deg, rgba(255,255,255,.4), rgba(255,255,255,.12));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.55);
+  }
+
+  .ios-home-header nav > button {
+    border-color: rgba(255,255,255,.42);
+    color: #fff;
+    background: rgba(255,255,255,.18);
+    border-radius: 999px;
+    font-size: 13px;
+  }
+
+  .ios-home-header .ios-mobile-hide-register {
+    display: none;
+  }
+
+  .ios-home-header .ios-mobile-guest-nav {
+    display: inline-flex;
+    border-color: #fff;
+    color: #0b6e5a;
+    background: #fff;
+    box-shadow: 0 4px 14px rgba(9,80,65,.28);
+  }
+
+  .ios-home-content {
+    display: block;
+    padding: 0;
+  }
+
+  .ios-hero-copy {
+    padding: 26px 16px 0;
+  }
+
+  .ios-hero-badge {
+    border: 1px solid rgba(255,255,255,.42);
+    color: #fff;
+    background: rgba(255,255,255,.2);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.45);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+  }
+
+  .ios-hero-title {
+    margin-top: 16px;
+    color: #fff;
+    font-size: 34px;
+    line-height: 1.2;
+    letter-spacing: -.025em;
+    text-shadow: 0 2px 12px rgba(8,60,50,.25);
+  }
+
+  .ios-hero-intro {
+    margin-top: 12px;
+    color: rgba(255,255,255,.88);
+    font-size: 15px;
+    line-height: 1.62;
+  }
+
+  .ios-feature-list {
+    margin-top: 18px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,.42);
+    border-radius: 22px;
+    color: #fff;
+    background: rgba(255,255,255,.17);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 12px 34px rgba(8,60,50,.18);
+    -webkit-backdrop-filter: blur(22px) saturate(160%);
+    backdrop-filter: blur(22px) saturate(160%);
+  }
+
+  .ios-feature-list > li {
+    gap: 12px;
+    padding: 13px 15px;
+    border-bottom: 1px solid rgba(255,255,255,.23);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .ios-feature-list > li:last-child {
+    border-bottom: 0;
+  }
+
+  .ios-feature-list > li > span {
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    background: rgba(255,255,255,.92);
+  }
+
+  .ios-mobile-guest-cta {
+    position: relative;
+    display: flex;
+    margin-top: 16px;
+    padding: 18px;
+    border: 1px solid rgba(255,255,255,.9);
+    border-radius: 22px;
+    color: #0b6e5a;
+    background: rgba(255,255,255,.93);
+    box-shadow: 0 16px 40px rgba(8,60,50,.3);
+  }
+
+  .ios-chip-list {
+    margin-top: 14px;
+    gap: 8px;
+  }
+
+  .ios-chip-list > span {
+    width: auto !important;
+    padding: 7px 12px !important;
+    border: 1px solid rgba(255,255,255,.42) !important;
+    border-radius: 999px !important;
+    color: #fff !important;
+    background: rgba(255,255,255,.17) !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.38) !important;
+  }
+
+  .ios-chip-list > span:last-child {
+    display: none;
+  }
+
+  .ios-account-card {
+    margin: 28px 16px 0;
+    padding: 18px;
+    border: 1px solid rgba(255,255,255,.45);
+    border-radius: 24px;
+    color: #fff;
+    background: rgba(255,255,255,.17);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 14px 40px rgba(8,60,50,.22);
+    -webkit-backdrop-filter: blur(22px) saturate(170%);
+    backdrop-filter: blur(22px) saturate(170%);
+  }
+
+  .ios-account-card input {
+    border-color: rgba(255,255,255,.38);
+    color: #fff;
+    background: rgba(255,255,255,.12);
+    font-size: 16px;
+  }
+
+  .ios-account-card input::placeholder {
+    color: rgba(255,255,255,.63);
+  }
+
+  .ios-account-card .text-\[\#8290a8\],
+  .ios-account-card .text-\[\#71809b\] {
+    color: rgba(255,255,255,.8);
+  }
+
+  .ios-account-card .bg-\[\#dfeeed\] {
+    border: 1px solid rgba(255,255,255,.35);
+    color: #fff;
+    background: rgba(255,255,255,.18);
+  }
+
+  .ios-account-card button.bg-\[\#0d8278\] {
+    border: 1px solid #fff;
+    color: #0b6e5a;
+    background: #fff;
+    box-shadow: 0 10px 26px rgba(8,60,50,.25);
+  }
+
+  .ios-account-guest-cta {
+    display: none;
+  }
+
+  .ios-mobile-email-note {
+    display: flex;
+    margin-top: 16px;
+    padding: 14px;
+    border: 1px solid rgba(255,255,255,.38);
+    border-radius: 16px;
+    background: rgba(255,255,255,.16);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.4);
+  }
+
+  .ios-account-card > button:last-child {
+    border-color: rgba(255,255,255,.42);
+    color: #fff;
+    background: rgba(255,255,255,.18);
+  }
+
+  .ios-workspaces {
+    padding: 34px 16px 44px;
+    color: #fff;
+  }
+
+  .ios-workspaces > p {
+    color: rgba(255,255,255,.82);
+  }
+
+  .ios-workspace-card {
+    border-color: rgba(255,255,255,.43);
+    color: #fff;
+    background: rgba(255,255,255,.17);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 12px 34px rgba(8,60,50,.2);
+    -webkit-backdrop-filter: blur(22px) saturate(165%);
+    backdrop-filter: blur(22px) saturate(165%);
+  }
+
+  .ios-workspace-card > p {
+    color: rgba(255,255,255,.82);
+  }
 }

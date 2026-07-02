@@ -505,8 +505,6 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
   const [mobileViewportRect, setMobileViewportRect] = useState({ width: 390, height: 720, offsetLeft: 0, offsetTop: 0 });
   const [isMobileChatExpanded, setIsMobileChatExpanded] = useState(false);
   const [isDesktopChatCollapsed, setIsDesktopChatCollapsed] = useState(false);
-  const [isMobilePortrait, setIsMobilePortrait] = useState(false);
-  const [isPortraitHintDismissed, setIsPortraitHintDismissed] = useState(false);
   const [isExportMode, setIsExportMode] = useState(false);
   const [selectedExportIds, setSelectedExportIds] = useState<Set<string>>(() => new Set());
   const [chatFontSize, setChatFontSize] = useState<ChatFontSize>(initialFontSize);
@@ -629,7 +627,6 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
           : nextRect,
       );
       setIsMobileViewport(nextIsMobileViewport);
-      setIsMobilePortrait(nextIsMobileViewport && nextRect.height > nextRect.width);
     };
 
     updateViewportMode();
@@ -662,10 +659,6 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
     if (isMobileViewport) setIsMobileChatExpanded(true);
     else setIsDesktopChatCollapsed(false);
   }, [isMobileViewport, openRequested]);
-
-  useEffect(() => {
-    if (!isMobilePortrait) setIsPortraitHintDismissed(false);
-  }, [isMobilePortrait]);
 
   useEffect(() => {
     setSelectedExportIds((current) => {
@@ -1943,20 +1936,6 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
           </div>
         </div>
       </header>
-
-      {isMobilePortrait && !isPortraitHintDismissed && !isChatCollapsed ? (
-        <div className="absolute inset-x-3 top-16 z-30 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 shadow-lg">
-          <p className="font-semibold">{b('Landscape Recommended / 建议横屏阅读')}</p>
-          <p className="mt-1 text-xs leading-5 text-amber-800">{b('Portrait mode is too narrow on mobile; landscape works better for reading PDFs and opening chat side by side. / 手机竖屏空间太窄，横屏更适合一边看 PDF、一边展开聊天。')}</p>
-          <button
-            className="mt-2 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white"
-            onClick={() => setIsPortraitHintDismissed(true)}
-            type="button"
-          >
-            {b('Continue Portrait / 继续竖屏')}
-          </button>
-        </div>
-      ) : null}
 
       {isExportMode && !isChatCollapsed ? (
         <div className="flex flex-wrap items-center gap-2 border-b bg-slate-50 px-3 py-2 text-xs">
