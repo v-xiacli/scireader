@@ -76,11 +76,6 @@ export const GlobalFloatingChat = () => {
     console.info('Global floating chat hidden: session loading and no paper context yet.');
     return null;
   }
-  if (!isAuthenticated && !paper && !financialContext?.active) {
-    console.info('Global floating chat hidden: not authenticated and no paper context.');
-    return null;
-  }
-
   console.info('Global floating chat rendering.', { paperId: paper?.id, isAuthenticated });
 
   return (
@@ -88,6 +83,7 @@ export const GlobalFloatingChat = () => {
       initialFontSize={preferences?.chatFontSize}
       initialPosition={preferences?.chatPosition}
       initialSize={preferences?.chatSize}
+      isAuthenticated={isAuthenticated}
       financialContext={financialContext}
       onLayoutChange={saveLayout}
       paper={paper ?? undefined}

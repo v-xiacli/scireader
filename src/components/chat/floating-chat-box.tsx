@@ -18,6 +18,7 @@ interface FloatingChatBoxProps {
   initialPosition?: { x: number; y: number };
   initialSize?: { width: number; height: number };
   initialFontSize?: ChatFontSize;
+  isAuthenticated?: boolean;
   onLayoutChange?: (layout: { position: { x: number; y: number }; size: { width: number; height: number }; fontSize: ChatFontSize }) => void;
 }
 
@@ -437,7 +438,7 @@ const clampLayout = (position: { x: number; y: number }, size: { width: number; 
   };
 };
 
-export const FloatingChatBox = ({ paper = null, selectedText = null, financialContext = null, initialPosition, initialSize, initialFontSize = 'small', onLayoutChange }: FloatingChatBoxProps) => {
+export const FloatingChatBox = ({ paper = null, selectedText = null, financialContext = null, initialPosition, initialSize, initialFontSize = 'small', isAuthenticated = false, onLayoutChange }: FloatingChatBoxProps) => {
   const { language } = useLanguage();
   const b = (value: string) => localizeBilingualText(value, language);
   const l = (en: string, zh: string) => language === 'zh' ? zh : en;
@@ -447,7 +448,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
   const appliedInitialPositionKeyRef = useRef('');
   const appliedInitialSizeKeyRef = useRef('');
   const appliedInitialFontSizeRef = useRef<ChatFontSize | null>(null);
-  const appliedChatModeRef = useRef<'financial' | 'standard' | null>(null);
+  const appliedChatModeRef = useRef<'financial' | 'standard' | 'guest' | null>(null);
   const appliedFinancialHistoryKeyRef = useRef('');
   const sizeRef = useRef(initialSize ?? defaultSize);
   const messageBodyRefs = useRef(new Map<string, HTMLDivElement>());
@@ -516,7 +517,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
   }, [size]);
 
   useEffect(() => {
-    const nextMode = isFinancialChat ? 'financial' : 'standard';
+    const nextMode = isFinancialChat ? 'financial' : !isAuthenticated && !paper ? 'guest' : 'standard';
     if (appliedChatModeRef.current === nextMode) return;
     appliedChatModeRef.current = nextMode;
     appliedFinancialHistoryKeyRef.current = '';
@@ -531,11 +532,18 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
               contextLabel: 'Financial analysis',
             },
           ]
-        : mockMessages,
+        : !isAuthenticated && !paper
+          ? [{
+              id: 'guest-welcome',
+              role: 'assistant',
+              content: '访客无需登录即可进行普通聊天，本 IP 地址共有 3,000 个免费 token。论文解读、审稿、写作和财务分析需要登录。',
+              contextLabel: 'Guest chat',
+            }]
+          : mockMessages,
     );
     setInput('');
     setPendingImageReading(null);
-  }, [isFinancialChat]);
+  }, [isAuthenticated, isFinancialChat, paper]);
 
   useEffect(() => {
     const updateViewportMode = () => {
@@ -687,7 +695,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
 
       if (!response.ok) throw new Error(result.message ?? result.error ?? 'Reader agent failed.');
 
-      return result as { answer: string; usage?: { inputTokens?: number; outputTokens?: number }; routedBy?: string; cached?: boolean; cachePath?: string };
+      return result as { answer: string; usage?: { inputTokens?: number; outputTokens?: number }; routedBy?: string; cached?: boolean; cachePath?: string; guestTokenAccount?: { tokenAvailable: number } };
     },
     [messages, paperId, paperPdfUrl, paperTitle, paperContextSummary, readingMode, readingModePrompt, selectedText, paper?.authors, paper?.journal, paper?.year],
   );
@@ -1653,7 +1661,13 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
     try {
       const result = await askReaderAgent(trimmed, selectedText ? 'selected-text' : 'whole-paper');
       const usageLabel = result.usage?.inputTokens ? ` · ${result.usage.inputTokens.toLocaleString()} in / ${(result.usage.outputTokens ?? 0).toLocaleString()} out` : '';
-      const contextLabel = result.routedBy === 'cheap-context' ? `Cheap context${usageLabel}` : result.routedBy === 'expensive-reader' ? `Expensive reader${usageLabel}` : undefined;
+      const contextLabel = result.guestTokenAccount
+        ? `Guest chat · ${result.guestTokenAccount.tokenAvailable.toLocaleString()} tokens remaining`
+        : result.routedBy === 'cheap-context'
+          ? `Cheap context${usageLabel}`
+          : result.routedBy === 'expensive-reader'
+            ? `Expensive reader${usageLabel}`
+            : undefined;
 
       setMessages((current) => current.map((message) => (message.id === loadingId ? { ...message, content: result.answer, contextLabel } : message)));
     } catch (error) {

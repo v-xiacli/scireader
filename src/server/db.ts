@@ -4,6 +4,7 @@ let client: ReturnType<typeof neon> | null = null;
 let initialized = false;
 
 export const DEFAULT_TOKEN_BALANCE = 200_000;
+export const DEFAULT_GUEST_TOKEN_BALANCE = 3_000;
 
 export const getSql = () => {
   const databaseUrl = process.env.DATABASE_URL?.trim();
@@ -103,6 +104,15 @@ export const ensureAuthTables = async () => {
 
   await getSql()`CREATE INDEX IF NOT EXISTS financial_analysis_reports_user_created_idx ON financial_analysis_reports (user_id, created_at DESC)`;
 
+  await getSql()`
+    CREATE TABLE IF NOT EXISTS guest_token_usage (
+      ip_hash TEXT PRIMARY KEY,
+      token_used BIGINT NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+
   initialized = true;
 };
 
@@ -162,6 +172,45 @@ export const getUserTokenAccount = async (userId: string) => {
     tokenBalance: balance,
     tokenUsed: used,
     tokenAvailable: balance - used,
+  };
+};
+
+export const getGuestTokenAccount = async (ipHash: string) => {
+  await ensureAuthTables();
+
+  const rows = (await getSql()`
+    SELECT token_used
+    FROM guest_token_usage
+    WHERE ip_hash = ${ipHash}
+    LIMIT 1
+  `) as Array<{ token_used: string | number }>;
+  const used = Math.max(0, Number(rows[0]?.token_used ?? 0));
+
+  return {
+    tokenBalance: DEFAULT_GUEST_TOKEN_BALANCE,
+    tokenUsed: used,
+    tokenAvailable: Math.max(0, DEFAULT_GUEST_TOKEN_BALANCE - used),
+  };
+};
+
+export const recordGuestTokenUsage = async (ipHash: string, billableTokens: number) => {
+  await ensureAuthTables();
+
+  const amount = Math.max(0, Math.ceil(billableTokens));
+  const rows = (await getSql()`
+    INSERT INTO guest_token_usage (ip_hash, token_used)
+    VALUES (${ipHash}, ${Math.min(DEFAULT_GUEST_TOKEN_BALANCE, amount)})
+    ON CONFLICT (ip_hash) DO UPDATE
+    SET token_used = LEAST(${DEFAULT_GUEST_TOKEN_BALANCE}, guest_token_usage.token_used + ${amount}),
+        updated_at = now()
+    RETURNING token_used
+  `) as Array<{ token_used: string | number }>;
+  const used = Math.max(0, Number(rows[0]?.token_used ?? 0));
+
+  return {
+    tokenBalance: DEFAULT_GUEST_TOKEN_BALANCE,
+    tokenUsed: used,
+    tokenAvailable: Math.max(0, DEFAULT_GUEST_TOKEN_BALANCE - used),
   };
 };
 

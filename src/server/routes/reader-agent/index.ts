@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { downloadFileAsAdmin, downloadTextAsAdmin, uploadFileAsAdmin, uploadTextAsAdmin } from '@/lib/firebase/server/storage-admin';
 import { readNeo4j, verifyNeo4jConnection, writeNeo4j } from '@/lib/neo4j';
 import { getUserStoragePrefix } from '@/lib/storage-paths';
-import { getUserFinancialAnalysisAccess, getUserIntroductionWritingAccess, getUserTokenAccount, listFinancialAnalysisReports, recordFinancialAnalysisReport, recordUserTokenUsage } from '@/server/db';
+import { getGuestTokenAccount, getUserFinancialAnalysisAccess, getUserIntroductionWritingAccess, getUserTokenAccount, listFinancialAnalysisReports, recordFinancialAnalysisReport, recordGuestTokenUsage, recordUserTokenUsage } from '@/server/db';
 import { getCurrentUser, loadUploadedPapers, sessionCookieName } from '@/server/routes/auth';
 
 type ExtractedPdfPage = {
@@ -505,6 +505,16 @@ const materializePdfToTempFile = async (storagePath: string) => {
   await fs.writeFile(localPdfPath, buffer);
 
   return { localPdfPath, outputDir, buffer };
+};
+
+const getGuestIpHash = (c: Context) => {
+  const forwardedFor = c.req.header('cf-connecting-ip')
+    ?? c.req.header('x-real-ip')
+    ?? c.req.header('x-forwarded-for')?.split(',')[0]?.trim()
+    ?? 'unknown';
+  const salt = process.env.GUEST_IP_HASH_SALT?.trim() || process.env.DATABASE_URL || 'scireader-development-guest-salt';
+
+  return createHash('sha256').update(`${salt}:${forwardedFor}`).digest('hex');
 };
 
 const detectSourceLanguageForAsk = async (request: z.infer<typeof readerRequestSchema>, storagePath: string | null): Promise<ExtractedPdf['sourceLanguage']> => {
@@ -2098,12 +2108,12 @@ const askClaude = async (request: z.infer<typeof readerRequestSchema>, forcedMod
   }
 };
 
-const askGeneralChat = async (request: z.infer<typeof readerRequestSchema>) => {
+const askGeneralChat = async (request: z.infer<typeof readerRequestSchema>, maxTokens = 4000) => {
   const modelSelection = selectCheapTriageModel();
   const client = createAnthropicClient(modelSelection.target);
   const response = await client.messages.create({
     model: modelSelection.model,
-    max_tokens: 4000,
+    max_tokens: maxTokens,
     system:
       'You are SCIReader general chat assistant. For identity, source, creator, father, provider, model, or version questions, answer exactly in Chinese: 我是论文阅读小助手. Do not claim to be ChatGPT, GPT, Claude, Anthropic, OpenAI, or any specific model/provider. For other questions, answer directly in Chinese unless another language is requested. Do not refuse just because there is no PDF context.',
     messages: [
@@ -4915,6 +4925,55 @@ const app = new Hono()
     const request = c.req.valid('json');
 
     try {
+      const hasPaperContext = Boolean(request.pdfUrl || request.selectedText || request.paperContextSummary);
+      const isGeneralChat = request.paperId === 'general-chat' && !hasPaperContext && request.scope === 'whole-paper';
+      const sessionUser = await getCurrentUser(getCookie(c, sessionCookieName));
+
+      if (!sessionUser && isGeneralChat) {
+        const ipHash = getGuestIpHash(c);
+        const guestTokenAccount = await getGuestTokenAccount(ipHash);
+
+        if (isIdentityQuestion(request.prompt)) {
+          return c.json({
+            answer: identityAnswerChinese,
+            citations: [],
+            sources: [],
+            scope: request.scope,
+            paperId: request.paperId,
+            routedBy: 'cheap-context',
+            usage: { inputTokens: 0, outputTokens: 0, billableTokens: 0 },
+            guestTokenAccount,
+          });
+        }
+
+        if (guestTokenAccount.tokenAvailable <= 0) {
+          return c.json({
+            error: 'Guest chat quota exhausted.',
+            message: 'The 3,000 free guest tokens for this IP address have been used. Please sign in to continue. / 该 IP 的 3,000 个访客免费 token 已用完，请登录后继续。',
+            guestTokenAccount,
+          }, 402);
+        }
+
+        const result = await askGeneralChat(request, Math.max(128, Math.min(1200, guestTokenAccount.tokenAvailable)));
+        const billableTokens = getUsageBillableTokens(result, result.model);
+        const nextGuestTokenAccount = await recordGuestTokenUsage(ipHash, billableTokens);
+
+        return c.json({
+          answer: result.answer,
+          citations: [],
+          sources: [],
+          scope: request.scope,
+          paperId: request.paperId,
+          routedBy: 'cheap-context',
+          usage: {
+            inputTokens: result.inputTokens,
+            outputTokens: result.outputTokens,
+            billableTokens,
+          },
+          guestTokenAccount: nextGuestTokenAccount,
+        });
+      }
+
       const { user, storagePath } = await requirePaperAccess(c, request.pdfUrl);
       if (isIdentityQuestion(request.prompt)) {
         return c.json({
@@ -4934,8 +4993,6 @@ const app = new Hono()
       }
 
       await ensurePositiveTokenBalance(user.id);
-
-      const hasPaperContext = Boolean(request.pdfUrl || request.selectedText || request.paperContextSummary);
 
       if (!hasPaperContext || request.paperId === 'general-chat') {
         const result = await askGeneralChat(request);
