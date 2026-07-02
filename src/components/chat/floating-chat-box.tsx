@@ -521,6 +521,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
   const [reviewerTarget, setReviewerTarget] = useState<{ key: string; target: string } | null>(null);
   const hasPaper = Boolean(paper);
   const isFinancialChat = Boolean(financialContext?.active);
+  const isGuestChat = !isAuthenticated && !hasPaper && !isFinancialChat;
   const financialStockKey = financialContext?.selectedStock ? `${financialContext.selectedStock.market ?? 'A'}:${financialContext.selectedStock.code}` : '';
   const paperId = paper?.id;
   const paperPdfUrl = paper?.pdfUrl;
@@ -535,7 +536,9 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
       ? `\n\nTarget journal/conference for reviewer calibration: ${reviewerTargetJournal.trim() || 'Not specified. Infer the appropriate venue tier from the paper evidence, and state the assumption explicitly.'}`
       : '';
   const summaryPrompt = `${readingModePrompt}${reviewerTargetInstruction}`;
-  const readingModeLabel = `${b(getPaperReadingModeLabel(readingMode))} · ${paper?.shouldAutoSummarize ? b('Reading / 解读中') : b('Pending / 待解读')}`;
+  const readingModeLabel = isGuestChat
+    ? l(`Guest mode · ${(guestTokensRemaining ?? 3000).toLocaleString()} tokens left`, `免注册模式 · 剩余 ${(guestTokensRemaining ?? 3000).toLocaleString()} tokens`)
+    : `${b(getPaperReadingModeLabel(readingMode))} · ${paper?.shouldAutoSummarize ? b('Reading / 解读中') : b('Pending / 待解读')}`;
   const fontSizeIndex = chatFontSizeOrder.indexOf(chatFontSize);
   const fontSizeStyle = chatFontSizeStyles[chatFontSize];
   const canDecreaseFontSize = fontSizeIndex > 0;
@@ -1844,13 +1847,13 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
           <div className={isMobileViewport ? 'min-w-0 flex-1' : 'min-w-0 flex-1 basis-48'}>
             <div className={`items-baseline gap-x-2 gap-y-0.5 ${isMobileViewport ? 'flex min-w-0 flex-nowrap' : 'flex flex-wrap'}`}>
               <p className="max-w-full break-words text-[10px] font-medium uppercase leading-4 tracking-wide text-primary">{readingModeLabel}</p>
-              <h2 className={`min-w-0 text-sm font-semibold leading-5 ${isMobileViewport ? 'truncate' : ''}`}>{isFinancialChat ? b('Financial Analysis chat / 财务分析 chat') : hasPaper ? b('Paper chat / 论文 chat') : 'SCIReader chat'}</h2>
+              <h2 className={`min-w-0 text-sm font-semibold leading-5 ${isMobileViewport ? 'truncate' : ''}`}>{isFinancialChat ? b('Financial Analysis chat / 财务分析 chat') : hasPaper ? b('Paper chat / 论文 chat') : isGuestChat ? l('Guest chat', '免注册对话') : 'SCIReader chat'}</h2>
             </div>
             <p className="truncate text-[11px] text-muted-foreground">
               {isFinancialChat
                 ? `${financialContext?.selectedStock ? `${financialContext.selectedStock.name} ${financialContext.selectedStock.code}` : b('Enter analysis target / 请输入拟分析对象')} · ${financialContext?.materials.length ?? 0} ${l('materials', '个材料')} · 3x token`
-                : paper?.title ?? (!isAuthenticated && guestTokensRemaining !== null
-                  ? l(`Guest chat · ${guestTokensRemaining.toLocaleString()} tokens left`, `免登录对话 · 剩余 ${guestTokensRemaining.toLocaleString()} tokens`)
+                : paper?.title ?? (isGuestChat
+                  ? l('No signup required · text and image chat', '无需注册 · 可发送文字和图片')
                   : l('Ask without opening a paper', '未打开论文也可提问'))}
             </p>
           </div>
@@ -2149,7 +2152,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
           onKeyDown={(event) => {
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) void sendMessage();
           }}
-          placeholder={isFinancialChat ? l('Ask a financial-analysis question, e.g. are there unusual short-term flows in the order book and report?', '输入财务分析问题，例如：结合盘口和财报，短线资金是否有异动？') : l('Ask about the paper, selected text, methods, or citations...', '询问论文、选中文本、方法或引用依据...')}
+          placeholder={isFinancialChat ? l('Ask a financial-analysis question, e.g. are there unusual short-term flows in the order book and report?', '输入财务分析问题，例如：结合盘口和财报，短线资金是否有异动？') : isGuestChat ? l('Ask anything, or attach an image...', '直接提问，或上传图片让 AI 分析...') : l('Ask about the paper, selected text, methods, or citations...', '询问论文、选中文本、方法或引用依据...')}
           value={input}
         />
         <div className="mt-2 flex items-stretch gap-2">
@@ -2183,7 +2186,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
             type="button"
           >
             {isThinking ? <Loader2 className="size-4 animate-spin" /> : <CornerDownLeft className="size-4" />}
-            {isThinking ? (isFinancialChat ? l('Financial analyst is working...', '财务分析助手正在处理...') : l('Reader agent is working...', '论文阅读助手正在处理...')) : isFinancialChat ? l('Send to financial analyst', '发送给财务分析助手') : l('Send to reader agent', '发送给论文阅读助手')}
+            {isThinking ? (isFinancialChat ? l('Financial analyst is working...', '财务分析助手正在处理...') : isGuestChat ? l('Guest chat is working...', '免注册对话正在处理...') : l('Reader agent is working...', '论文阅读助手正在处理...')) : isFinancialChat ? l('Send to financial analyst', '发送给财务分析助手') : isGuestChat ? l('Send guest message', '发送免注册对话') : l('Send to reader agent', '发送给论文阅读助手')}
           </button>
         </div>
       </footer>
