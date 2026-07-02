@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowRight, BarChart3, Check, FileText, Gift, Loader2, MessageCircle, ShieldCheck, Sparkles, type LucideIcon } from 'lucide-react';
+import { ArrowRight, BarChart3, Check, FileText, Gift, Loader2, MessageCircle, Sparkles, type LucideIcon } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
@@ -208,18 +208,6 @@ const HomePage = () => {
             <h1 className="mt-5 max-w-[620px] text-[36px] font-black leading-[1.08] tracking-[-0.04em] sm:text-[50px] sm:leading-[1.05]">{t.headline}</h1>
             <p className="mt-5 max-w-[590px] text-[15px] leading-7 text-[#62708a]">{t.intro}</p>
             <ul className="mt-6 space-y-3 text-[14px] text-[#34425c]">{t.benefits.map((item) => <li className="flex items-center gap-3" key={item}><span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-[#dceeed] text-[#0d8278]"><Check className="size-3.5" strokeWidth={3} /></span>{item}</li>)}</ul>
-            <button
-              className="mt-7 flex w-full max-w-[590px] items-center justify-center gap-4 rounded-[18px] border-2 border-[#0d8278] bg-[#0d8278] px-5 py-5 text-left text-white shadow-[0_12px_30px_rgba(13,130,120,0.26)] transition hover:-translate-y-0.5 hover:bg-[#096f67] hover:shadow-[0_16px_36px_rgba(13,130,120,0.32)] sm:w-auto sm:min-w-[420px] sm:px-8"
-              onClick={openGuestChat}
-              type="button"
-            >
-              <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-white/15"><MessageCircle className="size-6" /></span>
-              <span>
-                <span className="block text-xl font-black leading-tight sm:text-2xl">{language === 'zh' ? '免注册对话' : 'Chat without signup'}</span>
-                <span className="mt-1 block text-xs font-medium text-[#d7f2ef] sm:text-sm">{language === 'zh' ? '无需登录 · 3,000 免费 tokens · 支持图片' : 'No login · 3,000 free tokens · Image support'}</span>
-              </span>
-              <ArrowRight className="ml-auto size-5 shrink-0" />
-            </button>
             <div className="mt-7 flex flex-wrap gap-2">{t.chips.map((item, index) => <span className={index === t.chips.length - 1 ? 'inline-flex w-full items-center justify-center rounded-2xl border-2 border-[#79bdb6] bg-[#def2ef] px-6 py-4 text-[24px] font-black leading-tight text-[#066b64] shadow-sm sm:w-auto sm:text-[27px]' : 'rounded-full border border-[#dbe1eb] bg-white px-3 py-1.5 text-xs font-medium text-[#42506a]'} key={item}><span className="mr-3 text-[#0d8278]">●</span>{item}</span>)}</div>
           </div>
 
@@ -231,9 +219,9 @@ const HomePage = () => {
                 {authMode === 'signup' ? <div className="flex flex-col gap-2 sm:flex-row"><input className="h-12 min-w-0 flex-1 rounded-xl border bg-[#fafbfd] px-4 text-sm outline-none focus:border-[#0d8278]" inputMode="numeric" maxLength={6} onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder={t.code} value={verificationCode} /><button className="h-11 rounded-xl border border-[#b9d9d6] px-3 text-xs font-bold text-[#08746c] disabled:opacity-50 sm:h-auto" disabled={!email || isSendingCode} onClick={() => void handleSendCode()} type="button">{isSendingCode ? t.sending : t.sendCode}</button></div> : null}
                 <button className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#0d8278] text-sm font-bold text-white disabled:opacity-60" disabled={isAuthLoading || !email || !password || (authMode === 'signup' && verificationCode.length !== 6)} onClick={() => void handleAuth()} type="button">{isAuthLoading ? <Loader2 className="size-4 animate-spin" /> : null}{authMode === 'signup' ? t.create : t.login}<ArrowRight className="size-4" /></button>
               </div>
-              <div className="mt-4 flex gap-4 rounded-xl border-2 border-[#9bcfc9] bg-[#e5f2f1] p-4"><span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-white text-[#0d8278] shadow-sm"><ShieldCheck className="size-6" /></span><div><p className="text-[22px] font-black leading-7 text-[#075f59]">{t.noPhone}</p><p className="mt-1 text-[14px] leading-5 text-[#526f7d]">{t.noPhoneDetail}</p></div></div>
+              <button className="mt-4 flex w-full items-center gap-4 rounded-xl border-2 border-[#0d8278] bg-[#e5f2f1] p-4 text-left transition hover:bg-[#d8efec]" onClick={openGuestChat} type="button"><span className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-white text-[#0d8278] shadow-sm"><MessageCircle className="size-6" /></span><span className="min-w-0 flex-1"><span className="block text-[22px] font-black leading-7 text-[#075f59]">{language === 'zh' ? '免注册对话' : 'Chat without signup'}</span><span className="mt-1 block text-[13px] leading-5 text-[#526f7d]">{language === 'zh' ? '无需登录 · 3,000 免费 tokens · 可以直接上传照片' : 'No login · 3,000 free tokens · Upload photos directly'}</span></span><ArrowRight className="size-5 shrink-0 text-[#0d8278]" /></button>
               {authMessage ? <p className="mt-3 text-center text-xs text-rose-600">{authMessage}</p> : null}
-              <p className="mt-5 text-center text-[15px] text-[#65738b]">{authMode === 'signup' ? t.already : t.newHere}{' '}<button className="ml-1 font-extrabold text-[#08746c] hover:underline" onClick={() => setAuthMode(authMode === 'signup' ? 'login' : 'signup')} type="button">{authMode === 'signup' ? t.login : t.signup}</button></p>
+              <button className="mt-4 flex h-12 w-full items-center justify-center rounded-xl border-2 border-[#b9d9d6] bg-white text-sm font-extrabold text-[#08746c] transition hover:border-[#0d8278] hover:bg-[#f4faf9]" onClick={() => setAuthMode(authMode === 'signup' ? 'login' : 'signup')} type="button">{authMode === 'signup' ? (language === 'zh' ? '登录' : 'Log in') : (language === 'zh' ? '注册账号' : 'Create account')}</button>
             </>}
           </div>
         </section>
