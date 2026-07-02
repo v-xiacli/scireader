@@ -1721,7 +1721,7 @@ export const FloatingChatBox = ({ paper = null, selectedText = null, financialCo
 
   return (
     <aside
-      className={`${isFinancialChat ? 'financial-chat-glass' : ''} fixed z-50 flex max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-2xl border bg-white/95 shadow-2xl backdrop-blur`}
+      className={`${isFinancialChat ? 'financial-chat-glass' : ''} ${isChatCollapsed ? 'chat-collapsed-dark-glass' : ''} fixed z-50 flex max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-2xl border bg-white/95 shadow-2xl backdrop-blur`}
       style={{
         left: mobileLayout?.x ?? position.x,
         top: mobileLayout?.y ?? position.y,
