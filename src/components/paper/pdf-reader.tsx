@@ -71,13 +71,13 @@ export const PdfReader = ({ paper, onSelectionChange, initialZoom = 100, onZoomC
   }, [paper.pdfUrl]);
 
   return (
-    <section className="relative flex min-h-0 w-[min(72vw,1180px)] -translate-x-[12vw] flex-col rounded-3xl bg-slate-200 p-4 shadow-sm max-md:landscape:w-full max-md:landscape:translate-x-0 max-md:landscape:rounded-none max-md:landscape:p-1">
-      <div className="min-h-0 flex-1 overflow-auto rounded-2xl bg-slate-200 p-4 max-md:landscape:rounded-none max-md:landscape:p-1">
+    <section className="relative flex min-h-0 w-full flex-1 flex-col bg-[#dfe6e5]">
+      <div className="min-h-0 flex-1 overflow-hidden bg-[#dfe6e5] p-1 sm:p-2">
         {paper.pdfUrl ? (
           <>
             {pdfFrameStatus ? <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{pdfFrameStatus}</div> : null}
             <iframe
-              className="mx-auto h-full min-h-[980px] w-full origin-top rounded-sm bg-white shadow-xl transition-transform"
+              className="mx-auto h-full min-h-0 w-full origin-top rounded-sm bg-white shadow-[0_8px_30px_rgba(15,23,42,0.12)] transition-transform"
               onLoad={(event) => inspectPdfFrame(event.currentTarget)}
               onMouseUp={captureSelection}
               ref={iframeRef}

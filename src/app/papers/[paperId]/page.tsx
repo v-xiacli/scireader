@@ -47,14 +47,6 @@ const normalizeReadingMode = (mode?: string): PaperReadingMode => {
   return 'detailed';
 };
 
-const getReadingModeLabel = (mode: PaperReadingMode) => {
-  if (mode === 'quality') return 'High Quality / 高质量';
-  if (mode === 'simple' || mode === 'reader') return 'Simple / 简单';
-  if (mode === 'reviewer') return 'Reviewer / 审稿';
-
-  return 'Detailed / 详细';
-};
-
 const normalizeDetailedReport = (value?: string) => value !== '0' && value !== 'false';
 
 const PaperPage = ({ params, searchParams }: PaperPageProps) => {
@@ -109,18 +101,38 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
   }, []);
 
   return (
-    <main className="relative h-screen overflow-hidden p-1">
-      <nav className="absolute left-4 top-16 z-20 flex max-w-[calc(100vw-2rem)] flex-wrap items-center gap-2 rounded-2xl bg-white/90 px-3 py-2 shadow-sm backdrop-blur sm:left-6">
-        <Link className="whitespace-nowrap text-sm font-medium text-primary" href="/research">
-          ← {b('Paper Library / 论文库')}
+    <main className="grid h-screen grid-rows-[64px_minmax(0,1fr)] overflow-hidden bg-[#edf2f1] sm:grid-rows-[72px_minmax(0,1fr)]">
+      <header className="relative z-20 flex min-w-0 items-center gap-3 border-b border-slate-200/90 bg-white/95 px-3 shadow-[0_1px_12px_rgba(15,23,42,0.04)] backdrop-blur sm:px-5">
+        <Link
+          aria-label={b('Back to Paper Library / 返回论文库')}
+          className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-primary/30 hover:bg-primary/5 hover:text-primary"
+          href="/research"
+        >
+          <span aria-hidden="true" className="text-lg leading-none">←</span>
+          <span className="hidden sm:inline">{b('Paper Library / 论文库')}</span>
         </Link>
-        <LanguageToggle className="hidden sm:flex" />
-        <div className="hidden text-sm text-muted-foreground md:block">{b('PDF Reader + Floating Chat / PDF 阅读器 + 浮动聊天窗')}</div>
-        <div className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">{b(getReadingModeLabel(readingMode))}</div>
-        <div className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{paper?.shouldAutoSummarize ? b('Start Reading / 开始解读') : b('Open Only / 仅打开')}</div>
-      </nav>
+
+        <div className="h-8 w-px shrink-0 bg-slate-200" />
+
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="size-2 shrink-0 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.12)]" />
+            <h1 className="truncate text-sm font-semibold text-slate-900 sm:text-[15px]">
+              {paper?.title ?? b('Paper Reader / 论文阅读器')}
+            </h1>
+          </div>
+          {paper?.authors ? <p className="mt-0.5 hidden truncate text-xs text-slate-500 sm:block">{paper.authors}</p> : null}
+        </div>
+
+        <div className="hidden shrink-0 items-center gap-2 text-xs text-slate-500 lg:flex">
+          <span className="rounded-full bg-slate-100 px-3 py-1.5">PDF</span>
+          <span>{b('Select text to ask AI / 选中文字即可提问')}</span>
+        </div>
+        <LanguageToggle className="shrink-0" />
+      </header>
+
       {paper ? (
-        <div className="flex h-full min-h-0 justify-center overflow-hidden">
+        <div className="relative flex min-h-0 overflow-hidden">
           <PdfReader initialZoom={preferences?.pdfZoom} onSelectionChange={setSelectedText} onZoomChange={saveZoom} paper={paper} />
           <PaperChatContextBridge paper={paper} selectedText={selectedText} />
         </div>
