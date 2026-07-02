@@ -101,7 +101,7 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
   }, []);
 
   return (
-    <main className="paper-glass-page grid h-screen grid-rows-[64px_minmax(0,1fr)] overflow-hidden sm:grid-rows-[72px_minmax(0,1fr)]">
+    <main className="paper-glass-page grid h-screen w-full max-w-full grid-rows-[64px_minmax(0,1fr)] overflow-hidden sm:grid-rows-[72px_minmax(0,1fr)]">
       <header className="paper-glass-nav relative z-20 flex min-w-0 items-center gap-3 px-3 sm:px-5">
         <Link
           aria-label={b('Back to Paper Library / 返回论文库')}
@@ -112,7 +112,7 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
           <span className="hidden sm:inline">{b('Paper Library / 论文库')}</span>
         </Link>
 
-        <div className="h-8 w-px shrink-0 bg-slate-200" />
+        <div className="hidden h-8 w-px shrink-0 bg-slate-200 sm:block" />
 
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
@@ -128,7 +128,7 @@ const PaperPage = ({ params, searchParams }: PaperPageProps) => {
           <span className="rounded-full bg-slate-100 px-3 py-1.5">PDF</span>
           <span>{b('Select text to ask AI / 选中文字即可提问')}</span>
         </div>
-        <LanguageToggle className="shrink-0" />
+        <LanguageToggle className="hidden shrink-0 sm:flex" />
       </header>
 
       {paper ? (

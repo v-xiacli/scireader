@@ -786,9 +786,9 @@ const HomePage = () => {
   };
 
   return (
-    <main className="min-h-screen px-8 py-6">
-      <section className="mx-auto flex max-w-7xl flex-col gap-8">
-        <header className="rounded-3xl bg-white p-6 shadow-sm">
+    <main className="research-responsive-page min-h-screen w-full max-w-full overflow-x-hidden px-3 py-3 sm:px-8 sm:py-6">
+      <section className="mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-5 sm:gap-8">
+        <header className="min-w-0 rounded-2xl bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div className="flex flex-wrap items-center gap-3">
@@ -799,7 +799,7 @@ const HomePage = () => {
                   <ArrowLeft className="size-4" />
                   {b('Back to Home / 回到主页')}
                 </Link>
-                <LanguageToggle className="flex" />
+                <LanguageToggle className="hidden sm:flex" />
                 <p className="text-sm font-medium uppercase tracking-wide text-primary">SCIReader</p>
               </div>
               <h1 className="mt-2 text-3xl font-semibold">{b('Read Papers with AI / AI 阅读论文')}</h1>
@@ -1161,7 +1161,7 @@ const HomePage = () => {
               const isSelectedForWriting = canSelectForWriting && writingSelectedPaperKeys.includes(getWritingPaperKey(paper));
               const writingSelectControl = (
                 <label
-                  className={`flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-sm transition ${
+                  className={`flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border px-3 text-sm transition ${
                     canSelectForWriting ? 'cursor-pointer hover:border-primary hover:bg-white' : 'cursor-not-allowed bg-slate-50 text-slate-400'
                   }`}
                   onClick={(event) => event.stopPropagation()}
@@ -1181,14 +1181,14 @@ const HomePage = () => {
               );
               const content = (
                 <>
-                  <div className="min-w-0">
-                    <h3 className="font-semibold">{paper.title}</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">{paper.journal ? [paper.journal, paper.year].filter(Boolean).join(' · ') : paper.authors}</p>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="break-words text-[15px] font-semibold leading-5 sm:text-base sm:leading-6">{paper.title}</h3>
+                    <p className="mt-1 break-words text-xs leading-5 text-muted-foreground sm:text-sm">{paper.journal ? [paper.journal, paper.year].filter(Boolean).join(' · ') : paper.authors}</p>
                     <p className="mt-2 text-xs uppercase tracking-wide text-muted-foreground">
                       {paper.pages ? `${paper.pages} pages · ` : ''}{paper.status}
                     </p>
                   </div>
-                  <span className={`rounded-full px-3 py-1 text-xs font-medium ${isSelectedForReading ? 'bg-primary text-primary-foreground' : 'bg-slate-100 text-slate-600'}`}>
+                  <span className={`shrink-0 self-start rounded-full px-2.5 py-1 text-xs font-medium ${isSelectedForReading ? 'bg-primary text-primary-foreground' : 'bg-slate-100 text-slate-600'}`}>
                     {isSelectedForReading ? b('Selected / 已选定') : b('Pending / 待选定')}
                   </span>
                 </>
@@ -1196,20 +1196,21 @@ const HomePage = () => {
 
               return isLoggedIn ? (
                 <div
-                  className={`group flex items-center justify-between gap-3 rounded-2xl border p-4 text-left transition hover:border-primary hover:bg-slate-50 ${isSelectedForReading ? 'border-primary bg-primary/5 ring-1 ring-primary' : ''}`}
+                  className={`group flex flex-col gap-3 rounded-2xl border p-3 text-left transition hover:border-primary hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between sm:p-4 ${isSelectedForReading ? 'border-primary bg-primary/5 ring-1 ring-primary' : ''}`}
                   key={`${paper.id}-${paper.filePath ?? 'sample'}`}
                   onClick={() => setSelectedPaperKey(paperKey)}
                   role="button"
                   tabIndex={0}
                 >
-                  {writingSelectControl}
-                  <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                  <div className="flex min-w-0 w-full items-start justify-between gap-3 sm:flex-1 sm:items-center">
                     {content}
                   </div>
-                  {paper.filePath ? (
-                    <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                  <div className="flex w-full items-center gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
+                    {writingSelectControl}
+                    {paper.filePath ? (
+                    <div className="flex min-w-0 flex-1 gap-2 sm:flex-none">
                       <button
-                        className="rounded-xl border bg-white px-3 py-2 text-sm font-medium text-primary transition hover:bg-primary hover:text-primary-foreground"
+                        className="flex h-11 min-w-0 flex-1 items-center justify-center rounded-xl border bg-white px-4 text-sm font-semibold text-primary transition hover:bg-primary hover:text-primary-foreground sm:flex-none"
                         onClick={(event) => {
                           event.stopPropagation();
                           setSelectedPaperKey(paperKey);
@@ -1220,7 +1221,7 @@ const HomePage = () => {
                         {b('Read / 解读')}
                       </button>
                       <button
-                        className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100"
+                        className="flex h-11 min-w-0 flex-1 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 sm:flex-none"
                         onClick={(event) => {
                           event.stopPropagation();
                           setSelectedPaperKey(paperKey);
@@ -1231,10 +1232,10 @@ const HomePage = () => {
                         {b('Review / 审稿')}
                       </button>
                     </div>
-                  ) : null}
-                  {paper.filePath ? (
+                    ) : null}
+                    {paper.filePath ? (
                     <button
-                      className="rounded-xl border p-2 text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="flex size-11 shrink-0 items-center justify-center rounded-xl border text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
                       disabled={deletingFilePath === paper.filePath}
                       onClick={(event) => {
                         event.stopPropagation();
@@ -1245,7 +1246,8 @@ const HomePage = () => {
                     >
                       {deletingFilePath === paper.filePath ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
                     </button>
-                  ) : null}
+                    ) : null}
+                  </div>
                 </div>
               ) : (
                 <div

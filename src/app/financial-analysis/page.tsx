@@ -555,21 +555,21 @@ const FinancialAnalysisPage = () => {
   };
 
   return (
-    <main className="financial-glass-page min-h-screen">
-      <div className="relative z-[1] mx-auto flex min-h-screen w-full max-w-6xl flex-col px-3 pb-28 pt-3 sm:px-5 sm:pt-4">
-        <header className="financial-glass-nav sticky top-3 z-30 flex flex-col gap-4 rounded-2xl px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-3">
-            <Link className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-primary/40 hover:text-primary" href="/">
+    <main className="financial-glass-page min-h-screen w-full max-w-full overflow-x-hidden">
+      <div className="relative z-[1] mx-auto flex min-h-screen w-full min-w-0 max-w-6xl flex-col px-3 pb-28 pt-3 sm:px-5 sm:pt-4">
+        <header className="financial-glass-nav z-30 flex min-w-0 flex-col gap-4 rounded-2xl px-3 py-3 sm:px-4 lg:sticky lg:top-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
+            <Link className="inline-flex shrink-0 items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-primary/40 hover:text-primary" href="/">
               <ArrowLeft className="size-5" />
-              <span>{b('Back to Home / 回到主页')}</span>
+              <span className="hidden sm:inline">{b('Back to Home / 回到主页')}</span>
             </Link>
             <LanguageToggle className="hidden sm:flex" />
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <BarChart3 className="size-5 text-primary" />
-                <h1 className="text-xl font-semibold">{b('Financial Analysis / 财务分析')}</h1>
+                <h1 className="truncate text-lg font-semibold sm:text-xl">{b('Financial Analysis / 财务分析')}</h1>
               </div>
-              <p className="mt-1 text-sm text-muted-foreground">
+              <p className="mt-1 truncate text-xs text-muted-foreground sm:text-sm">
                 {authUser ? `${b('Current account / 当前账号')}: ${authUser.email}` : isSessionLoading ? b('Checking sign-in status... / 正在检查登录状态...') : b('Please return to the home page and sign in first. / 请先回到主页登录后使用。')}
               </p>
               <p className="mt-1 text-xs font-medium text-amber-700">{b('This feature must be enabled separately; token usage is billed at 3x the normal analysis rate. / 该功能需要单独开通；token 使用费按正常分析的 3 倍计算。')}</p>
@@ -674,7 +674,7 @@ const FinancialAnalysisPage = () => {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <input
-                className="min-w-64 rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-primary"
+                className="w-full min-w-0 rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-primary sm:w-auto sm:min-w-64"
                 onChange={(event) => setAnalysisTargetText(event.target.value)}
                 placeholder={b('Sector or stock to analyze, e.g. optical equipment, Alibaba 09988 / 拟分析板块或股票，例如：光伏设备、阿里巴巴 09988')}
                 value={analysisTargetText}

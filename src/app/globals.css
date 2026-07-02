@@ -215,3 +215,29 @@ body {
     animation: none;
   }
 }
+
+@media (max-width: 639px) {
+  .financial-glass-page section,
+  .financial-glass-page aside,
+  .financial-glass-page header,
+  .research-responsive-page section,
+  .research-responsive-page header {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .financial-glass-page h1,
+  .financial-glass-page h2,
+  .financial-glass-page h3,
+  .financial-glass-page p,
+  .research-responsive-page h1,
+  .research-responsive-page h2,
+  .research-responsive-page h3,
+  .research-responsive-page p {
+    overflow-wrap: anywhere;
+  }
+
+  .financial-token-chip {
+    width: 100%;
+  }
+}
